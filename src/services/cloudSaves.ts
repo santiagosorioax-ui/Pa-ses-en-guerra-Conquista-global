@@ -19,7 +19,13 @@ import {
   restoreSimulationFromSnapshot,
 } from '../engine/campaignSerializer';
 import type { SimulationState } from '../engine/gameSimulation';
-import { OperationType, db, handleFirestoreError } from '../firebase';
+import {
+  OperationType,
+  db,
+  formatFirestoreUserError,
+  handleFirestoreError,
+  withTimeout,
+} from '../firebase';
 
 export interface SavedCampaignSummary {
   campaignId: string;
@@ -46,44 +52,60 @@ export async function ensureUserProfile(user: User): Promise<void> {
   const email = (user.email || '').slice(0, 200);
   const photoUrl = user.photoURL ? user.photoURL.slice(0, 500) : undefined;
 
-  let exists = false;
+  let existingSnap;
   try {
-    const snap = await getDoc(ref);
-    exists = snap.exists();
+    existingSnap = await withTimeout(getDoc(ref), 8000);
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.GET, path, false);
+    throw new Error(formatFirestoreUserError(error, 'Error al verificar tu perfil en la nube.'));
   }
 
-  if (!exists) {
+  if (!existingSnap.exists()) {
     try {
-      await setDoc(ref, {
-        uid: user.uid,
-        displayName,
-        email,
-        ...(photoUrl ? { photoUrl } : {}),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await withTimeout(
+        setDoc(ref, {
+          uid: user.uid,
+          displayName,
+          email,
+          ...(photoUrl ? { photoUrl } : {}),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }),
+        8000
+      );
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, path);
+      handleFirestoreError(error, OperationType.CREATE, path, false);
+      throw new Error(formatFirestoreUserError(error, 'Error al crear perfil en la nube.'));
     }
   } else {
+    const prev = existingSnap.data();
+    const sameName = prev.displayName === displayName;
+    const sameEmail = prev.email === email;
+    const samePhoto = (prev.photoUrl ?? undefined) === photoUrl;
+    if (sameName && sameEmail && samePhoto) {
+      return;
+    }
     try {
-      await updateDoc(ref, {
-        displayName,
-        email,
-        ...(photoUrl ? { photoUrl } : {}),
-        updatedAt: serverTimestamp(),
-      });
+      await withTimeout(
+        updateDoc(ref, {
+          displayName,
+          email,
+          ...(photoUrl ? { photoUrl } : {}),
+          updatedAt: serverTimestamp(),
+        }),
+        8000
+      );
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+      handleFirestoreError(error, OperationType.UPDATE, path, false);
+      throw new Error(formatFirestoreUserError(error, 'Error al actualizar perfil en la nube.'));
     }
   }
 }
 
 export function subscribeUserCampaigns(
   uid: string,
-  onData: (campaigns: SavedCampaignSummary[]) => void
+  onData: (campaigns: SavedCampaignSummary[]) => void,
+  onError?: (msg: string) => void
 ): () => void {
   const path = `users/${uid}/campaigns`;
   const q = query(collection(db, 'users', uid, 'campaigns'), where('ownerId', '==', uid));
@@ -118,7 +140,8 @@ export function subscribeUserCampaigns(
       onData(items);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      handleFirestoreError(error, OperationType.LIST, path, false);
+      onError?.(formatFirestoreUserError(error, 'No se pudieron cargar las partidas guardadas.'));
     }
   );
 }
@@ -137,13 +160,14 @@ export async function saveCampaignToCloud(
   let exists = false;
   let alreadyDefeated = false;
   try {
-    const existingMeta = await getDoc(metaRef);
+    const existingMeta = await withTimeout(getDoc(metaRef), 8000);
     exists = existingMeta.exists();
     if (exists && existingMeta.data()?.outcome === 'defeat') {
       alreadyDefeated = true;
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, metaPath);
+    handleFirestoreError(error, OperationType.GET, metaPath, false);
+    throw error;
   }
 
   if (alreadyDefeated) {
@@ -214,10 +238,11 @@ export async function saveCampaignToCloud(
   });
 
   try {
-    await batch.commit();
+    await withTimeout(batch.commit(), 9000);
     return { saved: true };
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, snapPath);
+    handleFirestoreError(error, OperationType.WRITE, snapPath, false);
+    throw error;
   }
 }
 
@@ -229,11 +254,12 @@ export async function loadCampaignFromCloud(
   const snapRef = doc(db, 'users', uid, 'campaigns', campaignId, 'data', 'state');
 
   try {
-    const docSnap = await getDoc(snapRef);
+    const docSnap = await withTimeout(getDoc(snapRef), 9000);
     if (!docSnap.exists()) return null;
     return restoreSimulationFromSnapshot(docSnap.data());
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, snapPath);
+    handleFirestoreError(error, OperationType.GET, snapPath, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo cargar la partida guardada.'));
   }
 }
 
@@ -250,8 +276,9 @@ export async function deleteCampaignFromCloud(
   batch.delete(metaRef);
 
   try {
-    await batch.commit();
+    await withTimeout(batch.commit(), 8000);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, metaPath);
+    handleFirestoreError(error, OperationType.DELETE, metaPath, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo eliminar la partida.'));
   }
 }

@@ -4,7 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
+  getDocFromServer,
   onSnapshot,
   query,
   serverTimestamp,
@@ -14,7 +14,13 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { OperationType, db, handleFirestoreError } from '../firebase';
+import {
+  OperationType,
+  db,
+  formatFirestoreUserError,
+  handleFirestoreError,
+  withTimeout,
+} from '../firebase';
 import {
   buildRoomWorldStatePayload,
   type RoomWorldStatePayload,
@@ -72,17 +78,22 @@ export async function createMultiplayerRoom(user: User): Promise<string> {
   const hostName = sanitizeDisplayName(user);
   let chosenCode: string | null = null;
 
-  for (let attempt = 0; attempt < 10; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const candidate = generateFourDigitCode();
     const roomRef = doc(db, 'rooms', candidate);
     try {
-      const snap = await getDoc(roomRef);
+      const snap = await withTimeout(
+        getDocFromServer(roomRef),
+        8000,
+        'La conexión al servidor tardó demasiado al verificar el código de sala.'
+      );
       if (!snap.exists()) {
         chosenCode = candidate;
         break;
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `rooms/${candidate}`);
+      handleFirestoreError(error, OperationType.GET, `rooms/${candidate}`, false);
+      throw new Error(formatFirestoreUserError(error, 'No se pudo conectar para crear la sala.'));
     }
   }
 
@@ -120,9 +131,14 @@ export async function createMultiplayerRoom(user: User): Promise<string> {
   batch.set(memberRef, memberPayload);
 
   try {
-    await batch.commit();
+    await withTimeout(
+      batch.commit(),
+      9000,
+      'El servidor tardó demasiado al crear la sala (posible límite diario de escrituras o red lenta).'
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `rooms/${chosenCode}`);
+    handleFirestoreError(error, OperationType.CREATE, `rooms/${chosenCode}`, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo crear la sala.'));
   }
 
   return chosenCode;
@@ -135,11 +151,19 @@ export async function joinMultiplayerRoom(user: User, rawCode: string): Promise<
   }
 
   const roomRef = doc(db, 'rooms', code);
+  const memberRef = doc(db, 'rooms', code, 'members', user.uid);
+
   let roomSnap;
+  let existingMember;
   try {
-    roomSnap = await getDoc(roomRef);
+    [roomSnap, existingMember] = await withTimeout(
+      Promise.all([getDocFromServer(roomRef), getDocFromServer(memberRef)]),
+      8000,
+      'La conexión tardó demasiado al buscar la sala.'
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `rooms/${code}`);
+    handleFirestoreError(error, OperationType.GET, `rooms/${code}`, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo consultar la sala.'));
   }
 
   if (!roomSnap.exists()) {
@@ -159,14 +183,6 @@ export async function joinMultiplayerRoom(user: User, rawCode: string): Promise<
     createdAtMs: toMillis(data.createdAt),
     updatedAtMs: toMillis(data.updatedAt),
   };
-
-  const memberRef = doc(db, 'rooms', code, 'members', user.uid);
-  let existingMember;
-  try {
-    existingMember = await getDoc(memberRef);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `rooms/${code}/members/${user.uid}`);
-  }
 
   if (existingMember.exists()) {
     return room;
@@ -191,9 +207,14 @@ export async function joinMultiplayerRoom(user: User, rawCode: string): Promise<
   }
 
   try {
-    await setDoc(memberRef, memberPayload);
+    await withTimeout(
+      setDoc(memberRef, memberPayload),
+      9000,
+      'El servidor tardó demasiado al entrar en la sala (posible límite diario de escrituras o red lenta).'
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `rooms/${code}/members/${user.uid}`);
+    handleFirestoreError(error, OperationType.CREATE, `rooms/${code}/members/${user.uid}`, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo unir a la sala.'));
   }
 
   return room;
@@ -216,9 +237,14 @@ export async function updateMemberSelection(
     patch.photoUrl = user.photoURL.slice(0, 500);
   }
   try {
-    await updateDoc(memberRef, patch);
+    await withTimeout(
+      updateDoc(memberRef, patch),
+      8000,
+      'Tardó demasiado al guardar tu selección de país.'
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}/members/${user.uid}`);
+    handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}/members/${user.uid}`, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo seleccionar el país.'));
   }
 }
 
@@ -235,12 +261,12 @@ export async function leaveMultiplayerRoom(
       const batch = writeBatch(db);
       batch.delete(memberRef);
       batch.delete(roomRef);
-      await batch.commit();
+      await withTimeout(batch.commit(), 5000);
     } else {
-      await deleteDoc(memberRef);
+      await withTimeout(deleteDoc(memberRef), 5000);
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `rooms/${roomCode}/members/${uid}`);
+    handleFirestoreError(error, OperationType.DELETE, `rooms/${roomCode}/members/${uid}`, false);
   }
 }
 
@@ -270,9 +296,14 @@ export async function hostStartMultiplayerMatch(
   });
 
   try {
-    await batch.commit();
+    await withTimeout(
+      batch.commit(),
+      10000,
+      'Tardó demasiado al iniciar la partida en el servidor.'
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `rooms/${roomCode}`);
+    handleFirestoreError(error, OperationType.WRITE, `rooms/${roomCode}`, false);
+    throw new Error(formatFirestoreUserError(error, 'No se pudo iniciar la partida.'));
   }
 }
 
@@ -298,15 +329,19 @@ export async function hostBroadcastWorldState(
         winnerCountryId: sim.winnerCountryId ?? null,
         updatedAt: serverTimestamp(),
       });
-      await batch.commit();
+      await withTimeout(batch.commit(), 9000);
     } else {
-      await setDoc(stateRef, {
-        ...payload,
-        updatedAt: serverTimestamp(),
-      });
+      await withTimeout(
+        setDoc(stateRef, {
+          ...payload,
+          updatedAt: serverTimestamp(),
+        }),
+        9000
+      );
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `rooms/${roomCode}/state/current`);
+    handleFirestoreError(error, OperationType.WRITE, `rooms/${roomCode}/state/current`, false);
+    throw error;
   }
 }
 
@@ -321,17 +356,22 @@ export async function sendRoomAction(
   const actionRef = doc(db, 'rooms', roomCode, 'actions', actionId);
 
   try {
-    await setDoc(actionRef, {
-      roomCode,
-      hostUid,
-      senderUid,
-      actorCountryId,
-      payload,
-      status: 'pending',
-      createdAt: serverTimestamp(),
-    });
+    await withTimeout(
+      setDoc(actionRef, {
+        roomCode,
+        hostUid,
+        senderUid,
+        actorCountryId,
+        payload,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      }),
+      8000,
+      'Tardó demasiado al enviar la orden al anfitrión.'
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `rooms/${roomCode}/actions/${actionId}`);
+    handleFirestoreError(error, OperationType.CREATE, `rooms/${roomCode}/actions/${actionId}`, false);
+    throw new Error(formatFirestoreUserError(error, 'Error al enviar orden online.'));
   }
 
   return actionId;
@@ -348,45 +388,51 @@ export async function markRoomActionProcessed(
       processedAt: serverTimestamp(),
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}/actions/${actionId}`);
+    handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}/actions/${actionId}`, false);
   }
 }
 
 export function subscribeRoom(
   roomCode: string,
-  onRoom: (room: MultiplayerRoom | null) => void
+  onRoom: (room: MultiplayerRoom | null, meta?: { fromCache: boolean }) => void,
+  onError?: (message: string) => void
 ): Unsubscribe {
   const path = `rooms/${roomCode}`;
   return onSnapshot(
     doc(db, 'rooms', roomCode),
     (snap) => {
       if (!snap.exists()) {
-        onRoom(null);
+        onRoom(null, { fromCache: snap.metadata.fromCache });
         return;
       }
       const d = snap.data();
-      onRoom({
-        roomCode: String(d.roomCode),
-        hostUid: String(d.hostUid),
-        hostName: String(d.hostName),
-        status: (d.status as MultiplayerRoom['status']) ?? 'lobby',
-        winnerCountryId:
-          d.winnerCountryId === null || d.winnerCountryId === undefined
-            ? null
-            : Number(d.winnerCountryId),
-        createdAtMs: toMillis(d.createdAt),
-        updatedAtMs: toMillis(d.updatedAt),
-      });
+      onRoom(
+        {
+          roomCode: String(d.roomCode),
+          hostUid: String(d.hostUid),
+          hostName: String(d.hostName),
+          status: (d.status as MultiplayerRoom['status']) ?? 'lobby',
+          winnerCountryId:
+            d.winnerCountryId === null || d.winnerCountryId === undefined
+              ? null
+              : Number(d.winnerCountryId),
+          createdAtMs: toMillis(d.createdAt),
+          updatedAtMs: toMillis(d.updatedAt),
+        },
+        { fromCache: snap.metadata.fromCache }
+      );
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
+      handleFirestoreError(error, OperationType.GET, path, false);
+      onError?.(formatFirestoreUserError(error, 'Error al sincronizar la sala.'));
     }
   );
 }
 
 export function subscribeRoomMembers(
   roomCode: string,
-  onMembers: (members: RoomMember[]) => void
+  onMembers: (members: RoomMember[]) => void,
+  onError?: (message: string) => void
 ): Unsubscribe {
   const path = `rooms/${roomCode}/members`;
   const q = query(collection(db, 'rooms', roomCode, 'members'), where('roomCode', '==', roomCode));
@@ -411,14 +457,16 @@ export function subscribeRoomMembers(
       onMembers(list);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      handleFirestoreError(error, OperationType.LIST, path, false);
+      onError?.(formatFirestoreUserError(error, 'Error al cargar jugadores de la sala.'));
     }
   );
 }
 
 export function subscribeRoomState(
   roomCode: string,
-  onState: (raw: Record<string, unknown>) => void
+  onState: (raw: Record<string, unknown>) => void,
+  onError?: (message: string) => void
 ): Unsubscribe {
   const path = `rooms/${roomCode}/state/current`;
   return onSnapshot(
@@ -429,7 +477,8 @@ export function subscribeRoomState(
       }
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
+      handleFirestoreError(error, OperationType.GET, path, false);
+      onError?.(formatFirestoreUserError(error, 'Error al sincronizar la partida online.'));
     }
   );
 }
@@ -466,7 +515,7 @@ export function subscribePendingRoomActions(
       onActions(pending);
     },
     (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      handleFirestoreError(error, OperationType.LIST, path, false);
     }
   );
 }

@@ -35,6 +35,7 @@ interface OnlineLobbyScreenProps {
   roomCode: string | null;
   room: MultiplayerRoom | null;
   members: RoomMember[];
+  syncError?: string | null;
   onEnterRoom: (code: string) => void;
   onLeaveRoom: () => Promise<void>;
   onHostStartMatch: () => Promise<void>;
@@ -56,6 +57,7 @@ export function OnlineLobbyScreen({
   roomCode,
   room,
   members,
+  syncError,
   onEnterRoom,
   onLeaveRoom,
   onHostStartMatch,
@@ -616,9 +618,9 @@ export function OnlineLobbyScreen({
                 </p>
               </div>
 
-              {errorMsg && (
-                <div className="p-3 bg-red-950/60 border border-red-700/70 text-xs text-red-200 text-center">
-                  {errorMsg}
+              {(errorMsg || syncError || authError) && (
+                <div className="p-3 bg-red-950/70 border border-red-700/80 text-xs text-red-200 text-center leading-relaxed">
+                  {errorMsg || syncError || authError}
                 </div>
               )}
 
@@ -644,7 +646,9 @@ export function OnlineLobbyScreen({
                       )}
                     </div>
                     <div>
-                      <div className="text-base sm:text-lg font-bold text-white">Crear sala</div>
+                      <div className="text-base sm:text-lg font-bold text-white">
+                        {busyAction === 'create' ? 'Creando sala...' : 'Crear sala'}
+                      </div>
                       <p className="mt-1 text-xs sm:text-sm text-slate-300">
                         Genera un código numérico de 4 dígitos para invitar jugadores y controlar cuándo empezar.
                       </p>
@@ -652,7 +656,7 @@ export function OnlineLobbyScreen({
                   </div>
                   <div className="pt-2 border-t border-slate-800 text-xs font-semibold text-emerald-400 flex items-center justify-between">
                     <span>Ser anfitrión</span>
-                    <span>Crear →</span>
+                    <span>{busyAction === 'create' ? 'Conectando...' : 'Crear →'}</span>
                   </div>
                 </button>
 
@@ -790,7 +794,9 @@ export function OnlineLobbyScreen({
                 </div>
               )}
 
-              {errorMsg && <span className="text-xs text-red-400 truncate">{errorMsg}</span>}
+              {(errorMsg || syncError) && (
+                <span className="text-xs text-red-400 truncate">{errorMsg || syncError}</span>
+              )}
             </div>
 
             {isHost ? (

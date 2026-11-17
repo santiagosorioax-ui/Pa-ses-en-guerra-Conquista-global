@@ -30,6 +30,7 @@ import {
   type MapMode,
   type SimulationState,
 } from './engine/gameSimulation';
+import { isQuotaExceededError } from './firebase';
 import { MAP_H, MAP_W, buildWorldMapData, type WorldMapData } from './engine/mapRasterizer';
 import { soundEngine } from './engine/soundEngine';
 import {
@@ -73,10 +74,12 @@ export default function App() {
   const [mpRoomCode, setMpRoomCode] = useState<string | null>(null);
   const [mpRoom, setMpRoom] = useState<MultiplayerRoom | null>(null);
   const [mpMembers, setMpMembers] = useState<RoomMember[]>([]);
+  const [mpSyncError, setMpSyncError] = useState<string | null>(null);
   const mpTickRef = useRef<number>(1);
   const isBroadcastingRef = useRef<boolean>(false);
   const pendingBroadcastRef = useRef<boolean>(false);
   const broadcastThrottleRef = useRef<number | null>(null);
+  const quotaCooldownUntilRef = useRef<number>(0);
   const processedActionIdsRef = useRef<Set<string>>(new Set());
 
   const [renderTick, setRenderTick] = useState(0);
@@ -120,6 +123,7 @@ export default function App() {
       const uid = uidOverride ?? user?.uid;
       const sim = simRef.current;
       if (!uid || !sim || sim.isMultiplayer) return;
+      if (Date.now() < quotaCooldownUntilRef.current) return;
       if (isSavingRef.current) {
         pendingSaveRef.current = true;
         return;
@@ -129,13 +133,17 @@ export default function App() {
       pendingSaveRef.current = false;
       try {
         await saveCampaignToCloud(uid, activeCampaignIdRef.current, sim);
-      } catch {
-        // Silent automatic retry on next cycle or mutation
+      } catch (err) {
+        if (isQuotaExceededError(err)) {
+          quotaCooldownUntilRef.current = Date.now() + 60_000;
+        }
       } finally {
         isSavingRef.current = false;
-        if (pendingSaveRef.current) {
+        if (pendingSaveRef.current && Date.now() >= quotaCooldownUntilRef.current) {
           pendingSaveRef.current = false;
           void performCloudSave(uid);
+        } else {
+          pendingSaveRef.current = false;
         }
       }
     },
@@ -144,13 +152,14 @@ export default function App() {
 
   const scheduleAutoCloudSave = useCallback(() => {
     if (!user?.uid || !simRef.current || simRef.current.isMultiplayer) return;
+    if (Date.now() < quotaCooldownUntilRef.current) return;
     if (autoSaveTimerRef.current !== null) {
       window.clearTimeout(autoSaveTimerRef.current);
     }
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
       void performCloudSave(user.uid);
-    }, 1200);
+    }, 4500);
   }, [user?.uid, performCloudSave]);
 
   const handlePlayerMutation = useCallback(() => {
@@ -162,6 +171,7 @@ export default function App() {
     const sim = simRef.current;
     if (!mpRoomCode || !user?.uid || !sim || !sim.isMultiplayer) return;
     if (mpRoom && mpRoom.hostUid !== user.uid) return;
+    if (Date.now() < quotaCooldownUntilRef.current) return;
 
     if (isBroadcastingRef.current) {
       pendingBroadcastRef.current = true;
@@ -174,19 +184,24 @@ export default function App() {
       const nextTick = mpTickRef.current++;
       const finished = sim.outcome !== 'none';
       await hostBroadcastWorldState(mpRoomCode, user.uid, sim, nextTick, finished);
-    } catch {
-      // Retry on next cycle if transient network glitch
+    } catch (err) {
+      if (isQuotaExceededError(err)) {
+        quotaCooldownUntilRef.current = Date.now() + 60_000;
+      }
     } finally {
       isBroadcastingRef.current = false;
-      if (pendingBroadcastRef.current) {
+      if (pendingBroadcastRef.current && Date.now() >= quotaCooldownUntilRef.current) {
         pendingBroadcastRef.current = false;
         void performHostBroadcast();
+      } else {
+        pendingBroadcastRef.current = false;
       }
     }
   }, [mpRoomCode, mpRoom, user?.uid]);
 
   const scheduleHostBroadcast = useCallback(
     (immediate = false) => {
+      if (Date.now() < quotaCooldownUntilRef.current) return;
       if (immediate) {
         if (broadcastThrottleRef.current !== null) {
           window.clearTimeout(broadcastThrottleRef.current);
@@ -199,7 +214,7 @@ export default function App() {
       broadcastThrottleRef.current = window.setTimeout(() => {
         broadcastThrottleRef.current = null;
         void performHostBroadcast();
-      }, 280);
+      }, 4500);
     },
     [performHostBroadcast]
   );
@@ -260,26 +275,38 @@ export default function App() {
     if (!mpRoomCode || !user) {
       setMpRoom(null);
       setMpMembers([]);
+      setMpSyncError(null);
       return;
     }
 
-    const unsubRoom = subscribeRoom(mpRoomCode, (room) => {
-      if (!room) {
-        setMpRoomCode(null);
-        setMpRoom(null);
-        setMpMembers([]);
-        if (simRef.current?.isMultiplayer) {
-          simRef.current = null;
-          setScreen('ONLINE_LOBBY');
+    setMpSyncError(null);
+    const unsubRoom = subscribeRoom(
+      mpRoomCode,
+      (room, meta) => {
+        if (!room) {
+          if (meta?.fromCache) return;
+          setMpRoomCode(null);
+          setMpRoom(null);
+          setMpMembers([]);
+          if (simRef.current?.isMultiplayer) {
+            simRef.current = null;
+            setScreen('ONLINE_LOBBY');
+          }
+          return;
         }
-        return;
-      }
-      setMpRoom(room);
-    });
+        setMpSyncError(null);
+        setMpRoom(room);
+      },
+      (errMsg) => setMpSyncError(errMsg)
+    );
 
-    const unsubMembers = subscribeRoomMembers(mpRoomCode, (list) => {
-      setMpMembers(list);
-    });
+    const unsubMembers = subscribeRoomMembers(
+      mpRoomCode,
+      (list) => {
+        setMpMembers(list);
+      },
+      (errMsg) => setMpSyncError(errMsg)
+    );
 
     return () => {
       unsubRoom();
@@ -673,13 +700,13 @@ export default function App() {
     });
   }, []);
 
-  // Automatic cloud save every 10s & on tab/window exit (singleplayer only)
+  // Automatic cloud save every 60s & on tab/window exit (singleplayer only)
   useEffect(() => {
     if (screen !== 'PLAYING' || !user?.uid || simRef.current?.isMultiplayer) return;
 
     const autoTimer = window.setInterval(() => {
       void performCloudSave(user.uid);
-    }, 10000);
+    }, 60000);
 
     const onVisibilityOrHide = () => {
       if (document.visibilityState === 'hidden') {
@@ -732,7 +759,11 @@ export default function App() {
           roomCode={mpRoomCode}
           room={mpRoom}
           members={mpMembers}
-          onEnterRoom={(code) => setMpRoomCode(code)}
+          syncError={mpSyncError}
+          onEnterRoom={(code) => {
+            setMpSyncError(null);
+            setMpRoomCode(code);
+          }}
           onLeaveRoom={handleLeaveOnlineRoom}
           onHostStartMatch={handleHostStartMatch}
           onBack={() => setScreen('COUNTRY_SELECT')}

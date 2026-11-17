@@ -47,34 +47,39 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, []);
 
-  // Only sync profile & subscribe to campaigns when auth is ready and user is authenticated
+  // Sync profile & subscribe to campaigns when auth is ready and user is authenticated
   useEffect(() => {
     if (!authReady || !user) return;
 
     let cancelled = false;
-    let unsubCampaigns: (() => void) | null = null;
     setCampaignsLoading(true);
+    setAuthError(null);
 
-    ensureUserProfile(user)
-      .then(() => {
-        if (cancelled) return;
-        unsubCampaigns = subscribeUserCampaigns(user.uid, (list) => {
-          if (!cancelled) {
-            setCampaigns(list);
-            setCampaignsLoading(false);
-          }
-        });
-      })
-      .catch((err) => {
+    void ensureUserProfile(user).catch((err) => {
+      if (!cancelled) {
+        setAuthError(err instanceof Error ? err.message : 'Error al sincronizar perfil.');
+      }
+    });
+
+    const unsubCampaigns = subscribeUserCampaigns(
+      user.uid,
+      (list) => {
+        if (!cancelled) {
+          setCampaigns(list);
+          setCampaignsLoading(false);
+        }
+      },
+      (errMsg) => {
         if (!cancelled) {
           setCampaignsLoading(false);
-          setAuthError(err instanceof Error ? err.message : 'Error al sincronizar perfil.');
+          setAuthError(errMsg);
         }
-      });
+      }
+    );
 
     return () => {
       cancelled = true;
-      if (unsubCampaigns) unsubCampaigns();
+      unsubCampaigns();
     };
   }, [authReady, user]);
 
