@@ -99,7 +99,9 @@ export function OnlineLobbyScreen({
     [members, user?.uid]
   );
 
-  const isHost = Boolean(user && room && room.hostUid === user.uid);
+  const isHost = Boolean(
+    user && ((room && room.hostUid === user.uid) || myMember?.isHost)
+  );
   const allPicked = members.length > 0 && members.every((m) => m.countryId >= 0);
 
   const handleCreateRoom = async () => {
@@ -226,7 +228,11 @@ export function OnlineLobbyScreen({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 flex flex-col">
+      <main
+        className={`flex-1 min-h-0 p-3 sm:p-5 ${
+          roomCode ? 'overflow-y-auto md:overflow-hidden' : 'overflow-y-auto flex flex-col'
+        }`}
+      >
         {!authReady ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="flex items-center gap-2 text-sm text-slate-300">
@@ -375,17 +381,17 @@ export function OnlineLobbyScreen({
           </div>
         ) : (
           /* Waiting Room Lobby + Country Selection */
-          <div className="flex-1 min-h-0 max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4">
-            {/* Left: Room Code, Players & Start Button */}
-            <div className="lg:col-span-5 flex flex-col gap-3 min-h-0">
+          <div className="max-w-6xl w-full mx-auto flex flex-col md:grid md:grid-cols-12 md:h-full gap-3 sm:gap-4">
+            {/* Left: Room Code & Players */}
+            <div className="md:col-span-5 flex flex-col gap-3 md:h-full md:min-h-0 shrink-0">
               {/* 4-Digit Room Code Card */}
-              <div className="bg-[#111B2B] border border-emerald-500/40 p-4 space-y-3">
+              <div className="bg-[#111B2B] border border-emerald-500/40 p-3.5 sm:p-4 space-y-2 shrink-0">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <div className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold">
                       Código de Sala (4 dígitos)
                     </div>
-                    <div className="font-mono-num text-3xl sm:text-4xl font-extrabold tracking-[0.25em] text-white mt-0.5">
+                    <div className="font-mono-num text-2xl sm:text-4xl font-extrabold tracking-[0.25em] text-white mt-0.5">
                       {roomCode}
                     </div>
                   </div>
@@ -406,32 +412,32 @@ export function OnlineLobbyScreen({
                     )}
                   </button>
                 </div>
-                <p className="text-xs text-slate-400">
-                  Comparte este número con tus amigos para que pulsen «Unirse a sala». Los demás países serán manejados por la IA.
+                <p className="text-[11px] sm:text-xs text-slate-400">
+                  Comparte este código para que pulsen «Unirse a sala». Los demás países serán manejados por la IA.
                 </p>
               </div>
 
               {/* Players List */}
-              <div className="bg-[#111B2B] border border-slate-800 p-4 flex-1 min-h-[180px] flex flex-col gap-3 overflow-hidden">
-                <div className="flex items-center justify-between">
+              <div className="bg-[#111B2B] border border-slate-800 p-3.5 sm:p-4 flex-1 min-h-[150px] max-h-[230px] md:max-h-none flex flex-col gap-2.5 overflow-hidden">
+                <div className="flex items-center justify-between shrink-0">
                   <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-sky-400" />
                     <span>Jugadores en Sala ({members.length})</span>
                   </div>
                   {myMember && myMember.countryId >= 0 && (
-                    <span className="text-[11px] text-emerald-400 font-semibold">
-                      Tu país: {COUNTRIES_195[myMember.countryId].name}
+                    <span className="text-[11px] text-emerald-400 font-semibold truncate ml-2">
+                      {COUNTRIES_195[myMember.countryId].name}
                     </span>
                   )}
                 </div>
 
-                <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
                   {members.map((m) => {
                     const picked = m.countryId >= 0 ? COUNTRIES_195[m.countryId] : null;
                     return (
                       <div
                         key={m.uid}
-                        className={`p-2.5 bg-[#0B121E] border flex items-center justify-between gap-2 ${
+                        className={`p-2 bg-[#0B121E] border flex items-center justify-between gap-2 ${
                           m.uid === user.uid ? 'border-amber-500/50' : 'border-slate-800'
                         }`}
                       >
@@ -469,7 +475,7 @@ export function OnlineLobbyScreen({
                         {picked ? (
                           <PixelFlag country={picked} size="sm" />
                         ) : (
-                          <span className="text-[10px] px-2 py-0.5 bg-slate-900 border border-slate-700 text-slate-400">
+                          <span className="text-[10px] px-2 py-0.5 bg-slate-900 border border-slate-700 text-slate-400 shrink-0">
                             Pendiente
                           </span>
                         )}
@@ -477,57 +483,17 @@ export function OnlineLobbyScreen({
                     );
                   })}
                 </div>
-
-                {errorMsg && (
-                  <div className="p-2 bg-red-950/60 border border-red-700/70 text-xs text-red-200">
-                    {errorMsg}
-                  </div>
-                )}
-
-                {isHost ? (
-                  <button
-                    onClick={async () => {
-                      setErrorMsg(null);
-                      setBusyAction('start');
-                      try {
-                        soundEngine.playTreaty();
-                        await onHostStartMatch();
-                      } catch (err) {
-                        setErrorMsg(
-                          err instanceof Error ? err.message : 'No se pudo iniciar la partida.'
-                        );
-                      } finally {
-                        setBusyAction(null);
-                      }
-                    }}
-                    disabled={!allPicked || busyAction !== null}
-                    className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 disabled:opacity-45 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                  >
-                    {busyAction === 'start' ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Play className="w-4 h-4 fill-current" />
-                    )}
-                    <span>Empezar la partida</span>
-                  </button>
-                ) : (
-                  <div className="p-3 bg-[#0B121E] border border-slate-800 text-xs text-center text-slate-300">
-                    {myMember && myMember.countryId >= 0
-                      ? 'Esperando a que el anfitrión pulse «Empezar la partida»...'
-                      : 'Escoge tu país en la lista de la derecha para estar listo.'}
-                  </div>
-                )}
               </div>
             </div>
 
             {/* Right: 195 Countries Selector */}
-            <div className="lg:col-span-7 bg-[#111B2B] border border-slate-800 flex flex-col min-h-[340px] max-h-[75vh] lg:max-h-none overflow-hidden">
-              <div className="p-3.5 border-b border-slate-800 space-y-2.5 shrink-0">
+            <div className="md:col-span-7 bg-[#111B2B] border border-slate-800 flex flex-col h-[390px] md:h-full md:min-h-0 shrink-0 overflow-hidden">
+              <div className="p-3 sm:p-3.5 border-b border-slate-800 space-y-2.5 shrink-0">
                 <div className="flex items-center justify-between gap-2">
                   <h2 className="text-sm font-bold text-slate-100">
                     Elige tu país ({filteredCountries.length}/195)
                   </h2>
-                  <span className="text-[11px] text-slate-400">
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
                     Si te eliminan, podrás iniciar una rebelión
                   </span>
                 </div>
@@ -560,7 +526,7 @@ export function OnlineLobbyScreen({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto divide-y divide-slate-800/70">
+              <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-800/70">
                 {filteredCountries.map((c) => {
                   const isMine = myMember?.countryId === c.id;
                   const takenBy = takenByOther.get(c.id);
@@ -612,6 +578,69 @@ export function OnlineLobbyScreen({
           </div>
         )}
       </main>
+
+      {/* Pinned Always-Visible Action Footer inside Lobby */}
+      {user && roomCode && (
+        <footer className="shrink-0 border-t border-slate-800 bg-[#111B2B] px-3 sm:px-6 py-2.5 sm:py-3">
+          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            <div className="flex items-center justify-between sm:justify-start gap-3 min-w-0">
+              {myMember && myMember.countryId >= 0 ? (
+                <div className="flex items-center gap-2 min-w-0">
+                  <PixelFlag country={COUNTRIES_195[myMember.countryId]} size="sm" />
+                  <div className="text-xs truncate">
+                    <span className="text-slate-400">Tu país: </span>
+                    <span className="font-bold text-emerald-300">
+                      {COUNTRIES_195[myMember.countryId].name}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-amber-300 font-medium">
+                  Selecciona tu país en la lista para poder jugar
+                </div>
+              )}
+
+              {errorMsg && (
+                <span className="text-xs text-red-400 truncate">{errorMsg}</span>
+              )}
+            </div>
+
+            {isHost ? (
+              <button
+                onClick={async () => {
+                  setErrorMsg(null);
+                  setBusyAction('start');
+                  try {
+                    soundEngine.playTreaty();
+                    await onHostStartMatch();
+                  } catch (err) {
+                    setErrorMsg(
+                      err instanceof Error ? err.message : 'No se pudo iniciar la partida.'
+                    );
+                  } finally {
+                    setBusyAction(null);
+                  }
+                }}
+                disabled={!allPicked || busyAction !== null}
+                className="sm:w-auto w-full py-2.5 px-6 bg-amber-500 hover:bg-amber-400 disabled:opacity-45 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0"
+              >
+                {busyAction === 'start' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4 fill-current" />
+                )}
+                <span>Empezar la partida</span>
+              </button>
+            ) : (
+              <div className="px-4 py-2 bg-[#0B121E] border border-slate-800 text-xs text-center text-slate-300 shrink-0">
+                {myMember && myMember.countryId >= 0
+                  ? 'Esperando a que el anfitrión pulse «Empezar la partida»...'
+                  : 'Escoge tu país en la lista para estar listo.'}
+              </div>
+            )}
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
