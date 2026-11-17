@@ -46,19 +46,21 @@ export function RebellionPanel({
     }
   };
 
+  const isMobile = deviceMode === 'mobile';
+
   return (
     <div
       className={
-        deviceMode === 'mobile'
-          ? 'absolute bottom-2 left-2 right-2 z-30 bg-[#111B2B]/98 border border-amber-500/70 p-3.5 shadow-2xl space-y-2.5'
-          : 'absolute bottom-14 right-4 z-30 w-[370px] bg-[#111B2B]/98 border border-amber-500/70 p-4 shadow-2xl space-y-3'
+        isMobile
+          ? 'absolute bottom-14 left-2 right-2 z-30 bg-[#111B2B]/98 border border-amber-500/70 p-3 shadow-2xl space-y-2.5'
+          : 'absolute bottom-14 right-4 z-30 w-[380px] bg-[#111B2B]/98 border border-amber-500/70 p-4 shadow-2xl space-y-3'
       }
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <PixelFlag country={player.seed} size="md" />
           <div className="min-w-0">
-            <div className="text-xs font-extrabold uppercase tracking-wide text-amber-300">
+            <div className="text-xs font-extrabold uppercase tracking-wide text-amber-300 truncate">
               {player.seed.name} Anexado · Resistencia
             </div>
             <div className="text-[11px] text-slate-300 truncate flex items-center gap-1.5 mt-0.5">
@@ -72,28 +74,28 @@ export function RebellionPanel({
 
       <div className="grid grid-cols-3 gap-2 bg-[#0B121E] border border-slate-800 p-2 text-center font-mono-num">
         <div>
-          <div className="text-[10px] text-slate-400 font-sans">Fondos Rebeldes</div>
+          <div className="text-[10px] text-slate-400 font-sans">Fondos</div>
           <div className="text-xs font-bold text-emerald-300">${status.rebelMoney}</div>
           <div className="text-[9px] text-emerald-400">+${REBEL_INCOME_PER_SECOND}/s</div>
         </div>
         <div>
-          <div className="text-[10px] text-slate-400 font-sans">Tu Ejército Rebelde</div>
+          <div className="text-[10px] text-slate-400 font-sans">Rebeldes</div>
           <div className="text-xs font-bold text-amber-300">{status.rebelArmy}</div>
         </div>
         <div>
-          <div className="text-[10px] text-slate-400 font-sans">Ejército Ocupante</div>
+          <div className="text-[10px] text-slate-400 font-sans">Ocupante</div>
           <div className="text-xs font-bold text-red-400">{status.occupierArmy}</div>
         </div>
       </div>
 
       {/* Requirement Progress: half or more of occupier's army */}
       <div className="space-y-1">
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-slate-300 flex items-center gap-1">
-            <Users className="w-3.5 h-3.5 text-amber-400" />
-            <span>Requisito (≥ 50% de {status.occupierName})</span>
+        <div className="flex items-center justify-between text-[11px] gap-2">
+          <span className="text-slate-300 flex items-center gap-1 min-w-0 truncate">
+            <Users className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="truncate">Requisito (≥ 50% de {status.occupierName})</span>
           </span>
-          <span className="font-mono-num font-bold text-amber-300">
+          <span className="font-mono-num font-bold text-amber-300 shrink-0">
             {status.rebelArmy} / {status.requiredArmy}
           </span>
         </div>
@@ -117,22 +119,30 @@ export function RebellionPanel({
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <button
           disabled={busy || status.rebelMoney < REBEL_RECRUIT_COST}
           onClick={() => runAction({ type: 'recruit_rebel_army' })}
-          className="py-2.5 px-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+          className={`bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+            isMobile ? 'min-h-[44px] py-2 px-2' : 'py-2.5 px-3'
+          }`}
         >
-          <Swords className="w-3.5 h-3.5" />
-          <span>Recaudar (+{REBEL_RECRUIT_AMOUNT} · ${REBEL_RECRUIT_COST})</span>
+          <Swords className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">
+            {isMobile
+              ? `Recaudar (+${REBEL_RECRUIT_AMOUNT} · $${REBEL_RECRUIT_COST})`
+              : `Recaudar (+${REBEL_RECRUIT_AMOUNT} · $${REBEL_RECRUIT_COST})`}
+          </span>
         </button>
 
         <button
           disabled={busy || !status.canRebel}
           onClick={() => runAction({ type: 'start_rebellion' })}
-          className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+          className={`bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+            isMobile ? 'min-h-[44px] py-2 px-2' : 'py-2.5 px-3'
+          }`}
         >
-          <Flame className="w-3.5 h-3.5" />
+          <Flame className="w-3.5 h-3.5 shrink-0" />
           <span>Iniciar rebelión</span>
         </button>
       </div>

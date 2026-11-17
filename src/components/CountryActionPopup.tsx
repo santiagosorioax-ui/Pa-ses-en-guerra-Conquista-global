@@ -94,12 +94,14 @@ export function CountryActionPopup({
 
   const canBuildPort = hasCoast(sim, player.id);
 
+  const isMobile = deviceMode === 'mobile';
+
   return (
     <div
       className={
-        deviceMode === 'mobile'
-          ? 'absolute bottom-2 left-2 right-2 z-30 max-h-[65vh] overflow-y-auto bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-3.5 space-y-2.5'
-          : 'absolute top-4 right-4 z-30 w-[350px] bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-4 space-y-3'
+        isMobile
+          ? 'absolute bottom-2 left-2 right-2 z-30 max-h-[62vh] overflow-y-auto bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-3.5 space-y-2.5'
+          : 'absolute top-4 right-4 z-30 w-[355px] bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-4 space-y-3'
       }
     >
       {/* Header: Bandera, País, Capital y botón X */}
@@ -137,7 +139,9 @@ export function CountryActionPopup({
           onClick={onClose}
           title="Salir (Esc)"
           aria-label="Cerrar"
-          className="w-7 h-7 flex items-center justify-center bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs cursor-pointer shrink-0"
+          className={`flex items-center justify-center bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs cursor-pointer shrink-0 ${
+            isMobile ? 'w-9 h-9' : 'w-7 h-7'
+          }`}
         >
           <X className="w-4 h-4" />
         </button>
@@ -183,10 +187,10 @@ export function CountryActionPopup({
 
           {/* Relación diplomática (1-100) y envío de dinero */}
           <div className="bg-[#0B121E] border border-slate-800 px-2.5 py-2 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">Relación (1-100)</span>
+            <div className="flex items-center justify-between text-xs gap-2">
+              <span className="text-slate-400 shrink-0">Relación (1-100)</span>
               <span
-                className={`font-mono-num font-bold ${
+                className={`font-mono-num font-bold truncate ${
                   rel >= ALLIANCE_REL_THRESHOLD
                     ? 'text-emerald-400'
                     : rel <= 35
@@ -199,7 +203,7 @@ export function CountryActionPopup({
             </div>
 
             {!atWar && (
-              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
                 <span className="text-[11px] text-slate-400">
                   Enviar dinero ($100 = +1):
                 </span>
@@ -207,14 +211,18 @@ export function CountryActionPopup({
                   <button
                     onClick={() => handleSendMoney(1)}
                     disabled={busy || rel >= 100}
-                    className="px-2 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold cursor-pointer"
+                    className={`bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold cursor-pointer ${
+                      isMobile ? 'px-2.5 py-1.5 min-h-[34px]' : 'px-2 py-1'
+                    }`}
                   >
                     ${GIFT_MONEY_PER_REL} (+1)
                   </button>
                   <button
                     onClick={() => handleSendMoney(5)}
                     disabled={busy || rel >= 100}
-                    className="px-2 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold cursor-pointer"
+                    className={`bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold cursor-pointer ${
+                      isMobile ? 'px-2.5 py-1.5 min-h-[34px]' : 'px-2 py-1'
+                    }`}
                   >
                     ${GIFT_MONEY_PER_REL * 5} (+5)
                   </button>
@@ -230,10 +238,12 @@ export function CountryActionPopup({
                 <button
                   disabled={busy}
                   onClick={handleBuildDirectionalPort}
-                  className="w-full py-1.5 px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-semibold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
+                  className={`w-full px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-semibold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer ${
+                    isMobile ? 'py-2 min-h-[38px]' : 'py-1.5'
+                  }`}
                 >
-                  <Anchor className="w-3.5 h-3.5" />
-                  <span>Construir Puerto hacia {target.seed.name} (${PORT_COST})</span>
+                  <Anchor className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Construir Puerto hacia {target.seed.name} (${PORT_COST})</span>
                 </button>
               )}
             </div>
@@ -251,58 +261,114 @@ export function CountryActionPopup({
             </div>
           )}
 
-          {/* Los 3 botones solicitados: X (Salir), Atacar, Alianza */}
-          <div className="grid grid-cols-3 gap-2 pt-1">
-            <button
-              onClick={onClose}
-              className="py-2 px-2 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Salir</span>
-            </button>
+          {/* Action Buttons: adapted cleanly for Mobile vs Desktop */}
+          {isMobile ? (
+            <div className="space-y-2 pt-1">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  disabled={busy}
+                  onClick={handleAttack}
+                  className={`min-h-[44px] py-2.5 px-2 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-50 ${
+                    atWar
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      : 'bg-red-600 hover:bg-red-500 text-white'
+                  }`}
+                >
+                  {atWar ? (
+                    <>
+                      <Handshake className="w-4 h-4 shrink-0" />
+                      <span>{humanOwner ? 'Proponer Paz' : 'Firmar Paz'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Swords className="w-4 h-4 shrink-0" />
+                      <span>Atacar</span>
+                    </>
+                  )}
+                </button>
 
-            <button
-              disabled={busy}
-              onClick={handleAttack}
-              className={`py-2 px-2 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50 ${
-                atWar
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                  : 'bg-red-600 hover:bg-red-500 text-white'
-              }`}
-            >
-              {atWar ? (
-                <>
-                  <Handshake className="w-3.5 h-3.5" />
-                  <span>{humanOwner ? 'Proponer Paz' : 'Firmar Paz'}</span>
-                </>
-              ) : (
-                <>
-                  <Swords className="w-3.5 h-3.5" />
-                  <span>Atacar</span>
-                </>
-              )}
-            </button>
+                {allied && playerAtWar ? (
+                  <button
+                    disabled={busy}
+                    onClick={handleRequestHelp}
+                    className="min-h-[44px] py-2.5 px-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <Shield className="w-4 h-4 shrink-0" />
+                    <span>Pedir ayuda</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleAlliance}
+                    disabled={busy || allied || atWar}
+                    className="min-h-[44px] py-2.5 px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-45 disabled:hover:bg-sky-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <Shield className="w-4 h-4 shrink-0" />
+                    <span>{allied ? 'Aliado' : 'Alianza'}</span>
+                  </button>
+                )}
+              </div>
 
-            {allied && playerAtWar ? (
+              <button
+                onClick={onClose}
+                className="w-full min-h-[40px] py-2 px-3 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Salir</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <button
+                onClick={onClose}
+                className="py-2 px-2 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Salir</span>
+              </button>
+
               <button
                 disabled={busy}
-                onClick={handleRequestHelp}
-                className="py-2 px-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                onClick={handleAttack}
+                className={`py-2 px-2 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50 ${
+                  atWar
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-red-600 hover:bg-red-500 text-white'
+                }`}
               >
-                <Shield className="w-3.5 h-3.5" />
-                <span>Pedir ayuda</span>
+                {atWar ? (
+                  <>
+                    <Handshake className="w-3.5 h-3.5 shrink-0" />
+                    <span>{humanOwner ? 'Proponer Paz' : 'Firmar Paz'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Swords className="w-3.5 h-3.5 shrink-0" />
+                    <span>Atacar</span>
+                  </>
+                )}
               </button>
-            ) : (
-              <button
-                onClick={handleAlliance}
-                disabled={busy || allied || atWar}
-                className="py-2 px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-45 disabled:hover:bg-sky-600 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
-              >
-                <Shield className="w-3.5 h-3.5" />
-                <span>{allied ? 'Aliado' : 'Alianza'}</span>
-              </button>
-            )}
-          </div>
+
+              {allied && playerAtWar ? (
+                <button
+                  disabled={busy}
+                  onClick={handleRequestHelp}
+                  className="py-2 px-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                >
+                  <Shield className="w-3.5 h-3.5 shrink-0" />
+                  <span>Pedir ayuda</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleAlliance}
+                  disabled={busy || allied || atWar}
+                  className="py-2 px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-45 disabled:hover:bg-sky-600 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                >
+                  <Shield className="w-3.5 h-3.5 shrink-0" />
+                  <span>{allied ? 'Aliado' : 'Alianza'}</span>
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

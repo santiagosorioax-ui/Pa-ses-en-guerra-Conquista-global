@@ -56,7 +56,7 @@ export function TopCommandBar({
     return (
       <header className="bg-[#111B2B] border-b border-slate-800 shrink-0 z-30">
         {/* Row 1: Nation, Speed & Core Actions */}
-        <div className="h-11 px-2 flex items-center justify-between gap-1.5">
+        <div className="h-11 px-2 flex items-center justify-between gap-1">
           <button
             onClick={onSelectOwnCountry}
             className="flex items-center gap-1.5 min-w-0 text-left cursor-pointer"
@@ -64,7 +64,7 @@ export function TopCommandBar({
           >
             <PixelFlag country={player.seed} size="sm" />
             <div className="min-w-0">
-              <div className="text-xs font-bold text-amber-300 truncate max-w-[96px]">
+              <div className="text-xs font-bold text-amber-300 truncate max-w-[84px]">
                 {player.seed.name}
               </div>
               <div className="text-[10px] text-slate-400 font-mono-num leading-none">
@@ -75,7 +75,7 @@ export function TopCommandBar({
 
           {/* Speed Pills / Live Room Badge */}
           {isRemoteGuest ? (
-            <div className="px-2 py-1 bg-emerald-950/70 border border-emerald-600/60 text-[10px] font-mono-num text-emerald-300 shrink-0">
+            <div className="px-2 py-1 bg-emerald-950/70 border border-emerald-600/60 text-[10px] font-mono-num text-emerald-300 shrink-0 whitespace-nowrap">
               Sala {roomCode} · En vivo
             </div>
           ) : (
@@ -86,7 +86,7 @@ export function TopCommandBar({
                   <button
                     key={s}
                     onClick={() => onSetSpeed(s)}
-                    className={`px-2 py-1 text-[11px] font-mono-num cursor-pointer ${
+                    className={`min-w-[28px] h-7 px-1.5 text-[11px] font-mono-num flex items-center justify-center cursor-pointer ${
                       active
                         ? s === 0
                           ? 'bg-red-500/25 text-red-300'
@@ -106,7 +106,7 @@ export function TopCommandBar({
             <button
               onClick={onOpenSearch}
               title="Buscar país"
-              className="p-1.5 bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
             >
               <Search className="w-3.5 h-3.5" />
             </button>
@@ -114,7 +114,7 @@ export function TopCommandBar({
             <button
               onClick={() => onSwitchDeviceMode('desktop')}
               title="Cambiar a modo Computador"
-              className="p-1.5 bg-slate-900 border border-slate-700 text-slate-300 cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-amber-300 cursor-pointer"
             >
               <Monitor className="w-3.5 h-3.5" />
             </button>
@@ -122,16 +122,21 @@ export function TopCommandBar({
             <button
               onClick={onReturnToMenu}
               title="Menú principal"
-              className="p-1.5 bg-slate-900 border border-slate-700 text-amber-300 cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
-        {/* Row 2: Live Resource Strip (Dinero, Ejército, Puertos, km²) + Sound/Tutorial */}
-        <div className="h-8 px-2.5 bg-[#0B121E] border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px] font-mono-num">
-          <div className="flex items-center gap-3 overflow-x-auto whitespace-nowrap">
+        {/* Row 2: Live Resource Strip (Dinero, Ejército, Puertos, km²) + Sala + Sound/Tutorial */}
+        <div className="h-8 px-2 bg-[#0B121E] border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px] font-mono-num">
+          <div className="flex items-center gap-2.5 overflow-x-auto whitespace-nowrap min-w-0">
+            {roomCode && !isRemoteGuest && (
+              <span className="px-1.5 py-0.5 bg-emerald-950/70 border border-emerald-600/50 text-[10px] text-emerald-300 shrink-0">
+                Sala {roomCode}
+              </span>
+            )}
             <span className="flex items-center gap-1 text-emerald-300 font-bold">
               <Coins className="w-3 h-3 text-amber-400 shrink-0" />
               ${player.money}
@@ -152,7 +157,7 @@ export function TopCommandBar({
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <PWAInstallButton compact />
             <button
               onClick={onToggleSound}
@@ -176,7 +181,7 @@ export function TopCommandBar({
 
   // DESKTOP TOP BAR (preserved)
   return (
-    <header className="h-14 px-4 bg-[#111B2B] border-b border-slate-800 flex items-center justify-between gap-4 shrink-0 z-30">
+    <header className="h-14 px-3 lg:px-4 bg-[#111B2B] border-b border-slate-800 flex items-center justify-between gap-3 shrink-0 z-30">
       {/* Player Nation */}
       <button
         onClick={onSelectOwnCountry}
@@ -185,7 +190,7 @@ export function TopCommandBar({
       >
         <PixelFlag country={player.seed} size="md" />
         <div className="min-w-0">
-          <div className="text-xs font-bold text-amber-300 truncate max-w-[170px]">
+          <div className="text-xs font-bold text-amber-300 truncate max-w-[160px]">
             {player.seed.name}
           </div>
           <div className="text-[11px] text-slate-400 font-mono-num whitespace-nowrap">
@@ -195,12 +200,12 @@ export function TopCommandBar({
       </button>
 
       {/* Pure Number Comparison HUD: Dinero, Ejército, Puertos */}
-      <div className="flex items-center gap-5 text-xs font-mono-num">
+      <div className="flex items-center gap-4 text-xs font-mono-num min-w-0">
         <div className="flex items-center gap-2">
           <Coins className="w-4 h-4 text-amber-400 shrink-0" />
           <div>
             <div className="text-[10px] text-slate-400 font-sans leading-none">Dinero</div>
-            <div className="flex items-baseline gap-1.5 mt-0.5">
+            <div className="flex items-baseline gap-1.5 mt-0.5 whitespace-nowrap">
               <span className="text-sm font-bold text-emerald-300">${player.money}</span>
               <span className={`text-[11px] ${player.netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                 ({player.netIncome >= 0 ? '+' : ''}{player.netIncome}/seg)
@@ -215,15 +220,15 @@ export function TopCommandBar({
           <Swords className="w-4 h-4 text-rose-400 shrink-0" />
           <div>
             <div className="text-[10px] text-slate-400 font-sans leading-none">Ejército</div>
-            <div className="text-sm font-bold text-slate-100 mt-0.5">
+            <div className="text-sm font-bold text-slate-100 mt-0.5 whitespace-nowrap">
               {player.army} soldados
             </div>
           </div>
         </div>
 
-        <div className="h-7 w-px bg-slate-800" />
+        <div className="h-7 w-px bg-slate-800 hidden lg:block" />
 
-        <div className="flex items-center gap-2">
+        <div className="hidden lg:flex items-center gap-2">
           <Anchor className="w-4 h-4 text-sky-400 shrink-0" />
           <div>
             <div className="text-[10px] text-slate-400 font-sans leading-none">Puertos</div>
@@ -235,7 +240,7 @@ export function TopCommandBar({
       </div>
 
       {/* Time, Online Room & PC Controls */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 lg:gap-2 shrink-0">
         {roomCode && (
           <div className="px-2 py-1 bg-emerald-950/70 border border-emerald-600/60 text-xs font-mono-num text-emerald-300 whitespace-nowrap">
             Sala {roomCode}

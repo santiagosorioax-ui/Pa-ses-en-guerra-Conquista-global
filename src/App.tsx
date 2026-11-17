@@ -866,7 +866,7 @@ export default function App() {
           )}
 
           {/* Live Autonomous AI Geopolitical Feed (top-left of map) */}
-          {sim.chronicle.length > 0 && (
+          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense)) && (
             <div
               className={`absolute z-20 space-y-1.5 pointer-events-none ${
                 isMobile
@@ -942,27 +942,35 @@ export default function App() {
 
           {/* Incoming Human Diplomatic Offer (Multiplayer) */}
           {activeHumanOffer && (
-            <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[calc(100vw-16px)] max-w-md bg-[#111B2B]/95 border border-emerald-500/80 px-3 sm:px-4 py-2.5 sm:py-3 shadow-2xl flex items-center gap-3 sm:gap-4">
-              <PixelFlag
-                country={sim.countries[activeHumanOffer.fromCountryId].seed}
-                size="md"
-              />
-              <div className="text-xs min-w-0 flex-1">
-                <div className="font-bold text-emerald-300 truncate">
-                  {sim.humanPlayers[activeHumanOffer.fromCountryId]
-                    ? `${sim.humanPlayers[activeHumanOffer.fromCountryId].displayName} · `
-                    : ''}
-                  {sim.countries[activeHumanOffer.fromCountryId].seed.name}
-                </div>
-                <div className="text-slate-200 leading-snug">
-                  {activeHumanOffer.type === 'alliance'
-                    ? 'Propone firmar una Alianza Estratégica.'
-                    : activeHumanOffer.type === 'peace'
-                      ? 'Propone firmar un Tratado de Paz.'
-                      : 'Solicita tu ayuda militar en su guerra actual.'}
+            <div
+              className={
+                isMobile
+                  ? 'absolute top-2 left-2 right-2 z-30 bg-[#111B2B]/98 border border-emerald-500/80 p-3 shadow-2xl flex flex-col gap-2.5'
+                  : 'absolute top-3 left-1/2 -translate-x-1/2 z-30 w-[min(92vw,490px)] bg-[#111B2B]/95 border border-emerald-500/80 px-4 py-3 shadow-2xl flex items-center gap-4'
+              }
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <PixelFlag
+                  country={sim.countries[activeHumanOffer.fromCountryId].seed}
+                  size="md"
+                />
+                <div className="text-xs min-w-0 flex-1">
+                  <div className="font-bold text-emerald-300 truncate">
+                    {sim.humanPlayers[activeHumanOffer.fromCountryId]
+                      ? `${sim.humanPlayers[activeHumanOffer.fromCountryId].displayName} · `
+                      : ''}
+                    {sim.countries[activeHumanOffer.fromCountryId].seed.name}
+                  </div>
+                  <div className="text-slate-200 leading-snug">
+                    {activeHumanOffer.type === 'alliance'
+                      ? 'Propone firmar una Alianza Estratégica.'
+                      : activeHumanOffer.type === 'peace'
+                        ? 'Propone firmar un Tratado de Paz.'
+                        : 'Solicita tu ayuda militar en su guerra actual.'}
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className={isMobile ? 'grid grid-cols-2 gap-2' : 'flex items-center gap-1.5 shrink-0'}>
                 <button
                   onClick={() =>
                     void handleExecuteAction({
@@ -971,7 +979,9 @@ export default function App() {
                       accept: true,
                     })
                   }
-                  className="px-2.5 py-1.5 sm:py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer"
+                  className={`bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer ${
+                    isMobile ? 'min-h-[42px] py-2 px-3' : 'px-3 py-1.5'
+                  }`}
                 >
                   Aceptar
                 </button>
@@ -983,7 +993,9 @@ export default function App() {
                       accept: false,
                     })
                   }
-                  className="px-2.5 py-1.5 sm:py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 cursor-pointer"
+                  className={`bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 cursor-pointer ${
+                    isMobile ? 'min-h-[42px] py-2 px-3' : 'px-3 py-1.5'
+                  }`}
                 >
                   Rechazar
                 </button>
@@ -993,28 +1005,38 @@ export default function App() {
 
           {/* Incoming Diplomatic Proposal from AI Nation (Singleplayer) */}
           {!activeHumanOffer && sim.pendingProposal && (
-            <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[calc(100vw-16px)] max-w-md bg-[#111B2B]/95 border border-amber-500/70 px-3 sm:px-4 py-2.5 sm:py-3 shadow-2xl flex items-center gap-3 sm:gap-4">
-              <PixelFlag
-                country={sim.countries[sim.pendingProposal.fromId].seed}
-                size="md"
-              />
-              <div className="text-xs min-w-0 flex-1">
-                <div className="font-bold text-amber-300 truncate">
-                  Propuesta · {sim.countries[sim.pendingProposal.fromId].seed.name}
-                </div>
-                <div className="text-slate-200 leading-snug">
-                  {sim.pendingProposal.type === 'alliance'
-                    ? 'Propone firmar una Alianza Estratégica.'
-                    : 'Solicita firmar un Tratado de Paz.'}
+            <div
+              className={
+                isMobile
+                  ? 'absolute top-2 left-2 right-2 z-30 bg-[#111B2B]/98 border border-amber-500/70 p-3 shadow-2xl flex flex-col gap-2.5'
+                  : 'absolute top-3 left-1/2 -translate-x-1/2 z-30 w-[min(92vw,470px)] bg-[#111B2B]/95 border border-amber-500/70 px-4 py-3 shadow-2xl flex items-center gap-4'
+              }
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <PixelFlag
+                  country={sim.countries[sim.pendingProposal.fromId].seed}
+                  size="md"
+                />
+                <div className="text-xs min-w-0 flex-1">
+                  <div className="font-bold text-amber-300 truncate">
+                    Propuesta · {sim.countries[sim.pendingProposal.fromId].seed.name}
+                  </div>
+                  <div className="text-slate-200 leading-snug">
+                    {sim.pendingProposal.type === 'alliance'
+                      ? 'Propone firmar una Alianza Estratégica.'
+                      : 'Solicita firmar un Tratado de Paz.'}
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className={isMobile ? 'grid grid-cols-2 gap-2' : 'flex items-center gap-1.5 shrink-0'}>
                 <button
                   onClick={() => {
                     respondToPendingProposal(sim, true);
                     handlePlayerMutation();
                   }}
-                  className="px-2.5 py-1.5 sm:py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer"
+                  className={`bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer ${
+                    isMobile ? 'min-h-[42px] py-2 px-3' : 'px-3 py-1.5'
+                  }`}
                 >
                   Aceptar
                 </button>
@@ -1023,7 +1045,9 @@ export default function App() {
                     respondToPendingProposal(sim, false);
                     handlePlayerMutation();
                   }}
-                  className="px-2.5 py-1.5 sm:py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 cursor-pointer"
+                  className={`bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 cursor-pointer ${
+                    isMobile ? 'min-h-[42px] py-2 px-3' : 'px-3 py-1.5'
+                  }`}
                 >
                   Rechazar
                 </button>

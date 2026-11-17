@@ -166,8 +166,18 @@ export function CommandDrawer({
         {activeTab === 'manage' && (
           <>
             {!player.alive && sim.isMultiplayer && (
-              <div className="p-3 bg-amber-950/60 border border-amber-500/60 text-xs text-amber-200 leading-relaxed">
-                Tu país fue anexado. Usa el panel de resistencia en el mapa para recaudar un ejército rebelde e iniciar una rebelión.
+              <div className="p-3 bg-amber-950/60 border border-amber-500/60 text-xs text-amber-200 leading-relaxed space-y-2">
+                <div>
+                  Tu país fue anexado. Usa el panel de resistencia en el mapa para recaudar un ejército rebelde e iniciar una rebelión.
+                </div>
+                {deviceMode === 'mobile' && onCloseMobileDrawer && (
+                  <button
+                    onClick={onCloseMobileDrawer}
+                    className="w-full min-h-[40px] py-2 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+                  >
+                    Ver panel de rebelión en el mapa
+                  </button>
+                )}
               </div>
             )}
 
