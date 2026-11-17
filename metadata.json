@@ -1,0 +1,6 @@
+{
+  "name": "Pixel Imperium: Conquista Global",
+  "description": "Juego de estrategia global en 2D pixel-art para PC con los 195 países del mundo, conquista territorial en tiempo real, diplomacia, alianzas estratégicas, economía detallada y eventos históricos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

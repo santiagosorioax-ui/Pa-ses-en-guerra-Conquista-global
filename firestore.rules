@@ -1,0 +1,279 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Reusable Hardened Primitives
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+
+    // 3. Entity Validation Blueprints (synchronized with firebase-blueprint.json)
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'photoUrl', 'lastCampaignId', 'createdAt', 'updatedAt'])
+        && data.uid is string
+        && data.uid == userId
+        && data.uid == request.auth.uid
+        && isValidId(data.uid)
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 100
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 200
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500))
+        && (!('lastCampaignId' in data) || (data.lastCampaignId is string && data.lastCampaignId.size() <= 64 && data.lastCampaignId.matches('^[a-zA-Z0-9_\\-]+$')))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCampaignMeta(data, userId, campaignId) {
+      return data.keys().hasAll([
+          'ownerId', 'campaignId', 'countryId', 'countryName', 'countryIso2',
+          'dateLabel', 'day', 'month', 'year', 'elapsedSeconds',
+          'money', 'netIncome', 'army', 'pixels', 'outcome', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'campaignId', 'countryId', 'countryName', 'countryIso2',
+          'dateLabel', 'day', 'month', 'year', 'elapsedSeconds',
+          'money', 'netIncome', 'army', 'pixels', 'outcome', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && data.campaignId is string
+        && data.campaignId == campaignId
+        && data.campaignId.size() <= 64
+        && data.campaignId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.countryId is int
+        && data.countryId >= 0
+        && data.countryId < 195
+        && data.countryName is string
+        && data.countryName.size() >= 1
+        && data.countryName.size() <= 80
+        && data.countryIso2 is string
+        && data.countryIso2.size() >= 2
+        && data.countryIso2.size() <= 8
+        && data.countryIso2.matches('^[A-Z]{2,4}$')
+        && data.dateLabel is string
+        && data.dateLabel.size() >= 1
+        && data.dateLabel.size() <= 32
+        && data.day is int && data.day >= 1 && data.day <= 30
+        && data.month is int && data.month >= 1 && data.month <= 12
+        && data.year is int && data.year >= 2026 && data.year <= 9999
+        && data.elapsedSeconds is int && data.elapsedSeconds >= 0
+        && data.money is int && data.money >= 0
+        && data.netIncome is int
+        && data.army is int && data.army >= 0
+        && data.pixels is int && data.pixels >= 0
+        && data.outcome is string
+        && data.outcome.size() <= 16
+        && data.outcome in ['none', 'victory', 'defeat']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCampaignSnapshot(data, userId, campaignId) {
+      return data.keys().hasAll([
+          'ownerId', 'campaignId', 'version', 'playerId', 'day', 'month', 'year',
+          'totalDays', 'elapsedSeconds', 'globalStability', 'globalTension',
+          'sandboxAfterVictory', 'outcome', 'nextEventDay', 'nextIdCounter',
+          'aiCursor', 'lastAiWarMonth', 'ownerGridRle', 'relationsBytes',
+          'treatiesBytes', 'truceMonthsBytes', 'countries', 'wars',
+          'invasions', 'chronicle', 'playerHistory', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'campaignId', 'version', 'playerId', 'day', 'month', 'year',
+          'totalDays', 'elapsedSeconds', 'globalStability', 'globalTension',
+          'sandboxAfterVictory', 'outcome', 'nextEventDay', 'nextIdCounter',
+          'aiCursor', 'lastAiWarMonth', 'ownerGridRle', 'relationsBytes',
+          'treatiesBytes', 'truceMonthsBytes', 'countries', 'wars',
+          'invasions', 'chronicle', 'playerHistory', 'pendingProposal', 'updatedAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId == userId
+        && data.ownerId == request.auth.uid
+        && data.campaignId is string
+        && data.campaignId == campaignId
+        && data.campaignId.size() <= 64
+        && data.campaignId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.version is int && data.version == 1
+        && data.playerId is int && data.playerId >= 0 && data.playerId < 195
+        && data.day is int && data.day >= 1 && data.day <= 30
+        && data.month is int && data.month >= 1 && data.month <= 12
+        && data.year is int && data.year >= 2026 && data.year <= 9999
+        && data.totalDays is int && data.totalDays >= 0
+        && data.elapsedSeconds is int && data.elapsedSeconds >= 0
+        && (data.globalStability is int || data.globalStability is float)
+        && data.globalStability >= 0 && data.globalStability <= 100
+        && (data.globalTension is int || data.globalTension is float)
+        && data.globalTension >= 0 && data.globalTension <= 100
+        && data.sandboxAfterVictory is bool
+        && data.outcome is string && data.outcome.size() <= 16 && data.outcome in ['none', 'victory', 'defeat']
+        && data.nextEventDay is int && data.nextEventDay >= 0
+        && data.nextIdCounter is int && data.nextIdCounter >= 1
+        && data.aiCursor is int && data.aiCursor >= 0 && data.aiCursor < 195
+        && data.lastAiWarMonth is int
+        && data.ownerGridRle is bytes && data.ownerGridRle.size() >= 4 && data.ownerGridRle.size() <= 500000
+        && data.relationsBytes is bytes && data.relationsBytes.size() == 38025
+        && data.treatiesBytes is bytes && data.treatiesBytes.size() == 38025
+        && data.truceMonthsBytes is bytes && data.truceMonthsBytes.size() == 76050
+        && data.countries is list && data.countries.size() == 195 && data.countries[0] is map
+        && data.wars is list && data.wars.size() <= 500 && (data.wars.size() == 0 || data.wars[0] is map)
+        && data.invasions is list && data.invasions.size() <= 200 && (data.invasions.size() == 0 || data.invasions[0] is map)
+        && data.chronicle is list && data.chronicle.size() <= 25 && (data.chronicle.size() == 0 || data.chronicle[0] is map)
+        && data.playerHistory is list && data.playerHistory.size() <= 60 && (data.playerHistory.size() == 0 || data.playerHistory[0] is map)
+        && (!('pendingProposal' in data) || (
+          data.pendingProposal is map
+          && data.pendingProposal.keys().hasAll(['id', 'fromId', 'type'])
+          && data.pendingProposal.keys().hasOnly(['id', 'fromId', 'type'])
+          && data.pendingProposal.id is int
+          && data.pendingProposal.fromId is int
+          && data.pendingProposal.type is string
+          && data.pendingProposal.type.size() <= 16
+          && data.pendingProposal.type in ['alliance', 'peace']
+        ))
+        && data.updatedAt is timestamp;
+    }
+
+    // 4. User Profile Rules (Strict PII Isolation)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Sync profile metadata
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'updatedAt'])
+          ||
+          // Action: Update last active campaign pointer
+          incoming().diff(existing()).affectedKeys().hasOnly(['lastCampaignId', 'updatedAt'])
+          ||
+          // Action: Full login profile + lastCampaignId update
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoUrl', 'lastCampaignId', 'updatedAt'])
+        );
+
+      allow delete: if false;
+
+      // 5. Campaign Metadata Subcollection
+      match /campaigns/{campaignId} {
+        allow get: if isValidId(userId)
+          && isValidId(campaignId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isValidId(userId)
+          && isOwner(userId)
+          && existing().ownerId == request.auth.uid;
+
+        allow create: if isValidId(userId)
+          && isValidId(campaignId)
+          && isOwner(userId)
+          && isValidCampaignMeta(incoming(), userId, campaignId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isValidId(userId)
+          && isValidId(campaignId)
+          && isOwner(userId)
+          && isValidCampaignMeta(incoming(), userId, campaignId)
+          && existing().outcome != 'defeat'
+          && incoming().ownerId == existing().ownerId
+          && incoming().campaignId == existing().campaignId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'dateLabel', 'day', 'month', 'year', 'elapsedSeconds',
+            'money', 'netIncome', 'army', 'pixels', 'outcome', 'updatedAt'
+          ]);
+
+        allow delete: if isValidId(userId)
+          && isValidId(campaignId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        // 6. Campaign Full Snapshot Subcollection
+        match /data/{snapshotId} {
+          allow get: if isValidId(userId)
+            && isValidId(campaignId)
+            && snapshotId == 'state'
+            && isOwner(userId)
+            && get(/databases/$(database)/documents/users/$(userId)/campaigns/$(campaignId)).data.ownerId == request.auth.uid;
+
+          allow list: if false;
+
+          allow create: if isValidId(userId)
+            && isValidId(campaignId)
+            && snapshotId == 'state'
+            && isOwner(userId)
+            && isValidCampaignSnapshot(incoming(), userId, campaignId)
+            && incoming().updatedAt == request.time
+            && existsAfter(/databases/$(database)/documents/users/$(userId)/campaigns/$(campaignId))
+            && getAfter(/databases/$(database)/documents/users/$(userId)/campaigns/$(campaignId)).data.ownerId == request.auth.uid;
+
+          allow update: if isValidId(userId)
+            && isValidId(campaignId)
+            && snapshotId == 'state'
+            && isOwner(userId)
+            && isValidCampaignSnapshot(incoming(), userId, campaignId)
+            && existing().outcome != 'defeat'
+            && incoming().ownerId == existing().ownerId
+            && incoming().campaignId == existing().campaignId
+            && incoming().updatedAt == request.time
+            && get(/databases/$(database)/documents/users/$(userId)/campaigns/$(campaignId)).data.ownerId == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'day', 'month', 'year', 'totalDays', 'elapsedSeconds',
+              'globalStability', 'globalTension', 'sandboxAfterVictory', 'outcome',
+              'nextEventDay', 'nextIdCounter', 'aiCursor', 'lastAiWarMonth',
+              'ownerGridRle', 'relationsBytes', 'treatiesBytes', 'truceMonthsBytes',
+              'countries', 'wars', 'invasions', 'chronicle', 'playerHistory',
+              'pendingProposal', 'updatedAt'
+            ]);
+
+          allow delete: if isValidId(userId)
+            && isValidId(campaignId)
+            && snapshotId == 'state'
+            && isOwner(userId)
+            && get(/databases/$(database)/documents/users/$(userId)/campaigns/$(campaignId)).data.ownerId == request.auth.uid;
+        }
+      }
+    }
+  }
+}

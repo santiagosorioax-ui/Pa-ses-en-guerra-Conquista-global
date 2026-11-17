@@ -1,0 +1,299 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private profile for an authenticated player, isolated by UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID matching the document ID."
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Player display name."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Verified user email address (private to owner)."
+        },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional avatar URL."
+        },
+        "lastCampaignId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Most recently saved campaign ID."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp."
+        }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "CampaignMeta": {
+      "title": "CampaignMeta",
+      "description": "Summary metadata for a player's saved campaign in Países en Guerra.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID."
+        },
+        "campaignId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Campaign document ID."
+        },
+        "countryId": {
+          "type": "integer",
+          "description": "Selected country index (0..194)."
+        },
+        "countryName": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "Display name of player's country."
+        },
+        "countryIso2": {
+          "type": "string",
+          "maxLength": 8,
+          "pattern": "^[A-Z]{2,4}$",
+          "description": "ISO2 flag code."
+        },
+        "dateLabel": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Formatted in-game date."
+        },
+        "day": {
+          "type": "integer"
+        },
+        "month": {
+          "type": "integer"
+        },
+        "year": {
+          "type": "integer"
+        },
+        "elapsedSeconds": {
+          "type": "integer"
+        },
+        "money": {
+          "type": "integer"
+        },
+        "netIncome": {
+          "type": "integer"
+        },
+        "army": {
+          "type": "integer"
+        },
+        "pixels": {
+          "type": "integer"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["none", "victory", "defeat"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "campaignId",
+        "countryId",
+        "countryName",
+        "countryIso2",
+        "dateLabel",
+        "day",
+        "month",
+        "year",
+        "elapsedSeconds",
+        "money",
+        "netIncome",
+        "army",
+        "pixels",
+        "outcome",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CampaignSnapshot": {
+      "title": "CampaignSnapshot",
+      "description": "Full serialized simulation state for resuming a campaign seamlessly.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "campaignId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "playerId": {
+          "type": "integer"
+        },
+        "day": {
+          "type": "integer"
+        },
+        "month": {
+          "type": "integer"
+        },
+        "year": {
+          "type": "integer"
+        },
+        "totalDays": {
+          "type": "integer"
+        },
+        "elapsedSeconds": {
+          "type": "integer"
+        },
+        "globalStability": {
+          "type": "number"
+        },
+        "globalTension": {
+          "type": "number"
+        },
+        "sandboxAfterVictory": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["none", "victory", "defeat"],
+          "maxLength": 16
+        },
+        "nextEventDay": {
+          "type": "integer"
+        },
+        "nextIdCounter": {
+          "type": "integer"
+        },
+        "aiCursor": {
+          "type": "integer"
+        },
+        "lastAiWarMonth": {
+          "type": "integer"
+        },
+        "ownerGridRle": {
+          "type": "string",
+          "format": "byte",
+          "description": "RLE-encoded Int16 territory ownership grid."
+        },
+        "relationsBytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "195x195 diplomatic relations matrix."
+        },
+        "treatiesBytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "195x195 treaty bitmask matrix."
+        },
+        "truceMonthsBytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "195x195 truce countdown matrix."
+        },
+        "countries": {
+          "type": "array",
+          "description": "Mutable state of all 195 countries."
+        },
+        "wars": {
+          "type": "array",
+          "description": "Active wars array."
+        },
+        "invasions": {
+          "type": "array",
+          "description": "Active naval landings array."
+        },
+        "chronicle": {
+          "type": "array",
+          "description": "Recent geopolitical feed entries."
+        },
+        "playerHistory": {
+          "type": "array",
+          "description": "Historical chart datapoints for the player's nation."
+        },
+        "pendingProposal": {
+          "type": "object",
+          "description": "Optional active diplomatic proposal from an AI nation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "campaignId",
+        "version",
+        "playerId",
+        "day",
+        "month",
+        "year",
+        "totalDays",
+        "elapsedSeconds",
+        "globalStability",
+        "globalTension",
+        "sandboxAfterVictory",
+        "outcome",
+        "nextEventDay",
+        "nextIdCounter",
+        "aiCursor",
+        "lastAiWarMonth",
+        "ownerGridRle",
+        "relationsBytes",
+        "treatiesBytes",
+        "truceMonthsBytes",
+        "countries",
+        "wars",
+        "invasions",
+        "chronicle",
+        "playerHistory",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated player profile document (strict owner-only access)."
+    },
+    "/users/{userId}/campaigns/{campaignId}": {
+      "schema": { "$ref": "#/entities/CampaignMeta" },
+      "description": "Saved campaign metadata entries belonging to the authenticated player."
+    },
+    "/users/{userId}/campaigns/{campaignId}/data/{snapshotId}": {
+      "schema": { "$ref": "#/entities/CampaignSnapshot" },
+      "description": "Full simulation snapshot stored at snapshotId='state' for resuming campaigns."
+    }
+  }
+}

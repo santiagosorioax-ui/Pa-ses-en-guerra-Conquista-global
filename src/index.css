@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "flag-icons/css/flag-icons.min.css";
+
+.flag-real.fi {
+  display: block;
+  flex-shrink: 0;
+  line-height: 1;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.flag-real-sm.fi {
+  width: 20px;
+  height: 15px;
+}
+
+.flag-real-md.fi {
+  width: 28px;
+  height: 21px;
+}
+
+.flag-real-lg.fi {
+  width: 48px;
+  height: 36px;
+}
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: #0b121e;
+    color: #f1f5f9;
+    user-select: none;
+  }
+}
+
+.font-pixel {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.font-mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom slim dark scrollbars for PC strategy panels */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
