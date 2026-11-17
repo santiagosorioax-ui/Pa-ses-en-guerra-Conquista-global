@@ -1,24 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Anchor, Coins, Handshake, Shield, Swords, X } from 'lucide-react';
+import { Anchor, Coins, Handshake, Shield, Swords, UserCheck, X } from 'lucide-react';
 import {
   ALLIANCE_REL_THRESHOLD,
   GIFT_MONEY_PER_REL,
   PORT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
-  buildPort,
   canReachToAttack,
-  declareWar,
   getEnemies,
   getRelation,
   hasCoast,
   hasTreaty,
-  makePeace,
-  proposeAlliance,
-  requestAllyHelp,
-  sendDiplomaticGift,
   type SimulationState,
 } from '../engine/gameSimulation';
+import type { GameActionPayload, GameActionResult } from '../engine/gameActions';
 import type { DeviceMode } from './DeviceModeScreen';
 import { PixelFlag } from './PixelFlag';
 
@@ -27,7 +22,7 @@ interface CountryActionPopupProps {
   sim: SimulationState;
   targetId: number;
   onClose: () => void;
-  onMutated: () => void;
+  onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
 }
 
 export function CountryActionPopup({
@@ -35,13 +30,14 @@ export function CountryActionPopup({
   sim,
   targetId,
   onClose,
-  onMutated,
+  onExecuteAction,
 }: CountryActionPopupProps) {
   const [feedback, setFeedback] = useState<{
     text: string;
     ok: boolean;
     needsPort?: boolean;
   } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setFeedback(null);
@@ -56,71 +52,44 @@ export function CountryActionPopup({
   const allied = hasTreaty(sim, player.id, target.id, TREATY_ALLIANCE);
   const playerAtWar = getEnemies(sim, player.id).length > 0;
   const reach = canReachToAttack(sim, player.id, target.id);
+  const humanOwner = sim.isMultiplayer ? sim.humanPlayers[target.id] : undefined;
+
+  const runAction = async (payload: GameActionPayload) => {
+    setBusy(true);
+    try {
+      const res = await onExecuteAction(payload);
+      setFeedback({
+        text: res.message,
+        ok: res.ok,
+        needsPort: res.needsPort,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleAttack = () => {
     if (atWar) {
-      makePeace(sim, player.id, target.id);
-      setFeedback({ text: `Has firmado la paz con ${target.seed.name}.`, ok: true });
-      onMutated();
-      return;
-    }
-
-    const res = declareWar(sim, player.id, target.id);
-    if (!res.ok) {
-      setFeedback({
-        text: res.error ?? 'No se puede declarar la guerra.',
-        ok: false,
-        needsPort: !reach.ok && reach.viaSea,
-      });
+      void runAction({ type: 'make_peace', targetId: target.id });
     } else {
-      setFeedback({
-        text: reach.viaSea
-          ? `¡Guerra declarada! Tu flota zarpó desde tu puerto hacia ${target.seed.name}.`
-          : `¡Guerra declarada contra ${target.seed.name}!`,
-        ok: true,
-      });
+      void runAction({ type: 'declare_war', targetId: target.id });
     }
-    onMutated();
   };
 
   const handleAlliance = () => {
-    const res = proposeAlliance(sim, player.id, target.id);
-    setFeedback({ text: res.reason, ok: res.accepted });
-    onMutated();
+    void runAction({ type: 'propose_alliance', targetId: target.id });
   };
 
   const handleRequestHelp = () => {
-    const res = requestAllyHelp(sim, player.id, target.id);
-    setFeedback({ text: res.reason, ok: res.accepted });
-    onMutated();
+    void runAction({ type: 'request_ally_help', allyId: target.id });
   };
 
   const handleBuildDirectionalPort = () => {
-    const err = buildPort(sim, player.id, target.id);
-    if (err) {
-      setFeedback({ text: err, ok: false });
-    } else {
-      setFeedback({
-        text: `Puerto construido orientado hacia ${target.seed.name}. Ya puedes atacar.`,
-        ok: true,
-        needsPort: false,
-      });
-    }
-    onMutated();
+    void runAction({ type: 'build_port', towardsId: target.id });
   };
 
   const handleSendMoney = (points: number) => {
-    const res = sendDiplomaticGift(sim, player.id, target.id, points);
-    if (!res.ok) {
-      setFeedback({ text: res.error ?? 'No se pudo enviar dinero.', ok: false });
-    } else {
-      const gained = res.gained ?? points;
-      setFeedback({
-        text: `Enviaste $${gained * GIFT_MONEY_PER_REL} a ${target.seed.name}. La relación subió +${gained} (${getRelation(sim, player.id, target.id)}/100).`,
-        ok: true,
-      });
-    }
-    onMutated();
+    void runAction({ type: 'send_gift', targetId: target.id, points });
   };
 
   const canBuildPort = hasCoast(sim, player.id);
@@ -151,9 +120,17 @@ export function CountryActionPopup({
             <div className="text-xs text-amber-300 font-medium truncate">
               Capital: {target.seed.capital}
             </div>
-            <div className="text-[11px] text-slate-400">
-              {target.seed.continent} · {(target.pixels * 100).toLocaleString('es-ES')} km²
+            <div className="text-[11px] text-slate-400 flex items-center gap-1.5 truncate">
+              <span>
+                {target.seed.continent} · {(target.pixels * 100).toLocaleString('es-ES')} km²
+              </span>
             </div>
+            {humanOwner && (
+              <div className="text-[11px] text-emerald-300 font-semibold flex items-center gap-1 mt-0.5 truncate">
+                <UserCheck className="w-3 h-3 shrink-0" />
+                <span className="truncate">Jugador: {humanOwner.displayName}</span>
+              </div>
+            )}
           </div>
         </div>
         <button
@@ -169,6 +146,10 @@ export function CountryActionPopup({
       {!target.alive ? (
         <div className="p-2.5 bg-red-950/40 border border-red-800/60 text-xs text-red-200">
           Este país ha sido conquistado por completo.
+        </div>
+      ) : !player.alive ? (
+        <div className="p-2.5 bg-amber-950/40 border border-amber-700/60 text-xs text-amber-200">
+          Tu país fue anexado. Recauda un ejército rebelde e inicia una rebelión para recuperar tu soberanía.
         </div>
       ) : (
         <>
@@ -213,7 +194,7 @@ export function CountryActionPopup({
                       : 'text-slate-200'
                 }`}
               >
-                {rel}/100 (Alianza ≥ {ALLIANCE_REL_THRESHOLD})
+                {rel}/100 ({humanOwner ? 'Acuerdo mutuo' : `Alianza ≥ ${ALLIANCE_REL_THRESHOLD}`})
               </span>
             </div>
 
@@ -225,14 +206,14 @@ export function CountryActionPopup({
                 <div className="flex items-center gap-1.5 font-mono-num">
                   <button
                     onClick={() => handleSendMoney(1)}
-                    disabled={rel >= 100}
+                    disabled={busy || rel >= 100}
                     className="px-2 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold cursor-pointer"
                   >
                     ${GIFT_MONEY_PER_REL} (+1)
                   </button>
                   <button
                     onClick={() => handleSendMoney(5)}
-                    disabled={rel >= 100}
+                    disabled={busy || rel >= 100}
                     className="px-2 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold cursor-pointer"
                   >
                     ${GIFT_MONEY_PER_REL * 5} (+5)
@@ -247,8 +228,9 @@ export function CountryActionPopup({
               <div>{reach.reason}</div>
               {canBuildPort && (
                 <button
+                  disabled={busy}
                   onClick={handleBuildDirectionalPort}
-                  className="w-full py-1.5 px-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-1.5 px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-semibold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Anchor className="w-3.5 h-3.5" />
                   <span>Construir Puerto hacia {target.seed.name} (${PORT_COST})</span>
@@ -280,8 +262,9 @@ export function CountryActionPopup({
             </button>
 
             <button
+              disabled={busy}
               onClick={handleAttack}
-              className={`py-2 px-2 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+              className={`py-2 px-2 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50 ${
                 atWar
                   ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
                   : 'bg-red-600 hover:bg-red-500 text-white'
@@ -290,7 +273,7 @@ export function CountryActionPopup({
               {atWar ? (
                 <>
                   <Handshake className="w-3.5 h-3.5" />
-                  <span>Firmar Paz</span>
+                  <span>{humanOwner ? 'Proponer Paz' : 'Firmar Paz'}</span>
                 </>
               ) : (
                 <>
@@ -302,8 +285,9 @@ export function CountryActionPopup({
 
             {allied && playerAtWar ? (
               <button
+                disabled={busy}
                 onClick={handleRequestHelp}
-                className="py-2 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
+                className="py-2 px-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
               >
                 <Shield className="w-3.5 h-3.5" />
                 <span>Pedir ayuda</span>
@@ -311,7 +295,7 @@ export function CountryActionPopup({
             ) : (
               <button
                 onClick={handleAlliance}
-                disabled={allied || atWar}
+                disabled={busy || allied || atWar}
                 className="py-2 px-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-45 disabled:hover:bg-sky-600 text-white font-bold text-xs flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap"
               >
                 <Shield className="w-3.5 h-3.5" />

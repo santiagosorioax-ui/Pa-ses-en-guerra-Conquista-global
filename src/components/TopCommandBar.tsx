@@ -29,6 +29,8 @@ interface TopCommandBarProps {
   onOpenTutorial: () => void;
   onSelectOwnCountry: () => void;
   onReturnToMenu: () => void;
+  roomCode?: string | null;
+  isRemoteGuest?: boolean;
 }
 
 export function TopCommandBar({
@@ -43,6 +45,8 @@ export function TopCommandBar({
   onOpenTutorial,
   onSelectOwnCountry,
   onReturnToMenu,
+  roomCode,
+  isRemoteGuest = false,
 }: TopCommandBarProps) {
   const player = sim.countries[sim.playerId];
   const speeds = [0, 1, 2];
@@ -69,27 +73,33 @@ export function TopCommandBar({
             </div>
           </button>
 
-          {/* Speed Pills */}
-          <div className="flex items-center bg-[#0B121E] border border-slate-800 p-0.5 shrink-0">
-            {speeds.map((s) => {
-              const active = speed === s;
-              return (
-                <button
-                  key={s}
-                  onClick={() => onSetSpeed(s)}
-                  className={`px-2 py-1 text-[11px] font-mono-num cursor-pointer ${
-                    active
-                      ? s === 0
-                        ? 'bg-red-500/25 text-red-300'
-                        : 'bg-amber-500 text-slate-950 font-bold'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  {s === 0 ? <Pause className="w-3 h-3" /> : `${s}x`}
-                </button>
-              );
-            })}
-          </div>
+          {/* Speed Pills / Live Room Badge */}
+          {isRemoteGuest ? (
+            <div className="px-2 py-1 bg-emerald-950/70 border border-emerald-600/60 text-[10px] font-mono-num text-emerald-300 shrink-0">
+              Sala {roomCode} · En vivo
+            </div>
+          ) : (
+            <div className="flex items-center bg-[#0B121E] border border-slate-800 p-0.5 shrink-0">
+              {speeds.map((s) => {
+                const active = speed === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => onSetSpeed(s)}
+                    className={`px-2 py-1 text-[11px] font-mono-num cursor-pointer ${
+                      active
+                        ? s === 0
+                          ? 'bg-red-500/25 text-red-300'
+                          : 'bg-amber-500 text-slate-950 font-bold'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {s === 0 ? <Pause className="w-3 h-3" /> : `${s}x`}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Right Compact Icons */}
           <div className="flex items-center gap-1 shrink-0">
@@ -224,41 +234,48 @@ export function TopCommandBar({
         </div>
       </div>
 
-      {/* Time, Cloud Save & PC Controls */}
+      {/* Time, Online Room & PC Controls */}
       <div className="flex items-center gap-2 shrink-0">
+        {roomCode && (
+          <div className="px-2 py-1 bg-emerald-950/70 border border-emerald-600/60 text-xs font-mono-num text-emerald-300 whitespace-nowrap">
+            Sala {roomCode}
+          </div>
+        )}
         <div className="px-2.5 py-1 bg-[#0B121E] border border-slate-800 text-xs font-mono-num text-slate-200 whitespace-nowrap">
           {formatFullDate(sim.day, sim.month, sim.year)}
         </div>
 
-        <div className="flex items-center bg-[#0B121E] border border-slate-800 p-0.5">
-          {speeds.map((s) => {
-            const active = speed === s;
-            return (
-              <button
-                key={s}
-                onClick={() => onSetSpeed(s)}
-                title={s === 0 ? 'Pausar (Espacio)' : `Velocidad ${s}x`}
-                className={`px-2 py-1 text-[11px] font-mono-num transition-colors cursor-pointer whitespace-nowrap ${
-                  active
-                    ? s === 0
-                      ? 'bg-red-500/25 text-red-300'
-                      : 'bg-amber-500 text-slate-950 font-bold'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {s === 0 ? (
-                  <Pause className="w-3 h-3" />
-                ) : s === 1 ? (
-                  <span className="flex items-center gap-0.5">
-                    <Play className="w-2.5 h-2.5 fill-current" />1x
-                  </span>
-                ) : (
-                  `${s}x`
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {!isRemoteGuest && (
+          <div className="flex items-center bg-[#0B121E] border border-slate-800 p-0.5">
+            {speeds.map((s) => {
+              const active = speed === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => onSetSpeed(s)}
+                  title={s === 0 ? 'Pausar (Espacio)' : `Velocidad ${s}x`}
+                  className={`px-2 py-1 text-[11px] font-mono-num transition-colors cursor-pointer whitespace-nowrap ${
+                    active
+                      ? s === 0
+                        ? 'bg-red-500/25 text-red-300'
+                        : 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {s === 0 ? (
+                    <Pause className="w-3 h-3" />
+                  ) : s === 1 ? (
+                    <span className="flex items-center gap-0.5">
+                      <Play className="w-2.5 h-2.5 fill-current" />1x
+                    </span>
+                  ) : (
+                    `${s}x`
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <PWAInstallButton compact />
 

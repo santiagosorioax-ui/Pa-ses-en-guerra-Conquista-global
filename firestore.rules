@@ -275,5 +275,277 @@ service cloud.firestore {
         }
       }
     }
+
+    // 7. Multiplayer Room Validation Helpers
+    function isValidRoomCode(code) {
+      return code is string && code.size() == 4 && code.matches('^[0-9]{4}$');
+    }
+
+    function isValidMultiplayerRoom(data, roomCode) {
+      return data.keys().hasAll(['roomCode', 'hostUid', 'hostName', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['roomCode', 'hostUid', 'hostName', 'status', 'winnerCountryId', 'createdAt', 'updatedAt'])
+        && data.roomCode is string
+        && data.roomCode == roomCode
+        && isValidRoomCode(data.roomCode)
+        && data.hostUid is string
+        && isValidId(data.hostUid)
+        && data.hostName is string
+        && data.hostName.size() >= 1
+        && data.hostName.size() <= 100
+        && data.status is string
+        && data.status.size() <= 16
+        && data.status in ['lobby', 'playing', 'finished']
+        && (!('winnerCountryId' in data) || data.winnerCountryId == null || (data.winnerCountryId is int && data.winnerCountryId >= 0 && data.winnerCountryId < 195))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomMember(data, roomCode, memberId) {
+      return data.keys().hasAll(['uid', 'roomCode', 'displayName', 'countryId', 'ready', 'isHost', 'joinedAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'roomCode', 'displayName', 'photoUrl', 'countryId', 'ready', 'isHost', 'joinedAt', 'updatedAt'])
+        && data.uid is string
+        && data.uid == memberId
+        && isValidId(data.uid)
+        && data.roomCode is string
+        && data.roomCode == roomCode
+        && isValidRoomCode(data.roomCode)
+        && data.displayName is string
+        && data.displayName.size() >= 1
+        && data.displayName.size() <= 100
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500))
+        && data.countryId is int
+        && data.countryId >= -1
+        && data.countryId < 195
+        && data.ready is bool
+        && data.isHost is bool
+        && data.joinedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomWorldState(data, roomCode) {
+      return data.keys().hasAll([
+          'roomCode', 'hostUid', 'version', 'tick', 'day', 'month', 'year',
+          'totalDays', 'elapsedSeconds', 'globalStability', 'globalTension',
+          'outcome', 'nextIdCounter', 'ownerGridRle', 'relationsBytes',
+          'treatiesBytes', 'truceMonthsBytes', 'countries', 'wars',
+          'invasions', 'chronicle', 'humanPlayers', 'diplomaticOffers', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'roomCode', 'hostUid', 'version', 'tick', 'day', 'month', 'year',
+          'totalDays', 'elapsedSeconds', 'globalStability', 'globalTension',
+          'outcome', 'winnerCountryId', 'nextIdCounter', 'ownerGridRle', 'relationsBytes',
+          'treatiesBytes', 'truceMonthsBytes', 'countries', 'wars',
+          'invasions', 'chronicle', 'humanPlayers', 'diplomaticOffers', 'updatedAt'
+        ])
+        && data.roomCode is string
+        && data.roomCode == roomCode
+        && isValidRoomCode(data.roomCode)
+        && data.hostUid is string
+        && isValidId(data.hostUid)
+        && data.version is int && data.version == 1
+        && data.tick is int && data.tick >= 0
+        && data.day is int && data.day >= 1 && data.day <= 30
+        && data.month is int && data.month >= 1 && data.month <= 12
+        && data.year is int && data.year >= 2026 && data.year <= 9999
+        && data.totalDays is int && data.totalDays >= 0
+        && data.elapsedSeconds is int && data.elapsedSeconds >= 0
+        && (data.globalStability is int || data.globalStability is float)
+        && data.globalStability >= 0 && data.globalStability <= 100
+        && (data.globalTension is int || data.globalTension is float)
+        && data.globalTension >= 0 && data.globalTension <= 100
+        && data.outcome is string && data.outcome.size() <= 16 && data.outcome in ['none', 'victory', 'defeat']
+        && (!('winnerCountryId' in data) || data.winnerCountryId == null || (data.winnerCountryId is int && data.winnerCountryId >= 0 && data.winnerCountryId < 195))
+        && data.nextIdCounter is int && data.nextIdCounter >= 1
+        && data.ownerGridRle is bytes && data.ownerGridRle.size() >= 4 && data.ownerGridRle.size() <= 500000
+        && data.relationsBytes is bytes && data.relationsBytes.size() == 38025
+        && data.treatiesBytes is bytes && data.treatiesBytes.size() == 38025
+        && data.truceMonthsBytes is bytes && data.truceMonthsBytes.size() == 76050
+        && data.countries is list && data.countries.size() == 195 && data.countries[0] is map
+        && data.wars is list && data.wars.size() <= 500 && (data.wars.size() == 0 || data.wars[0] is map)
+        && data.invasions is list && data.invasions.size() <= 200 && (data.invasions.size() == 0 || data.invasions[0] is map)
+        && data.chronicle is list && data.chronicle.size() <= 25 && (data.chronicle.size() == 0 || data.chronicle[0] is map)
+        && data.humanPlayers is map
+        && data.diplomaticOffers is list && data.diplomaticOffers.size() <= 32 && (data.diplomaticOffers.size() == 0 || data.diplomaticOffers[0] is map)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomAction(data, roomCode) {
+      return data.keys().hasAll(['roomCode', 'hostUid', 'senderUid', 'actorCountryId', 'payload', 'status', 'createdAt'])
+        && data.keys().hasOnly(['roomCode', 'hostUid', 'senderUid', 'actorCountryId', 'payload', 'status', 'createdAt', 'processedAt'])
+        && data.roomCode is string
+        && data.roomCode == roomCode
+        && isValidRoomCode(data.roomCode)
+        && data.hostUid is string
+        && isValidId(data.hostUid)
+        && data.senderUid is string
+        && isValidId(data.senderUid)
+        && data.actorCountryId is int
+        && data.actorCountryId >= 0
+        && data.actorCountryId < 195
+        && data.payload is map
+        && data.payload.keys().hasAll(['type'])
+        && data.payload.type is string
+        && data.payload.type.size() >= 1
+        && data.payload.type.size() <= 32
+        && data.status is string
+        && data.status.size() <= 16
+        && data.status in ['pending', 'processed']
+        && data.createdAt is timestamp
+        && (!('processedAt' in data) || data.processedAt is timestamp);
+    }
+
+    // 8. Multiplayer Rooms Collection (Google-verified users only)
+    match /rooms/{roomCode} {
+      allow get: if isVerified() && isValidRoomCode(roomCode);
+      allow list: if false;
+
+      allow create: if isVerified()
+        && isValidRoomCode(roomCode)
+        && isValidMultiplayerRoom(incoming(), roomCode)
+        && incoming().hostUid == request.auth.uid
+        && incoming().status == 'lobby'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidRoomCode(roomCode)
+        && isValidMultiplayerRoom(incoming(), roomCode)
+        && existing().hostUid == request.auth.uid
+        && incoming().hostUid == existing().hostUid
+        && incoming().roomCode == existing().roomCode
+        && incoming().hostName == existing().hostName
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'winnerCountryId', 'updatedAt'])
+        && (
+          (existing().status == 'lobby' && incoming().status == 'playing' && existsAfter(/databases/$(database)/documents/rooms/$(roomCode)/state/current))
+          ||
+          (existing().status == 'playing' && incoming().status == 'finished')
+        );
+
+      allow delete: if isVerified()
+        && isValidRoomCode(roomCode)
+        && existing().hostUid == request.auth.uid;
+
+      // Room Members Subcollection
+      match /members/{memberId} {
+        allow get: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(memberId)
+          && exists(/databases/$(database)/documents/rooms/$(roomCode));
+
+        allow list: if isVerified()
+          && isValidRoomCode(roomCode)
+          && existing().roomCode == roomCode;
+
+        allow create: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(memberId)
+          && memberId == request.auth.uid
+          && isValidRoomMember(incoming(), roomCode, memberId)
+          && incoming().joinedAt == request.time
+          && incoming().updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/rooms/$(roomCode))
+          && getAfter(/databases/$(database)/documents/rooms/$(roomCode)).data.status == 'lobby'
+          && (
+            (incoming().isHost == true && getAfter(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid)
+            ||
+            (incoming().isHost == false && getAfter(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid != request.auth.uid)
+          );
+
+        allow update: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(memberId)
+          && memberId == request.auth.uid
+          && isValidRoomMember(incoming(), roomCode, memberId)
+          && incoming().uid == existing().uid
+          && incoming().roomCode == existing().roomCode
+          && incoming().isHost == existing().isHost
+          && incoming().joinedAt == existing().joinedAt
+          && incoming().updatedAt == request.time
+          && get(/databases/$(database)/documents/rooms/$(roomCode)).data.status == 'lobby'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['countryId', 'ready', 'displayName', 'photoUrl', 'updatedAt']);
+
+        allow delete: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(memberId)
+          && (
+            memberId == request.auth.uid
+            || get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid
+          );
+      }
+
+      // Live World State Subcollection
+      match /state/{stateId} {
+        allow get: if isVerified()
+          && isValidRoomCode(roomCode)
+          && stateId == 'current'
+          && exists(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid));
+
+        allow list: if false;
+
+        allow create: if isVerified()
+          && isValidRoomCode(roomCode)
+          && stateId == 'current'
+          && isValidRoomWorldState(incoming(), roomCode)
+          && incoming().hostUid == request.auth.uid
+          && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid
+          && incoming().updatedAt == request.time;
+
+        allow update: if isVerified()
+          && isValidRoomCode(roomCode)
+          && stateId == 'current'
+          && isValidRoomWorldState(incoming(), roomCode)
+          && existing().hostUid == request.auth.uid
+          && incoming().hostUid == existing().hostUid
+          && incoming().roomCode == existing().roomCode
+          && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid
+          && incoming().updatedAt == request.time;
+
+        allow delete: if isVerified()
+          && isValidRoomCode(roomCode)
+          && stateId == 'current'
+          && existing().hostUid == request.auth.uid;
+      }
+
+      // Player Actions Subcollection
+      match /actions/{actionId} {
+        allow get: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(actionId)
+          && (existing().senderUid == request.auth.uid || existing().hostUid == request.auth.uid);
+
+        allow list: if isVerified()
+          && isValidRoomCode(roomCode)
+          && existing().roomCode == roomCode
+          && (existing().hostUid == request.auth.uid || existing().senderUid == request.auth.uid);
+
+        allow create: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(actionId)
+          && isValidRoomAction(incoming(), roomCode)
+          && incoming().senderUid == request.auth.uid
+          && incoming().status == 'pending'
+          && incoming().createdAt == request.time
+          && get(/databases/$(database)/documents/rooms/$(roomCode)).data.status == 'playing'
+          && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == incoming().hostUid
+          && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.countryId == incoming().actorCountryId;
+
+        allow update: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(actionId)
+          && existing().hostUid == request.auth.uid
+          && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid
+          && existing().status == 'pending'
+          && incoming().status == 'processed'
+          && incoming().processedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'processedAt']);
+
+        allow delete: if isVerified()
+          && isValidRoomCode(roomCode)
+          && isValidId(actionId)
+          && existing().hostUid == request.auth.uid;
+      }
+    }
   }
 }

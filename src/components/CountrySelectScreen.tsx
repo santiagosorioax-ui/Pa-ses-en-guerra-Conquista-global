@@ -31,6 +31,7 @@ interface CountrySelectScreenProps {
   onChangeDeviceMode: (mode: DeviceMode) => void;
   onStartCampaign: (countryId: number) => void;
   onResumeCampaign: (summary: SavedCampaignSummary) => Promise<void>;
+  onOpenOnline: () => void;
 }
 
 const CONTINENTS: Array<'Todos' | Continent> = [
@@ -47,6 +48,7 @@ export function CountrySelectScreen({
   onChangeDeviceMode,
   onStartCampaign,
   onResumeCampaign,
+  onOpenOnline,
 }: CountrySelectScreenProps) {
   const {
     user,
@@ -493,6 +495,16 @@ export function CountrySelectScreen({
           </h1>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
+              onClick={() => {
+                soundEngine.playClick();
+                onOpenOnline();
+              }}
+              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Online</span>
+            </button>
+            <button
               onClick={() => onChangeDeviceMode('desktop')}
               title="Cambiar a modo Computador"
               className="px-2 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-[11px] flex items-center gap-1 cursor-pointer"
@@ -752,6 +764,16 @@ export function CountrySelectScreen({
               className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs cursor-pointer"
             >
               Centrar Mundo
+            </button>
+            <button
+              onClick={() => {
+                soundEngine.playClick();
+                onOpenOnline();
+              }}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Online</span>
             </button>
             <button
               onClick={() => onChangeDeviceMode('mobile')}

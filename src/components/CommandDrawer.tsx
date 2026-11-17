@@ -24,9 +24,6 @@ import {
   PORT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
-  buildCity,
-  buildGoldMine,
-  buildPort,
   getAllies,
   getCityCost,
   getCountryDefensePct,
@@ -36,10 +33,9 @@ import {
   getTopRelations,
   hasCoast,
   hasTreaty,
-  makePeace,
-  recruitSoldiers,
   type SimulationState,
 } from '../engine/gameSimulation';
+import type { GameActionPayload, GameActionResult } from '../engine/gameActions';
 import { PixelFlag } from './PixelFlag';
 import { StatsChartsPanel } from './StatsChartsPanel';
 
@@ -54,7 +50,7 @@ interface CommandDrawerProps {
   onChangeTab: (tab: DrawerTab) => void;
   onSelectCountry: (id: number | null) => void;
   onJumpToCountry: (id: number) => void;
-  onMutated: () => void;
+  onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
   placingDefense: boolean;
   onTogglePlaceDefense: () => void;
   defenseFeedback: { text: string; ok: boolean } | null;
@@ -69,19 +65,25 @@ export function CommandDrawer({
   onChangeTab,
   onSelectCountry,
   onJumpToCountry,
-  onMutated,
+  onExecuteAction,
   placingDefense,
   onTogglePlaceDefense,
   defenseFeedback,
 }: CommandDrawerProps) {
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
   const player = sim.countries[sim.playerId];
   const inspected =
     selectedId !== null && selectedId !== sim.playerId ? sim.countries[selectedId] : null;
 
-  const notify = (text: string, ok = true) => {
-    setFeedback({ text, ok });
-    onMutated();
+  const runAction = async (payload: GameActionPayload) => {
+    setBusy(true);
+    try {
+      const res = await onExecuteAction(payload);
+      setFeedback({ text: res.message, ok: res.ok });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const tabs: Array<{ id: DrawerTab; label: string; icon: typeof Coins }> = [
@@ -163,6 +165,12 @@ export function CommandDrawer({
 
         {activeTab === 'manage' && (
           <>
+            {!player.alive && sim.isMultiplayer && (
+              <div className="p-3 bg-amber-950/60 border border-amber-500/60 text-xs text-amber-200 leading-relaxed">
+                Tu país fue anexado. Usa el panel de resistencia en el mapa para recaudar un ejército rebelde e iniciar una rebelión.
+              </div>
+            )}
+
             {/* Resumen Dinero y Ejército */}
             <div className="grid grid-cols-2 gap-2 bg-[#0B121E] border border-slate-800 p-3 font-mono-num">
               <div>
@@ -184,14 +192,9 @@ export function CommandDrawer({
             {/* Botón Ejército: gastar dinero en soldados */}
             <div className="space-y-1.5">
               <button
-                onClick={() => {
-                  const err = recruitSoldiers(sim, player.id);
-                  notify(
-                    err ?? `¡+${ARMY_RECRUIT_AMOUNT} soldados reclutados para tu Ejército!`,
-                    !err
-                  );
-                }}
-                className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm flex items-center justify-between transition-colors cursor-pointer"
+                disabled={busy || !player.alive}
+                onClick={() => void runAction({ type: 'recruit_soldiers' })}
+                className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-sm flex items-center justify-between transition-colors cursor-pointer"
               >
                 <span className="flex items-center gap-2">
                   <Swords className="w-4 h-4" />
@@ -213,11 +216,9 @@ export function CommandDrawer({
               </h3>
 
               <button
-                onClick={() => {
-                  const err = buildGoldMine(sim, player.id);
-                  notify(err ?? `Mina de Oro construida (+$${GOLD_MINE_INCOME}/seg).`, !err);
-                }}
-                className={`w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 border border-slate-800 flex items-center justify-between text-left cursor-pointer ${
+                disabled={busy || !player.alive}
+                onClick={() => void runAction({ type: 'build_gold_mine' })}
+                className={`w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 disabled:opacity-45 border border-slate-800 flex items-center justify-between text-left cursor-pointer ${
                   player.goldMinesBuiltThisMonth >= MAX_GOLD_MINES_PER_MONTH ? 'opacity-60' : ''
                 }`}
               >
@@ -241,11 +242,9 @@ export function CommandDrawer({
               </button>
 
               <button
-                onClick={() => {
-                  const err = buildCity(sim, player.id);
-                  notify(err ?? `Ciudad construida (+$${CITY_INCOME}/seg).`, !err);
-                }}
-                className={`w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 border border-slate-800 flex items-center justify-between text-left cursor-pointer ${
+                disabled={busy || !player.alive}
+                onClick={() => void runAction({ type: 'build_city' })}
+                className={`w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 disabled:opacity-45 border border-slate-800 flex items-center justify-between text-left cursor-pointer ${
                   player.citiesBuiltThisMonth >= MAX_CITIES_PER_MONTH ? 'opacity-60' : ''
                 }`}
               >
@@ -269,17 +268,8 @@ export function CommandDrawer({
               </button>
 
               <button
-                onClick={() => {
-                  const err = buildPort(sim, player.id, inspected?.id);
-                  notify(
-                    err ??
-                      (inspected
-                        ? `Puerto construido orientado hacia ${inspected.seed.name}.`
-                        : 'Puerto naval construido en tu costa.'),
-                    !err
-                  );
-                }}
-                disabled={!canBuildPort}
+                onClick={() => void runAction({ type: 'build_port', towardsId: inspected?.id })}
+                disabled={busy || !player.alive || !canBuildPort}
                 className="w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 disabled:opacity-45 border border-slate-800 flex items-center justify-between text-left cursor-pointer"
               >
                 <div className="flex items-center gap-2.5">
@@ -303,11 +293,12 @@ export function CommandDrawer({
               </button>
 
               <button
+                disabled={busy || !player.alive}
                 onClick={() => {
                   setFeedback(null);
                   onTogglePlaceDefense();
                 }}
-                className={`w-full p-2.5 border flex items-center justify-between text-left cursor-pointer transition-colors ${
+                className={`w-full p-2.5 border flex items-center justify-between text-left cursor-pointer transition-colors disabled:opacity-45 ${
                   placingDefense
                     ? 'bg-emerald-950/70 border-emerald-500'
                     : 'bg-[#0B121E] hover:bg-slate-800/80 border-slate-800'
@@ -378,11 +369,9 @@ export function CommandDrawer({
                           </div>
                         </button>
                         <button
-                          onClick={() => {
-                            makePeace(sim, player.id, eid);
-                            notify(`Paz firmada con ${enemy.seed.name}.`, true);
-                          }}
-                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 shrink-0 cursor-pointer"
+                          disabled={busy}
+                          onClick={() => void runAction({ type: 'make_peace', targetId: eid })}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-[11px] text-slate-200 border border-slate-700 shrink-0 cursor-pointer"
                         >
                           Paz
                         </button>
@@ -510,7 +499,14 @@ export function CommandDrawer({
                     >
                       <span className="flex items-center gap-2 min-w-0">
                         <PixelFlag country={c.seed} size="sm" />
-                        <span className="text-slate-200 truncate">{c.seed.name}</span>
+                        <span className="text-slate-200 truncate">
+                          {c.seed.name}
+                          {sim.isMultiplayer && sim.humanPlayers[c.id] && (
+                            <span className="ml-1 text-[10px] text-emerald-400">
+                              ({sim.humanPlayers[c.id].displayName})
+                            </span>
+                          )}
+                        </span>
                       </span>
                       <span className="font-mono-num text-[11px] shrink-0 ml-2">
                         <span className="text-slate-400">Ej. {Math.round(c.army)} · </span>

@@ -21,8 +21,16 @@ export function EventModal({
   onRestartMenu,
 }: EventModalProps) {
   if (sim.outcome !== 'none') {
-    const isVictory = sim.outcome === 'victory';
     const player = sim.countries[sim.playerId];
+    const winnerCountry =
+      sim.winnerCountryId !== null ? sim.countries[sim.winnerCountryId] : null;
+    const isMpVictory = sim.isMultiplayer && sim.winnerCountryId === sim.playerId;
+    const isVictory = sim.isMultiplayer ? isMpVictory : sim.outcome === 'victory';
+    const winnerPlayerSlot =
+      sim.isMultiplayer && sim.winnerCountryId !== null
+        ? sim.humanPlayers[sim.winnerCountryId]
+        : undefined;
+
     return (
       <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-3 sm:p-6">
         <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-[#111B2B] border border-slate-700 p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-2xl">
@@ -34,22 +42,34 @@ export function EventModal({
             )}
             <div>
               <h2 className="text-lg font-extrabold tracking-tight text-white">
-                {isVictory ? 'HEGEMONÍA GLOBAL ALCANZADA' : 'DERROTA NACIONAL'}
+                {sim.isMultiplayer
+                  ? isMpVictory
+                    ? '¡CONQUISTA GLOBAL (195 PAÍSES)!'
+                    : 'PARTIDA ONLINE FINALIZADA'
+                  : isVictory
+                    ? 'HEGEMONÍA GLOBAL ALCANZADA'
+                    : 'DERROTA NACIONAL'}
               </h2>
               <p className="text-xs text-slate-400">
-                {player.seed.name} · Año {sim.year}
+                {sim.isMultiplayer && winnerCountry
+                  ? `Ganador: ${winnerCountry.seed.name}${winnerPlayerSlot ? ` (${winnerPlayerSlot.displayName})` : ' (IA)'} · Año ${sim.year}`
+                  : `${player.seed.name} · Año ${sim.year}`}
               </p>
             </div>
           </div>
 
           <p className="text-sm text-slate-300 leading-relaxed">
-            {isVictory
-              ? `${player.seed.name} domina más del 35% del territorio habitable del planeta (${(player.pixels * 100).toLocaleString('es-ES')} km²) con $${Math.round(player.money)} de dinero y un ejército de ${Math.round(player.army)} soldados.`
-              : `El último territorio de ${player.seed.name} ha caído bajo control enemigo. Tu campaña estratégica ha concluido.`}
+            {sim.isMultiplayer
+              ? isMpVictory
+                ? `¡Has eliminado a los 195 países del planeta al mando de ${player.seed.name}! Victoria mundial total en el modo Online.`
+                : `${winnerCountry?.seed.name ?? 'Un imperio'}${winnerPlayerSlot ? ` dirigido por ${winnerPlayerSlot.displayName}` : ''} ha eliminado a todos los demás países del planeta.`
+              : isVictory
+                ? `${player.seed.name} domina más del 35% del territorio habitable del planeta (${(player.pixels * 100).toLocaleString('es-ES')} km²) con $${Math.round(player.money)} de dinero y un ejército de ${Math.round(player.army)} soldados.`
+                : `El último territorio de ${player.seed.name} ha caído bajo control enemigo. Tu campaña estratégica ha concluido.`}
           </p>
 
           <div className="flex items-center gap-3 pt-2">
-            {isVictory && (
+            {!sim.isMultiplayer && isVictory && (
               <button
                 onClick={onContinueSandbox}
                 className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold border border-slate-600 cursor-pointer"
@@ -62,7 +82,7 @@ export function EventModal({
               className="flex-1 py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Nueva Campaña</span>
+              <span>{sim.isMultiplayer ? 'Salir al Menú' : 'Nueva Campaña'}</span>
             </button>
           </div>
         </div>

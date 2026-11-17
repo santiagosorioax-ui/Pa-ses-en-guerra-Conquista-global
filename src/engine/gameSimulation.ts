@@ -67,6 +67,7 @@ export interface CountryState {
   bboxMaxX: number;
   bboxMinY: number;
   bboxMaxY: number;
+  annexedById: number | null;
 }
 
 export interface BattleParticle {
@@ -119,8 +120,28 @@ export interface PlayerHistoryPoint {
   km2: number;
 }
 
+export interface HumanPlayerSlot {
+  uid: string;
+  displayName: string;
+  photoUrl?: string;
+  countryId: number;
+  rebelMoney: number;
+  rebelArmy: number;
+}
+
+export interface HumanDiplomaticOffer {
+  id: number;
+  fromCountryId: number;
+  toCountryId: number;
+  type: 'alliance' | 'peace' | 'alliance_help';
+}
+
 export interface SimulationState {
   playerId: number;
+  isMultiplayer: boolean;
+  winnerCountryId: number | null;
+  humanPlayers: Record<number, HumanPlayerSlot>;
+  diplomaticOffers: HumanDiplomaticOffer[];
   day: number; // 1..30
   month: number; // 1..12
   year: number; // 2026+
@@ -175,6 +196,13 @@ export const MAX_CITIES_PER_MONTH = 5;
 export const DEFENSE_COST = 85;
 export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
+export const REBEL_RECRUIT_COST = 100;
+export const REBEL_RECRUIT_AMOUNT = 20;
+export const REBEL_INCOME_PER_SECOND = 120;
+
+export function isHumanCountry(sim: SimulationState, countryId: number): boolean {
+  return Boolean(sim.humanPlayers[countryId]);
+}
 
 export function computeInitialMoney(seedGdp: number, seedMilitary: number): number {
   return Math.round(80 + Math.sqrt(Math.max(0, seedGdp)) * 3.5 + seedMilitary * 0.8);
@@ -415,7 +443,20 @@ export function canReachToAttack(
   return { ok: true, viaSea: true };
 }
 
-export function createSimulation(playerId: number): SimulationState {
+export interface CreateSimulationOptions {
+  isMultiplayer?: boolean;
+  humanSlots?: Array<{
+    uid: string;
+    displayName: string;
+    photoUrl?: string;
+    countryId: number;
+  }>;
+}
+
+export function createSimulation(
+  playerId: number,
+  options?: CreateSimulationOptions
+): SimulationState {
   const mapData = buildWorldMapData();
   const ownerGrid = new Int16Array(mapData.ownerGrid);
 
@@ -452,6 +493,7 @@ export function createSimulation(playerId: number): SimulationState {
       bboxMaxX: 0,
       bboxMinY: MAP_H - 1,
       bboxMaxY: 0,
+      annexedById: null,
     };
   });
 
@@ -542,8 +584,28 @@ export function createSimulation(playerId: number): SimulationState {
     }
   }
 
+  const humanPlayers: Record<number, HumanPlayerSlot> = {};
+  if (options?.humanSlots) {
+    for (const s of options.humanSlots) {
+      if (s.countryId >= 0 && s.countryId < N_COUNTRIES) {
+        humanPlayers[s.countryId] = {
+          uid: s.uid,
+          displayName: s.displayName,
+          ...(s.photoUrl ? { photoUrl: s.photoUrl } : {}),
+          countryId: s.countryId,
+          rebelMoney: 0,
+          rebelArmy: 0,
+        };
+      }
+    }
+  }
+
   const sim: SimulationState = {
     playerId,
+    isMultiplayer: Boolean(options?.isMultiplayer),
+    winnerCountryId: null,
+    humanPlayers,
+    diplomaticOffers: [],
     day: 1,
     month: 1,
     year: 2026,
@@ -614,7 +676,9 @@ export function createSimulation(playerId: number): SimulationState {
   pushChronicle(
     sim,
     'event',
-    `Campaña iniciada al mando de ${countries[playerId].seed.name}.`,
+    sim.isMultiplayer
+      ? `¡Partida Online iniciada! Conquista los 195 países para ganar.`
+      : `Campaña iniciada al mando de ${countries[playerId].seed.name}.`,
     playerId
   );
 
@@ -724,7 +788,7 @@ export function proposeAlliance(
   sim: SimulationState,
   fromId: number,
   toId: number
-): { accepted: boolean; reason: string } {
+): { accepted: boolean; pendingHuman?: boolean; reason: string } {
   if (fromId === toId) return { accepted: false, reason: 'Mismo país.' };
   const from = sim.countries[fromId];
   const to = sim.countries[toId];
@@ -734,6 +798,35 @@ export function proposeAlliance(
   }
   if (hasTreaty(sim, fromId, toId, TREATY_ALLIANCE)) {
     return { accepted: false, reason: 'Ya existe una alianza activa.' };
+  }
+
+  // En modo multijugador, las propuestas entre humanos esperan confirmación del otro jugador
+  if (sim.isMultiplayer && isHumanCountry(sim, toId) && isHumanCountry(sim, fromId)) {
+    const alreadyPending = sim.diplomaticOffers.some(
+      (o) => o.fromCountryId === fromId && o.toCountryId === toId && o.type === 'alliance'
+    );
+    if (alreadyPending) {
+      return {
+        accepted: false,
+        pendingHuman: true,
+        reason: `Ya hay una solicitud de alianza pendiente con ${to.seed.name}.`,
+      };
+    }
+    sim.diplomaticOffers = [
+      ...sim.diplomaticOffers.slice(-31),
+      {
+        id: sim.nextIdCounter++,
+        fromCountryId: fromId,
+        toCountryId: toId,
+        type: 'alliance',
+      },
+    ];
+    soundEngine.playClick();
+    return {
+      accepted: false,
+      pendingHuman: true,
+      reason: `Propuesta de alianza enviada al jugador de ${to.seed.name}.`,
+    };
   }
 
   const rel = getRelation(sim, fromId, toId);
@@ -799,7 +892,7 @@ export function requestAllyHelp(
   sim: SimulationState,
   playerId: number,
   allyId: number
-): { accepted: boolean; reason: string } {
+): { accepted: boolean; pendingHuman?: boolean; reason: string } {
   const ally = sim.countries[allyId];
   const player = sim.countries[playerId];
   if (!ally || !ally.alive || !player.alive) {
@@ -821,6 +914,28 @@ export function requestAllyHelp(
     return {
       accepted: true,
       reason: `${ally.seed.name} ya está combatiendo junto a ti en todas tus guerras.`,
+    };
+  }
+
+  if (sim.isMultiplayer && isHumanCountry(sim, allyId)) {
+    const alreadyPending = sim.diplomaticOffers.some(
+      (o) => o.fromCountryId === playerId && o.toCountryId === allyId && o.type === 'alliance_help'
+    );
+    if (!alreadyPending) {
+      sim.diplomaticOffers = [
+        ...sim.diplomaticOffers.slice(-31),
+        {
+          id: sim.nextIdCounter++,
+          fromCountryId: playerId,
+          toCountryId: allyId,
+          type: 'alliance_help',
+        },
+      ];
+    }
+    return {
+      accepted: false,
+      pendingHuman: true,
+      reason: `Solicitud de ayuda militar enviada a ${ally.seed.name}.`,
     };
   }
 
@@ -910,6 +1025,314 @@ export function requestAllyHelp(
     accepted: true,
     reason: `¡${ally.seed.name} acepta ayudarte y declara la guerra a tus enemigos!`,
   };
+}
+
+export function requestHumanPeace(
+  sim: SimulationState,
+  fromId: number,
+  toId: number
+): { ok: boolean; pendingHuman?: boolean; reason: string } {
+  if (!hasTreaty(sim, fromId, toId, TREATY_WAR)) {
+    return { ok: false, reason: 'No están en guerra.' };
+  }
+  if (sim.isMultiplayer && isHumanCountry(sim, toId) && isHumanCountry(sim, fromId)) {
+    const exists = sim.diplomaticOffers.some(
+      (o) => o.fromCountryId === fromId && o.toCountryId === toId && o.type === 'peace'
+    );
+    if (!exists) {
+      sim.diplomaticOffers = [
+        ...sim.diplomaticOffers.slice(-31),
+        {
+          id: sim.nextIdCounter++,
+          fromCountryId: fromId,
+          toCountryId: toId,
+          type: 'peace',
+        },
+      ];
+    }
+    return {
+      ok: true,
+      pendingHuman: true,
+      reason: `Propuesta de paz enviada a ${sim.countries[toId].seed.name}.`,
+    };
+  }
+  makePeace(sim, fromId, toId);
+  return { ok: true, reason: `Paz firmada con ${sim.countries[toId].seed.name}.` };
+}
+
+export function respondToHumanDiplomaticOffer(
+  sim: SimulationState,
+  offerId: number,
+  responderCountryId: number,
+  accept: boolean
+) {
+  const offer = sim.diplomaticOffers.find(
+    (o) => o.id === offerId && o.toCountryId === responderCountryId
+  );
+  if (!offer) return;
+  sim.diplomaticOffers = sim.diplomaticOffers.filter((o) => o.id !== offerId);
+
+  const from = sim.countries[offer.fromCountryId];
+  const to = sim.countries[offer.toCountryId];
+  if (!from?.alive || !to?.alive) return;
+
+  if (!accept) {
+    addRelation(sim, offer.fromCountryId, offer.toCountryId, -4);
+    soundEngine.playClick();
+    return;
+  }
+
+  if (offer.type === 'peace') {
+    makePeace(sim, offer.fromCountryId, offer.toCountryId);
+  } else if (offer.type === 'alliance') {
+    setTreatyFlag(sim, offer.fromCountryId, offer.toCountryId, TREATY_ALLIANCE, true);
+    addRelation(sim, offer.fromCountryId, offer.toCountryId, 12);
+    pushChronicle(
+      sim,
+      'alliance',
+      `${from.seed.name} y ${to.seed.name} firman una Alianza Estratégica.`,
+      offer.fromCountryId
+    );
+    if (offer.fromCountryId === sim.playerId || offer.toCountryId === sim.playerId) {
+      soundEngine.playAllianceFormed();
+    }
+  } else if (offer.type === 'alliance_help') {
+    const enemies = getEnemies(sim, offer.fromCountryId);
+    let joined = false;
+    for (const eid of enemies) {
+      if (!hasTreaty(sim, offer.toCountryId, eid, TREATY_WAR)) {
+        setTreatyFlag(sim, offer.toCountryId, eid, TREATY_ALLIANCE, false);
+        setTreatyFlag(sim, offer.toCountryId, eid, TREATY_WAR, true);
+        sim.truceMonths[idxPair(offer.toCountryId, eid)] = 0;
+        sim.truceMonths[idxPair(eid, offer.toCountryId)] = 0;
+        to.capitalLostPenaltyDone = false;
+        sim.wars.push({ a: offer.toCountryId, b: eid, startTotalDays: sim.totalDays });
+        if (!sim.mapData.landNeighbors[offer.toCountryId].has(eid) && to.ports.length > 0) {
+          launchNavalLandingFromPort(sim, offer.toCountryId, eid);
+        }
+        joined = true;
+      }
+    }
+    if (joined) {
+      pushChronicle(
+        sim,
+        'alliance',
+        `¡${to.seed.name} entra en la guerra en apoyo de su aliado ${from.seed.name}!`,
+        offer.toCountryId
+      );
+      soundEngine.playAllyJoinedWar();
+    }
+  }
+}
+
+export function getRebellionOccupierId(sim: SimulationState, countryId: number): number | null {
+  const c = sim.countries[countryId];
+  if (!c || c.alive) return null;
+  if (c.annexedById !== null && sim.countries[c.annexedById]?.alive) {
+    return c.annexedById;
+  }
+
+  // Scan original homeland to identify who currently occupies it
+  const counts = new Map<number, number>();
+  const orig = sim.mapData.originalGrid;
+  const grid = sim.ownerGrid;
+  for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+    if (orig[idx] === countryId) {
+      const owner = grid[idx];
+      if (owner >= 0 && owner !== countryId && sim.countries[owner]?.alive) {
+        counts.set(owner, (counts.get(owner) ?? 0) + 1);
+      }
+    }
+  }
+  let bestId: number | null = null;
+  let bestCnt = -1;
+  for (const [oid, cnt] of counts.entries()) {
+    if (cnt > bestCnt) {
+      bestCnt = cnt;
+      bestId = oid;
+    }
+  }
+  if (bestId === null) {
+    const fallback = sim.countries.find((other) => other.alive && other.id !== countryId);
+    bestId = fallback ? fallback.id : null;
+  }
+  c.annexedById = bestId;
+  return bestId;
+}
+
+export function getRebellionStatus(sim: SimulationState, countryId: number) {
+  const slot = sim.humanPlayers[countryId];
+  const occupierId = getRebellionOccupierId(sim, countryId);
+  const occupier = occupierId !== null ? sim.countries[occupierId] : null;
+  const occupierArmy = occupier ? Math.max(10, Math.round(occupier.army)) : 0;
+  const requiredArmy = occupier ? Math.max(10, Math.ceil(occupierArmy * 0.5)) : 0;
+  const rebelArmy = slot ? Math.round(slot.rebelArmy) : 0;
+  const rebelMoney = slot ? Math.round(slot.rebelMoney) : 0;
+  return {
+    occupierId,
+    occupierName: occupier ? occupier.seed.name : 'Ocupante',
+    occupierArmy,
+    requiredArmy,
+    rebelArmy,
+    rebelMoney,
+    canRebel: occupier !== null && sim.outcome === 'none' && rebelArmy >= requiredArmy,
+  };
+}
+
+export function recruitRebelArmy(sim: SimulationState, countryId: number): string | null {
+  const c = sim.countries[countryId];
+  const slot = sim.humanPlayers[countryId];
+  if (!c || c.alive || !slot || sim.outcome !== 'none') {
+    return 'Solo puedes recaudar ejército rebelde mientras tu país esté anexado.';
+  }
+  if (slot.rebelMoney < REBEL_RECRUIT_COST) {
+    return `Necesitas $${REBEL_RECRUIT_COST} clandestinos para reclutar ${REBEL_RECRUIT_AMOUNT} rebeldes.`;
+  }
+  slot.rebelMoney -= REBEL_RECRUIT_COST;
+  slot.rebelArmy += REBEL_RECRUIT_AMOUNT;
+  if (countryId === sim.playerId) soundEngine.playRecruit();
+  return null;
+}
+
+export function startRebellion(
+  sim: SimulationState,
+  countryId: number
+): { ok: boolean; error?: string } {
+  const c = sim.countries[countryId];
+  const slot = sim.humanPlayers[countryId];
+  if (!c || c.alive || !slot) {
+    return { ok: false, error: 'Tu país ya es independiente.' };
+  }
+  if (sim.outcome !== 'none') {
+    return { ok: false, error: 'La partida ya ha terminado.' };
+  }
+
+  const status = getRebellionStatus(sim, countryId);
+  if (status.occupierId === null) {
+    return { ok: false, error: 'No hay país ocupante activo.' };
+  }
+  if (status.rebelArmy < status.requiredArmy) {
+    return {
+      ok: false,
+      error: `Necesitas al menos la mitad del ejército de ${status.occupierName} (${status.requiredArmy} soldados).`,
+    };
+  }
+
+  const occId = status.occupierId;
+  const occ = sim.countries[occId];
+  const grid = sim.ownerGrid;
+  const orig = sim.mapData.originalGrid;
+
+  // Collect homeland pixels currently held by the occupier
+  const homelandPixels: number[] = [];
+  for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+    if (orig[idx] === countryId && grid[idx] === occId) {
+      homelandPixels.push(idx);
+    }
+  }
+
+  // Fallback: closest pixels of occupier around original capital
+  if (homelandPixels.length === 0) {
+    const capX = sim.mapData.capitalX[countryId];
+    const capY = sim.mapData.capitalY[countryId];
+    const occPixels: Array<{ idx: number; dist: number }> = [];
+    for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+      if (grid[idx] === occId) {
+        const px = idx % MAP_W;
+        const py = Math.floor(idx / MAP_W);
+        occPixels.push({ idx, dist: (px - capX) ** 2 + (py - capY) ** 2 });
+      }
+    }
+    occPixels.sort((a, b) => a.dist - b.dist);
+    const takeCount = Math.max(
+      1,
+      Math.min(Math.max(4, c.initialPixels), Math.max(1, occPixels.length - 2))
+    );
+    for (let i = 0; i < takeCount; i++) {
+      homelandPixels.push(occPixels[i].idx);
+    }
+  }
+
+  // Keep at least 2 pixels for occupier if possible so both fight cleanly
+  const maxTake = Math.max(1, occ.pixels - 2);
+  const finalTake = homelandPixels.slice(0, Math.min(homelandPixels.length, maxTake));
+  if (finalTake.length === 0) {
+    return { ok: false, error: 'No hay suficiente territorio ocupable para rebelarse.' };
+  }
+
+  for (const idx of finalTake) {
+    grid[idx] = countryId;
+  }
+
+  // Recompute pixel counts & bounding boxes for both countries accurately
+  c.pixels = 0;
+  c.bboxMinX = MAP_W - 1;
+  c.bboxMaxX = 0;
+  c.bboxMinY = MAP_H - 1;
+  c.bboxMaxY = 0;
+  occ.pixels = 0;
+  occ.bboxMinX = MAP_W - 1;
+  occ.bboxMaxX = 0;
+  occ.bboxMinY = MAP_H - 1;
+  occ.bboxMaxY = 0;
+
+  let bestCapIdx = finalTake[0];
+  let bestCapDist = Infinity;
+  const origCapX = sim.mapData.capitalX[countryId];
+  const origCapY = sim.mapData.capitalY[countryId];
+
+  for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+    const id = grid[idx];
+    if (id !== countryId && id !== occId) continue;
+    const px = idx % MAP_W;
+    const py = Math.floor(idx / MAP_W);
+    const targetCountry = id === countryId ? c : occ;
+    targetCountry.pixels++;
+    if (px < targetCountry.bboxMinX) targetCountry.bboxMinX = px;
+    if (px > targetCountry.bboxMaxX) targetCountry.bboxMaxX = px;
+    if (py < targetCountry.bboxMinY) targetCountry.bboxMinY = py;
+    if (py > targetCountry.bboxMaxY) targetCountry.bboxMaxY = py;
+    if (id === countryId) {
+      const d = (px - origCapX) ** 2 + (py - origCapY) ** 2;
+      if (d < bestCapDist) {
+        bestCapDist = d;
+        bestCapIdx = idx;
+      }
+    }
+  }
+
+  c.alive = c.pixels > 0;
+  c.annexedById = null;
+  c.capitalX = bestCapIdx % MAP_W;
+  c.capitalY = Math.floor(bestCapIdx / MAP_W);
+  c.capitalLostPenaltyDone = false;
+  c.army = Math.max(10, Math.round(slot.rebelArmy));
+  c.money = Math.max(300, Math.round(slot.rebelMoney));
+  slot.rebelArmy = 0;
+  slot.rebelMoney = 0;
+  sim.dirtyPixels = true;
+
+  // Relocate occupier's capital if rebel took it
+  relocateCapitalIfNeeded(sim, occ);
+
+  // Establish immediate War of Independence
+  sim.mapData.landNeighbors[countryId].add(occId);
+  sim.mapData.landNeighbors[occId].add(countryId);
+  setTreatyFlag(sim, countryId, occId, TREATY_ALLIANCE, false);
+  setTreatyFlag(sim, countryId, occId, TREATY_WAR, true);
+  sim.truceMonths[idxPair(countryId, occId)] = 0;
+  sim.truceMonths[idxPair(occId, countryId)] = 0;
+  setRelation(sim, countryId, occId, 10);
+  sim.wars.push({ a: countryId, b: occId, startTotalDays: sim.totalDays });
+
+  pushChronicle(
+    sim,
+    'war',
+    `¡REBELIÓN! ${c.seed.name} se independiza de ${occ.seed.name} con ${c.army} soldados.`,
+    countryId
+  );
+  soundEngine.playWarDeclared();
+  return { ok: true };
 }
 
 export function respondToPendingProposal(sim: SimulationState, accept: boolean) {
@@ -1166,6 +1589,18 @@ export function stepSimulationSecond(sim: SimulationState) {
     soundEngine.playMoneyEarned(true);
   }
 
+  // Underground rebellion income for annexed human players in multiplayer
+  if (sim.isMultiplayer && sim.outcome === 'none') {
+    for (const key of Object.keys(sim.humanPlayers)) {
+      const cid = Number(key);
+      const slot = sim.humanPlayers[cid];
+      const country = sim.countries[cid];
+      if (slot && country && !country.alive) {
+        slot.rebelMoney += REBEL_INCOME_PER_SECOND;
+      }
+    }
+  }
+
   if (sim.elapsedSeconds <= 4 || sim.elapsedSeconds % 3 === 0) {
     const p = sim.countries[sim.playerId];
     const nextPoint: PlayerHistoryPoint = {
@@ -1373,6 +1808,14 @@ function processFrontlineBattles(sim: SimulationState) {
     if (!a.alive || !b.alive) continue;
 
     if (pairs.length === 0) {
+      if (a.pixels <= 0) {
+        annexedThisTick.push({ loser: aId, winner: bId });
+        continue;
+      }
+      if (b.pixels <= 0) {
+        annexedThisTick.push({ loser: bId, winner: aId });
+        continue;
+      }
       // Si ya solo quedan pocos píxeles aislados tras perder la mayor parte del país, capitula por completo
       if (a.pixels <= 4 && (a.capitalLostPenaltyDone || a.pixels < a.initialPixels) && b.army >= a.army * 0.65) {
         annexedThisTick.push({ loser: aId, winner: bId });
@@ -1514,6 +1957,21 @@ function processFrontlineBattles(sim: SimulationState) {
     l.pixels = 0;
     l.ports = [];
     l.defenses = [];
+    l.annexedById = winner;
+
+    // Re-point any previously annexed nations whose occupier was `loser`
+    for (const other of sim.countries) {
+      if (!other.alive && other.annexedById === loser) {
+        other.annexedById = winner;
+      }
+    }
+
+    // Seed starter rebellion funds for annexed human players in multiplayer
+    if (sim.isMultiplayer && sim.humanPlayers[loser]) {
+      const slot = sim.humanPlayers[loser];
+      slot.rebelMoney = Math.max(slot.rebelMoney, 300);
+      slot.rebelArmy = Math.max(slot.rebelArmy, 20);
+    }
 
     w.money += Math.round(l.money * 0.4);
     w.goldMines += Math.max(0, Math.floor(l.goldMines * 0.5));
@@ -1541,17 +1999,33 @@ function processFrontlineBattles(sim: SimulationState) {
       soundEngine.playAnnexation(false);
     }
 
-    if (loser === sim.playerId && !sim.sandboxAfterVictory) {
+    if (!sim.isMultiplayer && loser === sim.playerId && !sim.sandboxAfterVictory) {
       sim.outcome = 'defeat';
     }
   }
 
   if (sim.outcome === 'none' && !sim.sandboxAfterVictory) {
-    const player = sim.countries[sim.playerId];
-    let totalLand = 0;
-    for (const c of sim.countries) totalLand += c.pixels;
-    if (totalLand > 0 && player.pixels / totalLand >= 0.35) {
-      sim.outcome = 'victory';
+    if (sim.isMultiplayer) {
+      let aliveCount = 0;
+      let lastAliveId = -1;
+      for (const c of sim.countries) {
+        if (c.alive) {
+          aliveCount++;
+          lastAliveId = c.id;
+        }
+      }
+      if (aliveCount === 1 && lastAliveId >= 0) {
+        sim.outcome = 'victory';
+        sim.winnerCountryId = lastAliveId;
+      }
+    } else {
+      const player = sim.countries[sim.playerId];
+      let totalLand = 0;
+      for (const c of sim.countries) totalLand += c.pixels;
+      if (totalLand > 0 && player.pixels / totalLand >= 0.35) {
+        sim.outcome = 'victory';
+        sim.winnerCountryId = sim.playerId;
+      }
     }
   }
 }
@@ -1626,7 +2100,17 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       const enemy = sim.countries[eid];
       const losingBadly = c.pixels < c.initialPixels * 0.6 || c.army < enemy.army * 0.45;
       if (duration > 130 && losingBadly && Math.random() < 0.35) {
-        if (eid === sim.playerId) {
+        if (sim.isMultiplayer && isHumanCountry(sim, eid)) {
+          const exists = sim.diplomaticOffers.some(
+            (o) => o.fromCountryId === c.id && o.toCountryId === eid && o.type === 'peace'
+          );
+          if (!exists) {
+            sim.diplomaticOffers = [
+              ...sim.diplomaticOffers.slice(-31),
+              { id: sim.nextIdCounter++, fromCountryId: c.id, toCountryId: eid, type: 'peace' },
+            ];
+          }
+        } else if (eid === sim.playerId) {
           if (!sim.pendingProposal) {
             sim.pendingProposal = { id: sim.nextIdCounter++, fromId: c.id, type: 'peace' };
           }
@@ -1659,6 +2143,20 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
 
   // Form Strategic Alliances
   if (newRel >= ALLIANCE_REL_THRESHOLD && !hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE) && getAllies(sim, c.id).length < 4 && Math.random() < 0.4) {
+    if (sim.isMultiplayer && isHumanCountry(sim, targetId)) {
+      if (Math.random() < 0.25) {
+        const exists = sim.diplomaticOffers.some(
+          (o) => o.fromCountryId === c.id && o.toCountryId === targetId && o.type === 'alliance'
+        );
+        if (!exists) {
+          sim.diplomaticOffers = [
+            ...sim.diplomaticOffers.slice(-31),
+            { id: sim.nextIdCounter++, fromCountryId: c.id, toCountryId: targetId, type: 'alliance' },
+          ];
+        }
+      }
+      return;
+    }
     if (targetId === sim.playerId) {
       if (!sim.pendingProposal && Math.random() < 0.25) {
         sim.pendingProposal = { id: sim.nextIdCounter++, fromId: c.id, type: 'alliance' };
@@ -1697,7 +2195,7 @@ function runAiPulse(sim: SimulationState) {
     sim.aiCursor = (sim.aiCursor + 1) % N_COUNTRIES;
     scanned++;
     const c = sim.countries[id];
-    if (!c.alive || id === sim.playerId) continue;
+    if (!c.alive || id === sim.playerId || isHumanCountry(sim, id)) continue;
     runAiAgentDecision(sim, c);
     processed++;
   }
@@ -1716,11 +2214,13 @@ function triggerHistoricalEvent(sim: SimulationState) {
     );
   }
   pushChronicle(sim, 'event', `Evento Histórico: ${template.title}.`);
-  sim.activeEvent = {
-    template,
-    dateLabel: formatDate(sim.month, sim.year),
-  };
-  soundEngine.playEvent();
+  if (!sim.isMultiplayer) {
+    sim.activeEvent = {
+      template,
+      dateLabel: formatDate(sim.month, sim.year),
+    };
+    soundEngine.playEvent();
+  }
 }
 
 export function resolveEventChoice(sim: SimulationState, choice: EventChoice) {

@@ -7,13 +7,15 @@ import {
   type ChronicleEntry,
   type CountryState,
   type DefenseCoord,
+  type HumanDiplomaticOffer,
+  type HumanPlayerSlot,
   type NavalInvasion,
   type PendingDiplomaticProposal,
   type PlayerHistoryPoint,
   type PortCoord,
   type SimulationState,
 } from './gameSimulation';
-import { MAP_H, MAP_W, TOTAL_PIXELS, buildWorldMapData } from './mapRasterizer';
+import { MAP_H, MAP_W, TOTAL_PIXELS, buildWorldMapData, type WorldMapData } from './mapRasterizer';
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
@@ -42,6 +44,7 @@ export interface SerializedCountry {
   bboxMaxX: number;
   bboxMinY: number;
   bboxMaxY: number;
+  annexedById?: number | null;
 }
 
 export interface SerializedCampaignData {
@@ -72,6 +75,33 @@ export interface SerializedCampaignData {
   chronicle: ChronicleEntry[];
   playerHistory: PlayerHistoryPoint[];
   pendingProposal?: PendingDiplomaticProposal;
+}
+
+export interface RoomWorldStatePayload {
+  roomCode: string;
+  hostUid: string;
+  version: number;
+  tick: number;
+  day: number;
+  month: number;
+  year: number;
+  totalDays: number;
+  elapsedSeconds: number;
+  globalStability: number;
+  globalTension: number;
+  outcome: 'none' | 'victory' | 'defeat';
+  winnerCountryId: number | null;
+  nextIdCounter: number;
+  ownerGridRle: Bytes;
+  relationsBytes: Bytes;
+  treatiesBytes: Bytes;
+  truceMonthsBytes: Bytes;
+  countries: SerializedCountry[];
+  wars: Array<{ a: number; b: number; startTotalDays: number }>;
+  invasions: NavalInvasion[];
+  chronicle: ChronicleEntry[];
+  humanPlayers: Record<string, HumanPlayerSlot>;
+  diplomaticOffers: HumanDiplomaticOffer[];
 }
 
 export function encodeOwnerGridRle(ownerGrid: Int16Array): Uint8Array {
@@ -160,12 +190,8 @@ export function buildCampaignMetaPayload(
   };
 }
 
-export function buildCampaignSnapshotPayload(
-  uid: string,
-  campaignId: string,
-  sim: SimulationState
-): SerializedCampaignData {
-  const serializedCountries: SerializedCountry[] = sim.countries.map((c) => ({
+function serializeCountries(sim: SimulationState): SerializedCountry[] {
+  return sim.countries.map((c) => ({
     id: c.id,
     alive: c.alive,
     pixels: Math.max(0, Math.round(c.pixels)),
@@ -190,8 +216,81 @@ export function buildCampaignSnapshotPayload(
     bboxMaxX: c.bboxMaxX,
     bboxMinY: c.bboxMinY,
     bboxMaxY: c.bboxMaxY,
+    annexedById: c.annexedById ?? null,
   }));
+}
 
+function recomputeLandNeighborsFromGrid(mapData: WorldMapData, ownerGrid: Int16Array) {
+  for (let i = 0; i < N_COUNTRIES; i++) {
+    mapData.landNeighbors[i].clear();
+  }
+  for (let y = 0; y < MAP_H; y++) {
+    const row = y * MAP_W;
+    for (let x = 0; x < MAP_W; x++) {
+      const id = ownerGrid[row + x];
+      if (id < 0) continue;
+      if (x + 1 < MAP_W) {
+        const r = ownerGrid[row + x + 1];
+        if (r >= 0 && r !== id) {
+          mapData.landNeighbors[id].add(r);
+          mapData.landNeighbors[r].add(id);
+        }
+      }
+      if (y + 1 < MAP_H) {
+        const d = ownerGrid[row + x + MAP_W];
+        if (d >= 0 && d !== id) {
+          mapData.landNeighbors[id].add(d);
+          mapData.landNeighbors[d].add(id);
+        }
+      }
+    }
+  }
+}
+
+function hydrateCountries(
+  rawCountries: SerializedCountry[],
+  mapData: WorldMapData
+): CountryState[] {
+  return rawCountries.map((sc, idx) => {
+    const seed = COUNTRIES_195[idx];
+    return {
+      id: idx,
+      seed,
+      alive: sc.alive,
+      pixels: sc.pixels,
+      initialPixels: mapData.initialPixelCounts[idx] || sc.pixels,
+      capitalX: sc.capitalX,
+      capitalY: sc.capitalY,
+      capitalLostPenaltyDone: sc.capitalLostPenaltyDone,
+      money: sc.money,
+      netIncome: sc.netIncome,
+      monthlyIncomeBonus: sc.monthlyIncomeBonus,
+      army: sc.army,
+      goldMines: sc.goldMines,
+      cities: sc.cities,
+      goldMinePurchases: sc.goldMinePurchases,
+      cityPurchases: sc.cityPurchases,
+      goldMinesBuiltThisMonth: sc.goldMinesBuiltThisMonth,
+      citiesBuiltThisMonth: sc.citiesBuiltThisMonth,
+      ports: (sc.ports ?? []).map((p) => ({ ...p })),
+      defenses: (sc.defenses ?? []).map((d) => ({ ...d })),
+      aggressiveExpansion: sc.aggressiveExpansion,
+      aiDoctrine: sc.aiDoctrine,
+      color: seed.color,
+      bboxMinX: sc.bboxMinX,
+      bboxMaxX: sc.bboxMaxX,
+      bboxMinY: sc.bboxMinY,
+      bboxMaxY: sc.bboxMaxY,
+      annexedById: sc.annexedById ?? null,
+    };
+  });
+}
+
+export function buildCampaignSnapshotPayload(
+  uid: string,
+  campaignId: string,
+  sim: SimulationState
+): SerializedCampaignData {
   const payload: SerializedCampaignData = {
     ownerId: uid,
     campaignId,
@@ -214,7 +313,7 @@ export function buildCampaignSnapshotPayload(
     relationsBytes: Bytes.fromUint8Array(sim.relations),
     treatiesBytes: Bytes.fromUint8Array(sim.treaties),
     truceMonthsBytes: Bytes.fromUint8Array(int16ArrayToUint8(sim.truceMonths)),
-    countries: serializedCountries,
+    countries: serializeCountries(sim),
     wars: sim.wars.slice(0, 500).map((w) => ({
       a: w.a,
       b: w.b,
@@ -254,68 +353,16 @@ export function restoreSimulationFromSnapshot(
     N_COUNTRIES * N_COUNTRIES
   );
 
-  // Recompute dynamic land neighbors from restored ownerGrid
-  for (let i = 0; i < N_COUNTRIES; i++) {
-    mapData.landNeighbors[i].clear();
-  }
-  for (let y = 0; y < MAP_H; y++) {
-    const row = y * MAP_W;
-    for (let x = 0; x < MAP_W; x++) {
-      const id = ownerGrid[row + x];
-      if (id < 0) continue;
-      if (x + 1 < MAP_W) {
-        const r = ownerGrid[row + x + 1];
-        if (r >= 0 && r !== id) {
-          mapData.landNeighbors[id].add(r);
-          mapData.landNeighbors[r].add(id);
-        }
-      }
-      if (y + 1 < MAP_H) {
-        const d = ownerGrid[row + x + MAP_W];
-        if (d >= 0 && d !== id) {
-          mapData.landNeighbors[id].add(d);
-          mapData.landNeighbors[d].add(id);
-        }
-      }
-    }
-  }
+  recomputeLandNeighborsFromGrid(mapData, ownerGrid);
 
-  const rawCountries = raw.countries as SerializedCountry[];
-  const countries: CountryState[] = rawCountries.map((sc, idx) => {
-    const seed = COUNTRIES_195[idx];
-    return {
-      id: idx,
-      seed,
-      alive: sc.alive,
-      pixels: sc.pixels,
-      initialPixels: mapData.initialPixelCounts[idx] || sc.pixels,
-      capitalX: sc.capitalX,
-      capitalY: sc.capitalY,
-      capitalLostPenaltyDone: sc.capitalLostPenaltyDone,
-      money: sc.money,
-      netIncome: sc.netIncome,
-      monthlyIncomeBonus: sc.monthlyIncomeBonus,
-      army: sc.army,
-      goldMines: sc.goldMines,
-      cities: sc.cities,
-      goldMinePurchases: sc.goldMinePurchases,
-      cityPurchases: sc.cityPurchases,
-      goldMinesBuiltThisMonth: sc.goldMinesBuiltThisMonth,
-      citiesBuiltThisMonth: sc.citiesBuiltThisMonth,
-      ports: (sc.ports ?? []).map((p) => ({ ...p })),
-      defenses: (sc.defenses ?? []).map((d) => ({ ...d })),
-      aggressiveExpansion: sc.aggressiveExpansion,
-      aiDoctrine: sc.aiDoctrine,
-      color: seed.color,
-      bboxMinX: sc.bboxMinX,
-      bboxMaxX: sc.bboxMaxX,
-      bboxMinY: sc.bboxMinY,
-      bboxMaxY: sc.bboxMaxY,
-    };
-  });
+  const countries = hydrateCountries(raw.countries as SerializedCountry[], mapData);
 
   return {
     playerId: Number(raw.playerId),
+    isMultiplayer: false,
+    winnerCountryId: null,
+    humanPlayers: {},
+    diplomaticOffers: [],
     day: Number(raw.day),
     month: Number(raw.month),
     year: Number(raw.year),
@@ -345,5 +392,159 @@ export function restoreSimulationFromSnapshot(
     nextIdCounter: Number(raw.nextIdCounter),
     aiCursor: Number(raw.aiCursor),
     lastAiWarMonth: Number(raw.lastAiWarMonth),
+  };
+}
+
+export function buildRoomWorldStatePayload(
+  roomCode: string,
+  hostUid: string,
+  sim: SimulationState,
+  tick: number
+): RoomWorldStatePayload {
+  const humanPlayers: Record<string, HumanPlayerSlot> = {};
+  for (const [k, slot] of Object.entries(sim.humanPlayers)) {
+    humanPlayers[String(k)] = {
+      uid: slot.uid,
+      displayName: slot.displayName,
+      ...(slot.photoUrl ? { photoUrl: slot.photoUrl } : {}),
+      countryId: slot.countryId,
+      rebelMoney: Math.max(0, Math.round(slot.rebelMoney)),
+      rebelArmy: Math.max(0, Math.round(slot.rebelArmy)),
+    };
+  }
+
+  return {
+    roomCode,
+    hostUid,
+    version: SNAPSHOT_SCHEMA_VERSION,
+    tick: Math.max(0, Math.round(tick)),
+    day: sim.day,
+    month: sim.month,
+    year: sim.year,
+    totalDays: sim.totalDays,
+    elapsedSeconds: Math.max(0, Math.round(sim.elapsedSeconds)),
+    globalStability: Math.max(0, Math.min(100, sim.globalStability)),
+    globalTension: Math.max(0, Math.min(100, sim.globalTension)),
+    outcome: sim.outcome,
+    winnerCountryId: sim.winnerCountryId ?? null,
+    nextIdCounter: Math.max(1, sim.nextIdCounter),
+    ownerGridRle: Bytes.fromUint8Array(encodeOwnerGridRle(sim.ownerGrid)),
+    relationsBytes: Bytes.fromUint8Array(sim.relations),
+    treatiesBytes: Bytes.fromUint8Array(sim.treaties),
+    truceMonthsBytes: Bytes.fromUint8Array(int16ArrayToUint8(sim.truceMonths)),
+    countries: serializeCountries(sim),
+    wars: sim.wars.slice(0, 500).map((w) => ({
+      a: w.a,
+      b: w.b,
+      startTotalDays: w.startTotalDays,
+    })),
+    invasions: sim.invasions.slice(0, 200).map((inv) => ({ ...inv })),
+    chronicle: sim.chronicle.slice(0, 25).map((entry) => ({ ...entry })),
+    humanPlayers,
+    diplomaticOffers: sim.diplomaticOffers.slice(-32).map((o) => ({ ...o })),
+  };
+}
+
+export function restoreRoomWorldState(
+  raw: Record<string, unknown>,
+  myCountryId: number,
+  cachedMapData?: WorldMapData,
+  prevHistory: PlayerHistoryPoint[] = []
+): SimulationState {
+  const mapData = cachedMapData ?? buildWorldMapData();
+
+  const rleField = raw.ownerGridRle as Bytes;
+  const relField = raw.relationsBytes as Bytes;
+  const trField = raw.treatiesBytes as Bytes;
+  const truceField = raw.truceMonthsBytes as Bytes;
+
+  const ownerGrid = decodeOwnerGridRle(rleField.toUint8Array());
+  const relations = new Uint8Array(relField.toUint8Array());
+  const treaties = new Uint8Array(trField.toUint8Array());
+  const truceMonths = uint8ToInt16Array(
+    truceField.toUint8Array(),
+    N_COUNTRIES * N_COUNTRIES
+  );
+
+  recomputeLandNeighborsFromGrid(mapData, ownerGrid);
+
+  const countries = hydrateCountries(raw.countries as SerializedCountry[], mapData);
+
+  const humanPlayers: Record<number, HumanPlayerSlot> = {};
+  const rawHumans = (raw.humanPlayers as Record<string, HumanPlayerSlot> | undefined) ?? {};
+  for (const [k, slot] of Object.entries(rawHumans)) {
+    const cid = Number(k);
+    if (!Number.isNaN(cid) && slot) {
+      humanPlayers[cid] = {
+        uid: slot.uid,
+        displayName: slot.displayName,
+        ...(slot.photoUrl ? { photoUrl: slot.photoUrl } : {}),
+        countryId: slot.countryId,
+        rebelMoney: slot.rebelMoney ?? 0,
+        rebelArmy: slot.rebelArmy ?? 0,
+      };
+    }
+  }
+
+  const day = Number(raw.day);
+  const month = Number(raw.month);
+  const year = Number(raw.year);
+  const elapsedSeconds = Number(raw.elapsedSeconds);
+  const myCountry = countries[myCountryId];
+  let nextHistory = prevHistory.map((pt) => ({ ...pt }));
+  const lastSec = nextHistory.length > 0 ? nextHistory[nextHistory.length - 1].elapsedSeconds : -1;
+  if (myCountry && (nextHistory.length === 0 || (elapsedSeconds > lastSec && (elapsedSeconds <= 4 || elapsedSeconds % 3 === 0)))) {
+    nextHistory = [
+      ...nextHistory.slice(-59),
+      {
+        label: `${elapsedSeconds}s`,
+        dateLabel: formatFullDate(day, month, year),
+        elapsedSeconds,
+        money: Math.round(myCountry.money),
+        netIncome: Math.round(myCountry.netIncome),
+        army: Math.round(myCountry.army),
+        km2: myCountry.pixels * 100,
+      },
+    ];
+  }
+
+  return {
+    playerId: myCountryId,
+    isMultiplayer: true,
+    winnerCountryId:
+      raw.winnerCountryId === null || raw.winnerCountryId === undefined
+        ? null
+        : Number(raw.winnerCountryId),
+    humanPlayers,
+    diplomaticOffers: ((raw.diplomaticOffers as HumanDiplomaticOffer[]) ?? []).map((o) => ({ ...o })),
+    day,
+    month,
+    year,
+    totalDays: Number(raw.totalDays),
+    elapsedSeconds,
+    globalStability: Number(raw.globalStability),
+    globalTension: Number(raw.globalTension),
+    countries,
+    ownerGrid,
+    mapData,
+    relations,
+    treaties,
+    truceMonths,
+    wars: ((raw.wars as Array<{ a: number; b: number; startTotalDays: number }>) ?? []).map((w) => ({
+      ...w,
+    })),
+    invasions: ((raw.invasions as NavalInvasion[]) ?? []).map((inv) => ({ ...inv })),
+    particles: [],
+    chronicle: ((raw.chronicle as ChronicleEntry[]) ?? []).map((entry) => ({ ...entry })),
+    playerHistory: nextHistory,
+    activeEvent: null,
+    pendingProposal: null,
+    outcome: (raw.outcome as 'none' | 'victory' | 'defeat') ?? 'none',
+    sandboxAfterVictory: false,
+    dirtyPixels: true,
+    nextEventDay: 999999,
+    nextIdCounter: Number(raw.nextIdCounter ?? 1),
+    aiCursor: 0,
+    lastAiWarMonth: 0,
   };
 }

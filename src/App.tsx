@@ -7,14 +7,22 @@ import { CountrySelectScreen } from './components/CountrySelectScreen';
 import { DeviceModeScreen, type DeviceMode } from './components/DeviceModeScreen';
 import { EventModal } from './components/EventModal';
 import { MinimapBar } from './components/MinimapBar';
+import { OnlineLobbyScreen } from './components/OnlineLobbyScreen';
 import { OfflineIndicator, PWAInstallBanner } from './components/PWAInstallPrompt';
+import { PixelFlag } from './components/PixelFlag';
+import { RebellionPanel } from './components/RebellionPanel';
 import { TopCommandBar } from './components/TopCommandBar';
 import { TutorialOverlay } from './components/TutorialOverlay';
 import { WorldMapCanvas, type CameraView } from './components/WorldMapCanvas';
 import { useFirebase } from './contexts/FirebaseContext';
-import { MAP_H, MAP_W } from './engine/mapRasterizer';
+import { restoreRoomWorldState } from './engine/campaignSerializer';
 import {
-  buildDefenseAt,
+  executeGameAction,
+  type GameActionPayload,
+  type GameActionResult,
+} from './engine/gameActions';
+import {
+  canReachToAttack,
   createSimulation,
   respondToPendingProposal,
   stepSimulationDay,
@@ -22,15 +30,28 @@ import {
   type MapMode,
   type SimulationState,
 } from './engine/gameSimulation';
+import { MAP_H, MAP_W, buildWorldMapData, type WorldMapData } from './engine/mapRasterizer';
 import { soundEngine } from './engine/soundEngine';
 import {
   loadCampaignFromCloud,
   saveCampaignToCloud,
   type SavedCampaignSummary,
 } from './services/cloudSaves';
-import { PixelFlag } from './components/PixelFlag';
+import {
+  hostBroadcastWorldState,
+  hostStartMultiplayerMatch,
+  leaveMultiplayerRoom,
+  markRoomActionProcessed,
+  sendRoomAction,
+  subscribePendingRoomActions,
+  subscribeRoom,
+  subscribeRoomMembers,
+  subscribeRoomState,
+  type MultiplayerRoom,
+  type RoomMember,
+} from './services/multiplayerService';
 
-type GameScreen = 'DEVICE_SELECT' | 'COUNTRY_SELECT' | 'PLAYING';
+type GameScreen = 'DEVICE_SELECT' | 'COUNTRY_SELECT' | 'ONLINE_LOBBY' | 'PLAYING';
 
 export default function App() {
   const { user } = useFirebase();
@@ -39,13 +60,26 @@ export default function App() {
   const [deviceMode, setDeviceMode] = useState<DeviceMode>('desktop');
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const simRef = useRef<SimulationState | null>(null);
+  const cachedMapDataRef = useRef<WorldMapData | null>(null);
+
+  // Singleplayer automatic cloud save refs
   const activeCampaignIdRef = useRef<string>(`camp_${Date.now()}`);
   const isSavingRef = useRef<boolean>(false);
   const pendingSaveRef = useRef<boolean>(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const lastOutcomeRef = useRef<'none' | 'victory' | 'defeat'>('none');
-  const [renderTick, setRenderTick] = useState(0);
 
+  // Multiplayer room state & host sync refs
+  const [mpRoomCode, setMpRoomCode] = useState<string | null>(null);
+  const [mpRoom, setMpRoom] = useState<MultiplayerRoom | null>(null);
+  const [mpMembers, setMpMembers] = useState<RoomMember[]>([]);
+  const mpTickRef = useRef<number>(1);
+  const isBroadcastingRef = useRef<boolean>(false);
+  const pendingBroadcastRef = useRef<boolean>(false);
+  const broadcastThrottleRef = useRef<number | null>(null);
+  const processedActionIdsRef = useRef<Set<string>>(new Set());
+
+  const [renderTick, setRenderTick] = useState(0);
   const [speed, setSpeed] = useState<number>(1);
   const lastActiveSpeedRef = useRef<number>(1);
   const [mapMode, setMapMode] = useState<MapMode>('political');
@@ -75,11 +109,17 @@ export default function App() {
     setRenderTick((t) => t + 1);
   }, []);
 
+  const isOnlineMatch = Boolean(mpRoomCode && simRef.current?.isMultiplayer);
+  const isOnlineHost = Boolean(
+    isOnlineMatch && mpRoom && user && mpRoom.hostUid === user.uid
+  );
+  const isRemoteGuest = Boolean(isOnlineMatch && !isOnlineHost);
+
   const performCloudSave = useCallback(
     async (uidOverride?: string) => {
       const uid = uidOverride ?? user?.uid;
       const sim = simRef.current;
-      if (!uid || !sim) return;
+      if (!uid || !sim || sim.isMultiplayer) return;
       if (isSavingRef.current) {
         pendingSaveRef.current = true;
         return;
@@ -103,7 +143,7 @@ export default function App() {
   );
 
   const scheduleAutoCloudSave = useCallback(() => {
-    if (!user?.uid || !simRef.current) return;
+    if (!user?.uid || !simRef.current || simRef.current.isMultiplayer) return;
     if (autoSaveTimerRef.current !== null) {
       window.clearTimeout(autoSaveTimerRef.current);
     }
@@ -118,7 +158,255 @@ export default function App() {
     scheduleAutoCloudSave();
   }, [bumpRender, scheduleAutoCloudSave]);
 
+  const performHostBroadcast = useCallback(async () => {
+    const sim = simRef.current;
+    if (!mpRoomCode || !user?.uid || !sim || !sim.isMultiplayer) return;
+    if (mpRoom && mpRoom.hostUid !== user.uid) return;
+
+    if (isBroadcastingRef.current) {
+      pendingBroadcastRef.current = true;
+      return;
+    }
+
+    isBroadcastingRef.current = true;
+    pendingBroadcastRef.current = false;
+    try {
+      const nextTick = mpTickRef.current++;
+      const finished = sim.outcome !== 'none';
+      await hostBroadcastWorldState(mpRoomCode, user.uid, sim, nextTick, finished);
+    } catch {
+      // Retry on next cycle if transient network glitch
+    } finally {
+      isBroadcastingRef.current = false;
+      if (pendingBroadcastRef.current) {
+        pendingBroadcastRef.current = false;
+        void performHostBroadcast();
+      }
+    }
+  }, [mpRoomCode, mpRoom, user?.uid]);
+
+  const scheduleHostBroadcast = useCallback(
+    (immediate = false) => {
+      if (immediate) {
+        if (broadcastThrottleRef.current !== null) {
+          window.clearTimeout(broadcastThrottleRef.current);
+          broadcastThrottleRef.current = null;
+        }
+        void performHostBroadcast();
+        return;
+      }
+      if (broadcastThrottleRef.current !== null) return;
+      broadcastThrottleRef.current = window.setTimeout(() => {
+        broadcastThrottleRef.current = null;
+        void performHostBroadcast();
+      }, 280);
+    },
+    [performHostBroadcast]
+  );
+
+  const handleExecuteAction = useCallback(
+    async (action: GameActionPayload): Promise<GameActionResult> => {
+      const sim = simRef.current;
+      if (!sim) {
+        return { ok: false, message: 'No hay partida activa.' };
+      }
+
+      if (sim.isMultiplayer && mpRoom && user && mpRoom.hostUid !== user.uid) {
+        if (action.type === 'declare_war') {
+          const reach = canReachToAttack(sim, sim.playerId, action.targetId);
+          if (!reach.ok) {
+            return {
+              ok: false,
+              message: reach.reason ?? 'Necesitas un puerto para atacar por mar.',
+              needsPort: reach.viaSea,
+            };
+          }
+        }
+        try {
+          await sendRoomAction(
+            mpRoom.roomCode,
+            mpRoom.hostUid,
+            user.uid,
+            sim.playerId,
+            action
+          );
+          soundEngine.playClick();
+          return {
+            ok: true,
+            message: 'Orden enviada en vivo al anfitrión...',
+          };
+        } catch (err) {
+          return {
+            ok: false,
+            message: err instanceof Error ? err.message : 'Error al enviar orden online.',
+          };
+        }
+      }
+
+      const res = executeGameAction(sim, sim.playerId, action);
+      if (sim.isMultiplayer) {
+        bumpRender();
+        scheduleHostBroadcast(true);
+      } else {
+        handlePlayerMutation();
+      }
+      return res;
+    },
+    [mpRoom, user, bumpRender, scheduleHostBroadcast, handlePlayerMutation]
+  );
+
+  // Subscribe to Room & Members whenever in an online room
+  useEffect(() => {
+    if (!mpRoomCode || !user) {
+      setMpRoom(null);
+      setMpMembers([]);
+      return;
+    }
+
+    const unsubRoom = subscribeRoom(mpRoomCode, (room) => {
+      if (!room) {
+        setMpRoomCode(null);
+        setMpRoom(null);
+        setMpMembers([]);
+        if (simRef.current?.isMultiplayer) {
+          simRef.current = null;
+          setScreen('ONLINE_LOBBY');
+        }
+        return;
+      }
+      setMpRoom(room);
+    });
+
+    const unsubMembers = subscribeRoomMembers(mpRoomCode, (list) => {
+      setMpMembers(list);
+    });
+
+    return () => {
+      unsubRoom();
+      unsubMembers();
+    };
+  }, [mpRoomCode, user]);
+
+  // Guest client: subscribe to /state/current as soon as host starts match
+  useEffect(() => {
+    if (
+      !mpRoomCode ||
+      !user ||
+      !mpRoom ||
+      mpRoom.hostUid === user.uid ||
+      (mpRoom.status !== 'playing' && mpRoom.status !== 'finished')
+    ) {
+      return;
+    }
+
+    const unsubState = subscribeRoomState(mpRoomCode, (raw) => {
+      const prevSim = simRef.current;
+      const myMember = mpMembers.find((m) => m.uid === user.uid);
+      let myCountryId = myMember && myMember.countryId >= 0 ? myMember.countryId : -1;
+
+      if (myCountryId < 0 && raw.humanPlayers && typeof raw.humanPlayers === 'object') {
+        const slots = Object.values(raw.humanPlayers as Record<string, { uid?: string; countryId?: number }>);
+        const mine = slots.find((s) => s.uid === user.uid);
+        if (mine && typeof mine.countryId === 'number') {
+          myCountryId = mine.countryId;
+        }
+      }
+      if (myCountryId < 0) return;
+
+      if (!cachedMapDataRef.current) {
+        cachedMapDataRef.current = buildWorldMapData();
+      }
+
+      const nextSim = restoreRoomWorldState(
+        raw,
+        myCountryId,
+        cachedMapDataRef.current,
+        prevSim?.isMultiplayer ? prevSim.playerHistory : []
+      );
+
+      // Contextual sound cues on guest updates
+      if (prevSim?.isMultiplayer) {
+        const prevWarCount = prevSim.wars.filter(
+          (w) => w.a === myCountryId || w.b === myCountryId
+        ).length;
+        const nextWarCount = nextSim.wars.filter(
+          (w) => w.a === myCountryId || w.b === myCountryId
+        ).length;
+        if (nextWarCount > prevWarCount) {
+          soundEngine.playWarDeclared();
+        }
+        if (prevSim.outcome === 'none' && nextSim.outcome !== 'none') {
+          soundEngine.playAnnexation(nextSim.winnerCountryId === myCountryId);
+        }
+      }
+
+      simRef.current = nextSim;
+      lastOutcomeRef.current = nextSim.outcome;
+      bumpRender();
+
+      setScreen((curr) => {
+        if (curr === 'ONLINE_LOBBY') {
+          setSelectedId(myCountryId);
+          setDrawerTab('manage');
+          setMobileDrawerOpen(false);
+          setMapMode('political');
+          setShowTutorial(false);
+          const c = nextSim.countries[myCountryId];
+          if (c) {
+            setFocusRequest({
+              x: c.capitalX,
+              y: c.capitalY,
+              zoom: c.pixels < 20 ? 3.5 : 2.0,
+              nonce: Date.now(),
+            });
+          }
+          return 'PLAYING';
+        }
+        return curr;
+      });
+    });
+
+    return () => {
+      unsubState();
+    };
+  }, [mpRoomCode, mpRoom, user, mpMembers, bumpRender]);
+
+  // Host: subscribe to pending player actions and execute them on authoritative sim
+  useEffect(() => {
+    if (screen !== 'PLAYING' || !isOnlineHost || !mpRoomCode || !user?.uid) return;
+
+    const unsubActions = subscribePendingRoomActions(mpRoomCode, user.uid, (actions) => {
+      const sim = simRef.current;
+      if (!sim || !sim.isMultiplayer) return;
+
+      let executedAny = false;
+      for (const act of actions) {
+        if (processedActionIdsRef.current.has(act.id)) continue;
+        processedActionIdsRef.current.add(act.id);
+
+        const slot = sim.humanPlayers[act.actorCountryId];
+        if (slot && slot.uid === act.senderUid) {
+          executeGameAction(sim, act.actorCountryId, act.payload);
+          executedAny = true;
+        }
+        void markRoomActionProcessed(mpRoomCode, act.id);
+      }
+
+      if (executedAny) {
+        bumpRender();
+        scheduleHostBroadcast(true);
+      }
+    });
+
+    return () => {
+      unsubActions();
+    };
+  }, [screen, isOnlineHost, mpRoomCode, user?.uid, bumpRender, scheduleHostBroadcast]);
+
   const handleStartCampaign = (countryId: number) => {
+    setMpRoomCode(null);
+    setMpRoom(null);
+    setMpMembers([]);
     const sim = createSimulation(countryId);
     simRef.current = sim;
     lastOutcomeRef.current = 'none';
@@ -153,6 +441,9 @@ export default function App() {
   const handleResumeCampaign = useCallback(
     async (summary: SavedCampaignSummary) => {
       if (!user?.uid) return;
+      setMpRoomCode(null);
+      setMpRoom(null);
+      setMpMembers([]);
       const loadedSim = await loadCampaignFromCloud(user.uid, summary.campaignId);
       if (!loadedSim) {
         throw new Error('No se encontró el estado de la campaña.');
@@ -180,6 +471,73 @@ export default function App() {
     [user?.uid, bumpRender]
   );
 
+  const handleHostStartMatch = useCallback(async () => {
+    if (!mpRoomCode || !user?.uid) return;
+    const myMember = mpMembers.find((m) => m.uid === user.uid);
+    if (!myMember || myMember.countryId < 0) {
+      throw new Error('Debes escoger un país antes de empezar la partida.');
+    }
+
+    const humanSlots = mpMembers
+      .filter((m) => m.countryId >= 0)
+      .map((m) => ({
+        uid: m.uid,
+        displayName: m.displayName,
+        photoUrl: m.photoUrl,
+        countryId: m.countryId,
+      }));
+
+    const sim = createSimulation(myMember.countryId, {
+      isMultiplayer: true,
+      humanSlots,
+    });
+    simRef.current = sim;
+    mpTickRef.current = 1;
+    processedActionIdsRef.current.clear();
+    lastOutcomeRef.current = 'none';
+
+    await hostStartMultiplayerMatch(mpRoomCode, user.uid, sim);
+
+    setSelectedId(myMember.countryId);
+    setDrawerTab('manage');
+    setMobileDrawerOpen(false);
+    setMapMode('political');
+    setSpeed(1);
+    lastActiveSpeedRef.current = 1;
+    setShowTutorial(false);
+    setScreen('PLAYING');
+
+    const c = sim.countries[myMember.countryId];
+    setFocusRequest({
+      x: c.capitalX,
+      y: c.capitalY,
+      zoom: c.pixels < 20 ? 3.5 : 2.0,
+      nonce: Date.now(),
+    });
+    bumpRender();
+  }, [mpRoomCode, user?.uid, mpMembers, bumpRender]);
+
+  const handleLeaveOnlineRoom = useCallback(async () => {
+    if (mpRoomCode && user?.uid && mpRoom) {
+      try {
+        await leaveMultiplayerRoom(
+          mpRoomCode,
+          user.uid,
+          mpRoom.hostUid === user.uid,
+          mpRoom.status
+        );
+      } catch {
+        // ignore cleanup error
+      }
+    }
+    setMpRoomCode(null);
+    setMpRoom(null);
+    setMpMembers([]);
+    if (simRef.current?.isMultiplayer) {
+      simRef.current = null;
+    }
+  }, [mpRoomCode, user?.uid, mpRoom]);
+
   const dismissTutorial = useCallback(() => {
     setShowTutorial(false);
     try {
@@ -192,14 +550,15 @@ export default function App() {
 
   const handleSetSpeed = useCallback(
     (s: number) => {
+      if (isRemoteGuest) return;
       if (s > 0) lastActiveSpeedRef.current = s;
       setSpeed(s);
       soundEngine.playClick();
-      if (s === 0 && user?.uid) {
+      if (s === 0 && user?.uid && !simRef.current?.isMultiplayer) {
         void performCloudSave(user.uid);
       }
     },
-    [user?.uid, performCloudSave]
+    [isRemoteGuest, user?.uid, performCloudSave]
   );
 
   // PC Keyboard Shortcuts
@@ -215,8 +574,10 @@ export default function App() {
       }
 
       if (e.code === 'Space') {
-        e.preventDefault();
-        setSpeed((prev) => (prev === 0 ? lastActiveSpeedRef.current : 0));
+        if (!isRemoteGuest) {
+          e.preventDefault();
+          setSpeed((prev) => (prev === 0 ? lastActiveSpeedRef.current : 0));
+        }
       } else if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setSearchOpen(true);
@@ -239,11 +600,11 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [screen, searchOpen, placingDefense, showTutorial, dismissTutorial]);
+  }, [screen, isRemoteGuest, searchOpen, placingDefense, showTutorial, dismissTutorial]);
 
-  // Simulation Day Accumulator
+  // Simulation Day Accumulator (Singleplayer or Multiplayer Host only)
   useEffect(() => {
-    if (screen !== 'PLAYING' || speed === 0) return;
+    if (screen !== 'PLAYING' || speed === 0 || isRemoteGuest) return;
 
     const intervalMs = Math.max(45, Math.round(420 / speed));
 
@@ -253,7 +614,9 @@ export default function App() {
       stepSimulationDay(sim);
       if (sim.outcome !== lastOutcomeRef.current) {
         lastOutcomeRef.current = sim.outcome;
-        if (user?.uid) {
+        if (sim.isMultiplayer) {
+          scheduleHostBroadcast(true);
+        } else if (user?.uid) {
           void performCloudSave(user.uid);
         }
       }
@@ -261,22 +624,25 @@ export default function App() {
     }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [screen, speed, bumpRender, user?.uid, performCloudSave]);
+  }, [screen, speed, isRemoteGuest, bumpRender, user?.uid, performCloudSave, scheduleHostBroadcast]);
 
-  // Per-second Economy Income Tick (every 1s at 1x, 0.5s at 2x)
+  // Per-second Economy Income Tick & Host Multiplayer Sync
   useEffect(() => {
-    if (screen !== 'PLAYING' || speed === 0) return;
+    if (screen !== 'PLAYING' || speed === 0 || isRemoteGuest) return;
 
     const intervalMs = Math.round(1000 / speed);
     const timer = window.setInterval(() => {
       const sim = simRef.current;
       if (!sim) return;
       stepSimulationSecond(sim);
+      if (sim.isMultiplayer) {
+        scheduleHostBroadcast(false);
+      }
       bumpRender();
     }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [screen, speed, bumpRender]);
+  }, [screen, speed, isRemoteGuest, bumpRender, scheduleHostBroadcast]);
 
   const handleCameraChange = useCallback((cam: CameraView, vw: number, vh: number) => {
     setCameraView((prev) => {
@@ -307,9 +673,9 @@ export default function App() {
     });
   }, []);
 
-  // Automatic cloud save every 10s, on initial connection, and when leaving tab/window
+  // Automatic cloud save every 10s & on tab/window exit (singleplayer only)
   useEffect(() => {
-    if (screen !== 'PLAYING' || !user?.uid) return;
+    if (screen !== 'PLAYING' || !user?.uid || simRef.current?.isMultiplayer) return;
 
     const autoTimer = window.setInterval(() => {
       void performCloudSave(user.uid);
@@ -346,6 +712,30 @@ export default function App() {
             setDeviceMode(mode);
             setScreen('COUNTRY_SELECT');
           }}
+          onSelectOnline={(autoMode) => {
+            setDeviceMode(autoMode);
+            setScreen('ONLINE_LOBBY');
+          }}
+        />
+        <PWAInstallBanner />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
+  if (screen === 'ONLINE_LOBBY') {
+    return (
+      <>
+        <OnlineLobbyScreen
+          deviceMode={deviceMode}
+          onChangeDeviceMode={setDeviceMode}
+          roomCode={mpRoomCode}
+          room={mpRoom}
+          members={mpMembers}
+          onEnterRoom={(code) => setMpRoomCode(code)}
+          onLeaveRoom={handleLeaveOnlineRoom}
+          onHostStartMatch={handleHostStartMatch}
+          onBack={() => setScreen('COUNTRY_SELECT')}
         />
         <PWAInstallBanner />
         <OfflineIndicator />
@@ -361,6 +751,7 @@ export default function App() {
           onChangeDeviceMode={setDeviceMode}
           onStartCampaign={handleStartCampaign}
           onResumeCampaign={handleResumeCampaign}
+          onOpenOnline={() => setScreen('ONLINE_LOBBY')}
         />
         <PWAInstallBanner />
         <OfflineIndicator />
@@ -371,6 +762,10 @@ export default function App() {
   const sim = simRef.current;
   const isMobile = deviceMode === 'mobile';
   const showForeignPopup = selectedId !== null && selectedId !== sim.playerId;
+  const incomingHumanOffers = sim.isMultiplayer
+    ? sim.diplomaticOffers.filter((o) => o.toCountryId === sim.playerId)
+    : [];
+  const activeHumanOffer = incomingHumanOffers[0] ?? null;
 
   const openMobileTab = (tab: DrawerTab) => {
     soundEngine.playClick();
@@ -380,6 +775,17 @@ export default function App() {
     if (showForeignPopup) {
       setSelectedId(sim.playerId);
     }
+  };
+
+  const handleExitToMenu = async () => {
+    setSpeed(0);
+    setMobileDrawerOpen(false);
+    if (sim.isMultiplayer) {
+      await handleLeaveOnlineRoom();
+    } else if (user?.uid) {
+      void performCloudSave(user.uid);
+    }
+    setScreen('COUNTRY_SELECT');
   };
 
   return (
@@ -407,14 +813,9 @@ export default function App() {
           handleJumpToCountry(sim.playerId);
           soundEngine.playSelectCountry();
         }}
-        onReturnToMenu={() => {
-          setSpeed(0);
-          setMobileDrawerOpen(false);
-          if (user?.uid) {
-            void performCloudSave(user.uid);
-          }
-          setScreen('COUNTRY_SELECT');
-        }}
+        onReturnToMenu={() => void handleExitToMenu()}
+        roomCode={sim.isMultiplayer ? mpRoomCode : null}
+        isRemoteGuest={isRemoteGuest}
       />
 
       <div className="flex-1 flex min-h-0 relative">
@@ -438,17 +839,11 @@ export default function App() {
             focusRequest={focusRequest}
             onCameraChange={handleCameraChange}
             placingDefense={placingDefense}
-            onPlaceDefense={(mx, my) => {
-              const err = buildDefenseAt(sim, sim.playerId, mx, my);
-              if (err) {
-                setDefenseFeedback({ text: err, ok: false });
-              } else {
-                setDefenseFeedback({
-                  text: '¡Defensa construida! Protege tu territorio dentro de su radio.',
-                  ok: true,
-                });
+            onPlaceDefense={async (mx, my) => {
+              const res = await handleExecuteAction({ type: 'build_defense', x: mx, y: my });
+              setDefenseFeedback({ text: res.message, ok: res.ok });
+              if (res.ok) {
                 setPlacingDefense(false);
-                handlePlayerMutation();
               }
             }}
             onCancelPlaceDefense={() => setPlacingDefense(false)}
@@ -532,12 +927,72 @@ export default function App() {
               sim={sim}
               targetId={selectedId}
               onClose={() => setSelectedId(sim.playerId)}
-              onMutated={handlePlayerMutation}
+              onExecuteAction={handleExecuteAction}
             />
           )}
 
-          {/* Incoming Diplomatic Proposal from AI Nation */}
-          {sim.pendingProposal && (
+          {/* Underground Rebellion Panel when eliminated in Multiplayer */}
+          {sim.isMultiplayer && !sim.countries[sim.playerId]?.alive && !showForeignPopup && (
+            <RebellionPanel
+              deviceMode={deviceMode}
+              sim={sim}
+              onExecuteAction={handleExecuteAction}
+            />
+          )}
+
+          {/* Incoming Human Diplomatic Offer (Multiplayer) */}
+          {activeHumanOffer && (
+            <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[calc(100vw-16px)] max-w-md bg-[#111B2B]/95 border border-emerald-500/80 px-3 sm:px-4 py-2.5 sm:py-3 shadow-2xl flex items-center gap-3 sm:gap-4">
+              <PixelFlag
+                country={sim.countries[activeHumanOffer.fromCountryId].seed}
+                size="md"
+              />
+              <div className="text-xs min-w-0 flex-1">
+                <div className="font-bold text-emerald-300 truncate">
+                  {sim.humanPlayers[activeHumanOffer.fromCountryId]
+                    ? `${sim.humanPlayers[activeHumanOffer.fromCountryId].displayName} · `
+                    : ''}
+                  {sim.countries[activeHumanOffer.fromCountryId].seed.name}
+                </div>
+                <div className="text-slate-200 leading-snug">
+                  {activeHumanOffer.type === 'alliance'
+                    ? 'Propone firmar una Alianza Estratégica.'
+                    : activeHumanOffer.type === 'peace'
+                      ? 'Propone firmar un Tratado de Paz.'
+                      : 'Solicita tu ayuda militar en su guerra actual.'}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() =>
+                    void handleExecuteAction({
+                      type: 'respond_human_offer',
+                      offerId: activeHumanOffer.id,
+                      accept: true,
+                    })
+                  }
+                  className="px-2.5 py-1.5 sm:py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer"
+                >
+                  Aceptar
+                </button>
+                <button
+                  onClick={() =>
+                    void handleExecuteAction({
+                      type: 'respond_human_offer',
+                      offerId: activeHumanOffer.id,
+                      accept: false,
+                    })
+                  }
+                  className="px-2.5 py-1.5 sm:py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 cursor-pointer"
+                >
+                  Rechazar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Incoming Diplomatic Proposal from AI Nation (Singleplayer) */}
+          {!activeHumanOffer && sim.pendingProposal && (
             <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[calc(100vw-16px)] max-w-md bg-[#111B2B]/95 border border-amber-500/70 px-3 sm:px-4 py-2.5 sm:py-3 shadow-2xl flex items-center gap-3 sm:gap-4">
               <PixelFlag
                 country={sim.countries[sim.pendingProposal.fromId].seed}
@@ -634,9 +1089,9 @@ export default function App() {
               soundEngine.playSelectCountry();
             }}
             onJumpToCountry={handleJumpToCountry}
-            onMutated={() => {
+            onExecuteAction={async (act) => {
               setDefenseFeedback(null);
-              handlePlayerMutation();
+              return handleExecuteAction(act);
             }}
             placingDefense={placingDefense}
             onTogglePlaceDefense={() => {
@@ -744,14 +1199,7 @@ export default function App() {
           lastOutcomeRef.current = 'none';
           handlePlayerMutation();
         }}
-        onRestartMenu={() => {
-          setSpeed(0);
-          setMobileDrawerOpen(false);
-          if (user?.uid) {
-            void performCloudSave(user.uid);
-          }
-          setScreen('COUNTRY_SELECT');
-        }}
+        onRestartMenu={() => void handleExitToMenu()}
       />
 
       <PWAInstallBanner liftAboveBottomNav={isMobile} />

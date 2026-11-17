@@ -280,6 +280,272 @@
         "playerHistory",
         "updatedAt"
       ]
+    },
+    "MultiplayerRoom": {
+      "title": "MultiplayerRoom",
+      "description": "Online multiplayer room identified by a 4-digit numeric room code.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "maxLength": 4,
+          "pattern": "^[0-9]{4}$"
+        },
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "hostName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "enum": ["lobby", "playing", "finished"],
+          "maxLength": 16
+        },
+        "winnerCountryId": {
+          "type": ["integer", "null"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomCode",
+        "hostUid",
+        "hostName",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RoomMember": {
+      "title": "RoomMember",
+      "description": "Player joined in a multiplayer room lobby (public profile info without PII).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomCode": {
+          "type": "string",
+          "maxLength": 4,
+          "pattern": "^[0-9]{4}$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "photoUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "countryId": {
+          "type": "integer"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "isHost": {
+          "type": "boolean"
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "roomCode",
+        "displayName",
+        "countryId",
+        "ready",
+        "isHost",
+        "joinedAt",
+        "updatedAt"
+      ]
+    },
+    "RoomWorldState": {
+      "title": "RoomWorldState",
+      "description": "Host-authoritative live multiplayer simulation state.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "maxLength": 4,
+          "pattern": "^[0-9]{4}$"
+        },
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "tick": {
+          "type": "integer"
+        },
+        "day": {
+          "type": "integer"
+        },
+        "month": {
+          "type": "integer"
+        },
+        "year": {
+          "type": "integer"
+        },
+        "totalDays": {
+          "type": "integer"
+        },
+        "elapsedSeconds": {
+          "type": "integer"
+        },
+        "globalStability": {
+          "type": "number"
+        },
+        "globalTension": {
+          "type": "number"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["none", "victory", "defeat"],
+          "maxLength": 16
+        },
+        "winnerCountryId": {
+          "type": ["integer", "null"]
+        },
+        "nextIdCounter": {
+          "type": "integer"
+        },
+        "ownerGridRle": {
+          "type": "string",
+          "format": "byte"
+        },
+        "relationsBytes": {
+          "type": "string",
+          "format": "byte"
+        },
+        "treatiesBytes": {
+          "type": "string",
+          "format": "byte"
+        },
+        "truceMonthsBytes": {
+          "type": "string",
+          "format": "byte"
+        },
+        "countries": {
+          "type": "array"
+        },
+        "wars": {
+          "type": "array"
+        },
+        "invasions": {
+          "type": "array"
+        },
+        "chronicle": {
+          "type": "array"
+        },
+        "humanPlayers": {
+          "type": "object"
+        },
+        "diplomaticOffers": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomCode",
+        "hostUid",
+        "version",
+        "tick",
+        "day",
+        "month",
+        "year",
+        "totalDays",
+        "elapsedSeconds",
+        "globalStability",
+        "globalTension",
+        "outcome",
+        "nextIdCounter",
+        "ownerGridRle",
+        "relationsBytes",
+        "treatiesBytes",
+        "truceMonthsBytes",
+        "countries",
+        "wars",
+        "invasions",
+        "chronicle",
+        "humanPlayers",
+        "diplomaticOffers",
+        "updatedAt"
+      ]
+    },
+    "RoomAction": {
+      "title": "RoomAction",
+      "description": "Player-submitted command processed by the room host.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "maxLength": 4,
+          "pattern": "^[0-9]{4}$"
+        },
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "actorCountryId": {
+          "type": "integer"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "processed"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "processedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomCode",
+        "hostUid",
+        "senderUid",
+        "actorCountryId",
+        "payload",
+        "status",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -294,6 +560,22 @@
     "/users/{userId}/campaigns/{campaignId}/data/{snapshotId}": {
       "schema": { "$ref": "#/entities/CampaignSnapshot" },
       "description": "Full simulation snapshot stored at snapshotId='state' for resuming campaigns."
+    },
+    "/rooms/{roomCode}": {
+      "schema": { "$ref": "#/entities/MultiplayerRoom" },
+      "description": "Online multiplayer room keyed by 4-digit numeric code."
+    },
+    "/rooms/{roomCode}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/RoomMember" },
+      "description": "Players joined inside an online room."
+    },
+    "/rooms/{roomCode}/state/{stateId}": {
+      "schema": { "$ref": "#/entities/RoomWorldState" },
+      "description": "Authoritative multiplayer simulation state at stateId='current'."
+    },
+    "/rooms/{roomCode}/actions/{actionId}": {
+      "schema": { "$ref": "#/entities/RoomAction" },
+      "description": "Player action queue for the room host."
     }
   }
 }
