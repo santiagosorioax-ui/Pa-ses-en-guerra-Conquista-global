@@ -18,6 +18,7 @@ import { MAP_H, MAP_W, buildWorldMapData, lonToX, latToY } from '../engine/mapRa
 import { renderStaticPreviewToBuffer } from '../engine/pixelRenderer';
 import { soundEngine } from '../engine/soundEngine';
 import { deleteCampaignFromCloud, type SavedCampaignSummary } from '../services/cloudSaves';
+import { PWAInstallButton } from './PWAInstallPrompt';
 import { PixelFlag } from './PixelFlag';
 
 interface CountrySelectScreenProps {
@@ -220,10 +221,11 @@ export function CountrySelectScreen({
               onClick={() => {
                 camRef.current = { x: MAP_W / 2, y: MAP_H / 2, zoom: 1.0 };
               }}
-              className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs"
+              className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs cursor-pointer"
             >
               Centrar Mundo
             </button>
+            <PWAInstallButton />
           </div>
         </div>
 

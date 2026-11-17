@@ -5,6 +5,7 @@ import { CountrySearchModal } from './components/CountrySearchModal';
 import { CountrySelectScreen } from './components/CountrySelectScreen';
 import { EventModal } from './components/EventModal';
 import { MinimapBar } from './components/MinimapBar';
+import { OfflineIndicator, PWAInstallBanner } from './components/PWAInstallPrompt';
 import { TopCommandBar, type CloudSaveStatus } from './components/TopCommandBar';
 import { TutorialOverlay } from './components/TutorialOverlay';
 import { WorldMapCanvas, type CameraView } from './components/WorldMapCanvas';
@@ -304,10 +305,14 @@ export default function App() {
 
   if (screen === 'COUNTRY_SELECT' || !simRef.current) {
     return (
-      <CountrySelectScreen
-        onStartCampaign={handleStartCampaign}
-        onResumeCampaign={handleResumeCampaign}
-      />
+      <>
+        <CountrySelectScreen
+          onStartCampaign={handleStartCampaign}
+          onResumeCampaign={handleResumeCampaign}
+        />
+        <PWAInstallBanner />
+        <OfflineIndicator />
+      </>
     );
   }
 
@@ -582,6 +587,9 @@ export default function App() {
           setScreen('COUNTRY_SELECT');
         }}
       />
+
+      <PWAInstallBanner />
+      <OfflineIndicator />
     </div>
   );
 }

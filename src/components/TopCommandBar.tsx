@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { formatFullDate, type SimulationState } from '../engine/gameSimulation';
 import { useFirebase } from '../contexts/FirebaseContext';
+import { PWAInstallButton } from './PWAInstallPrompt';
 import { PixelFlag } from './PixelFlag';
 
 export type CloudSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -195,6 +196,8 @@ export function TopCommandBar({
             <span className="hidden xl:inline">Conectar Nube</span>
           </button>
         )}
+
+        <PWAInstallButton compact />
 
         <button
           onClick={onOpenSearch}
