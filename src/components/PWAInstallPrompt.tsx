@@ -131,7 +131,7 @@ export function PWAInstallButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export function PWAInstallBanner() {
+export function PWAInstallBanner({ liftAboveBottomNav = false }: { liftAboveBottomNav?: boolean }) {
   const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
   const [dismissed, setDismissed] = useState(() => {
     try {
@@ -178,7 +178,11 @@ export function PWAInstallBanner() {
 
   return (
     <>
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(94vw,520px)] bg-[#111B2B]/98 border border-amber-500/70 px-4 py-3 shadow-2xl flex items-center justify-between gap-3">
+      <div
+        className={`fixed left-1/2 -translate-x-1/2 z-40 w-[min(94vw,520px)] bg-[#111B2B]/98 border border-amber-500/70 px-3.5 sm:px-4 py-2.5 sm:py-3 shadow-2xl flex items-center justify-between gap-2.5 sm:gap-3 ${
+          liftAboveBottomNav ? 'bottom-16' : 'bottom-4'
+        }`}
+      >
         <div className="flex items-center gap-3 min-w-0">
           <img
             src="/pwa-192x192.png"
@@ -225,12 +229,16 @@ export function PWAInstallBanner() {
   );
 }
 
-export function OfflineIndicator() {
+export function OfflineIndicator({ liftAboveBottomNav = false }: { liftAboveBottomNav?: boolean }) {
   const isOnline = useOnlineStatus();
   if (isOnline) return null;
 
   return (
-    <div className="fixed bottom-3 left-3 z-50 flex items-center gap-2 bg-amber-600/95 border border-amber-400 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-lg">
+    <div
+      className={`fixed left-3 z-50 flex items-center gap-2 bg-amber-600/95 border border-amber-400 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow-lg ${
+        liftAboveBottomNav ? 'bottom-16' : 'bottom-3'
+      }`}
+    >
       <WifiOff className="w-3.5 h-3.5" />
       <span>Modo sin conexión — Usando datos en caché</span>
     </div>

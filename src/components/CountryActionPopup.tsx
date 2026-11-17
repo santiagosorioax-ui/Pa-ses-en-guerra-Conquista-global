@@ -19,9 +19,11 @@ import {
   sendDiplomaticGift,
   type SimulationState,
 } from '../engine/gameSimulation';
+import type { DeviceMode } from './DeviceModeScreen';
 import { PixelFlag } from './PixelFlag';
 
 interface CountryActionPopupProps {
+  deviceMode: DeviceMode;
   sim: SimulationState;
   targetId: number;
   onClose: () => void;
@@ -29,6 +31,7 @@ interface CountryActionPopupProps {
 }
 
 export function CountryActionPopup({
+  deviceMode,
   sim,
   targetId,
   onClose,
@@ -123,7 +126,13 @@ export function CountryActionPopup({
   const canBuildPort = hasCoast(sim, player.id);
 
   return (
-    <div className="absolute top-4 right-4 z-30 w-[350px] bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-4 space-y-3">
+    <div
+      className={
+        deviceMode === 'mobile'
+          ? 'absolute bottom-2 left-2 right-2 z-30 max-h-[65vh] overflow-y-auto bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-3.5 space-y-2.5'
+          : 'absolute top-4 right-4 z-30 w-[350px] bg-[#111B2B]/98 border border-slate-600 rounded-lg shadow-2xl p-4 space-y-3'
+      }
+    >
       {/* Header: Bandera, País, Capital y botón X */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">

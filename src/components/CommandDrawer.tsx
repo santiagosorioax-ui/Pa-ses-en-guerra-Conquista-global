@@ -9,7 +9,9 @@ import {
   Shield,
   Swords,
   TrendingUp,
+  X,
 } from 'lucide-react';
+import type { DeviceMode } from './DeviceModeScreen';
 import {
   ARMY_RECRUIT_AMOUNT,
   ARMY_RECRUIT_COST,
@@ -44,6 +46,8 @@ import { StatsChartsPanel } from './StatsChartsPanel';
 export type DrawerTab = 'manage' | 'diplomacy' | 'charts' | 'chronicle';
 
 interface CommandDrawerProps {
+  deviceMode: DeviceMode;
+  onCloseMobileDrawer?: () => void;
   sim: SimulationState;
   selectedId: number | null;
   activeTab: DrawerTab;
@@ -57,6 +61,8 @@ interface CommandDrawerProps {
 }
 
 export function CommandDrawer({
+  deviceMode,
+  onCloseMobileDrawer,
   sim,
   selectedId,
   activeTab,
@@ -95,9 +101,30 @@ export function CommandDrawer({
     .slice(0, 16);
 
   return (
-    <aside className="w-[365px] shrink-0 bg-[#111B2B] border-l border-slate-800 flex flex-col h-full overflow-hidden">
+    <aside
+      className={
+        deviceMode === 'mobile'
+          ? 'absolute inset-x-0 bottom-0 z-30 h-[62vh] bg-[#111B2B]/98 border-t border-slate-600 shadow-2xl flex flex-col overflow-hidden'
+          : 'w-[365px] shrink-0 bg-[#111B2B] border-l border-slate-800 flex flex-col h-full overflow-hidden'
+      }
+    >
+      {deviceMode === 'mobile' && (
+        <div className="px-3 py-2 border-b border-slate-800 bg-[#0E1726] flex items-center justify-between shrink-0">
+          <span className="text-xs font-bold text-amber-300">
+            {tabs.find((t) => t.id === activeTab)?.label ?? 'Panel'}
+          </span>
+          <button
+            onClick={onCloseMobileDrawer}
+            className="px-2.5 py-1 bg-slate-900 border border-slate-700 text-xs text-slate-200 flex items-center gap-1 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Ver Mapa</span>
+          </button>
+        </div>
+      )}
+
       {/* Tab Selector */}
-      <div className="grid grid-cols-4 border-b border-slate-800 bg-[#0E1726]">
+      <div className={deviceMode === 'mobile' ? 'hidden' : 'grid grid-cols-4 border-b border-slate-800 bg-[#0E1726]'}>
         {tabs.map((t) => {
           const Icon = t.icon;
           const active = activeTab === t.id;
@@ -512,7 +539,10 @@ export function CommandDrawer({
         )}
 
         {activeTab === 'charts' && (
-          <StatsChartsPanel player={player} history={sim.playerHistory} />
+          <StatsChartsPanel
+            player={player}
+            history={sim.playerHistory.map((pt) => ({ ...pt }))}
+          />
         )}
 
         {activeTab === 'chronicle' && (

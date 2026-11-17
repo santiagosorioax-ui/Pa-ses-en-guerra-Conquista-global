@@ -49,6 +49,12 @@ export function WorldMapCanvas({
 
   const camRef = useRef<CameraView>({ x: MAP_W / 2, y: MAP_H / 2, zoom: 1.0 });
   const keysPressedRef = useRef<Set<string>>(new Set());
+  const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStateRef = useRef<{
+    active: boolean;
+    startDist: number;
+    startZoom: number;
+  }>({ active: false, startDist: 0, startZoom: 1 });
   const dragRef = useRef<{
     active: boolean;
     startX: number;
@@ -441,6 +447,21 @@ export function WorldMapCanvas({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointersRef.current.size === 2) {
+      const pts = Array.from(activePointersRef.current.values());
+      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      pinchStateRef.current = {
+        active: true,
+        startDist: Math.max(1, dist),
+        startZoom: camRef.current.zoom,
+      };
+      dragRef.current.active = false;
+      dragRef.current.moved = true;
+      return;
+    }
+
     dragRef.current = {
       active: true,
       startX: e.clientX,
@@ -455,10 +476,39 @@ export function WorldMapCanvas({
     const container = containerRef.current;
     if (!container) return;
 
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // Two-finger pinch-to-zoom
+    if (activePointersRef.current.size === 2 && pinchStateRef.current.active) {
+      const pts = Array.from(activePointersRef.current.values());
+      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      const ratio = dist / Math.max(1, pinchStateRef.current.startDist);
+      const rect = container.getBoundingClientRect();
+      const midX = (pts[0].x + pts[1].x) * 0.5 - rect.left;
+      const midY = (pts[0].y + pts[1].y) * 0.5 - rect.top;
+      const cw = rect.width;
+      const ch = rect.height;
+      const baseScale = Math.max(cw / MAP_W, ch / MAP_H);
+      const oldZoom = camRef.current.zoom;
+      const oldScale = baseScale * oldZoom;
+      const worldX = camRef.current.x + (midX - cw * 0.5) / oldScale;
+      const worldY = camRef.current.y + (midY - ch * 0.5) / oldScale;
+
+      const newZoom = Math.max(0.55, Math.min(14, pinchStateRef.current.startZoom * ratio));
+      const newScale = baseScale * newZoom;
+      camRef.current.zoom = newZoom;
+      camRef.current.x = Math.max(0, Math.min(MAP_W, worldX - (midX - cw * 0.5) / newScale));
+      camRef.current.y = Math.max(0, Math.min(MAP_H, worldY - (midY - ch * 0.5) / newScale));
+      setHoverInfo(null);
+      return;
+    }
+
     if (dragRef.current.active) {
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
-      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
         dragRef.current.moved = true;
       }
       if (dragRef.current.moved) {
@@ -468,6 +518,11 @@ export function WorldMapCanvas({
         camRef.current.x = Math.max(0, Math.min(MAP_W, dragRef.current.camStartX - dx / scale));
         camRef.current.y = Math.max(0, Math.min(MAP_H, dragRef.current.camStartY - dy / scale));
       }
+    }
+
+    if (e.pointerType === 'touch') {
+      setHoverInfo(null);
+      return;
     }
 
     const pos = screenToMapPixel(e.clientX, e.clientY);
@@ -483,6 +538,11 @@ export function WorldMapCanvas({
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchStateRef.current.active = false;
+    }
+
     const wasMoved = dragRef.current.moved;
     dragRef.current.active = false;
     if (wasMoved) return;
@@ -492,7 +552,7 @@ export function WorldMapCanvas({
       return;
     }
 
-    if (e.button === 0) {
+    if (e.button === 0 || e.pointerType === 'touch') {
       const pos = screenToMapPixel(e.clientX, e.clientY);
       if (pos) {
         if (placingDefenseRef.current) {
@@ -559,10 +619,15 @@ export function WorldMapCanvas({
     >
       <canvas
         ref={canvasRef}
-        className={`w-full h-full block pixelated ${placingDefense ? 'cursor-cell' : 'cursor-crosshair'}`}
+        className={`w-full h-full block pixelated touch-none ${placingDefense ? 'cursor-cell' : 'cursor-crosshair'}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={(e) => {
+          activePointersRef.current.delete(e.pointerId);
+          if (activePointersRef.current.size < 2) pinchStateRef.current.active = false;
+          dragRef.current.active = false;
+        }}
         onPointerLeave={() => {
           hoveredIdRef.current = null;
           hoverMapPosRef.current = null;

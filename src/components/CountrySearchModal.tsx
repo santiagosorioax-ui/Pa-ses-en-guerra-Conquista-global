@@ -51,7 +51,7 @@ export function CountrySearchModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/65 flex items-start justify-center pt-20 p-4"
+      className="fixed inset-0 z-50 bg-black/65 flex items-start justify-center pt-10 sm:pt-20 p-3 sm:p-4"
       onClick={onClose}
     >
       <div
@@ -77,13 +77,13 @@ export function CountrySearchModal({
           />
           <button
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-white cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="max-h-96 overflow-y-auto divide-y divide-slate-800/70">
+        <div className="max-h-[65vh] sm:max-h-96 overflow-y-auto divide-y divide-slate-800/70">
           {matches.map((c) => {
             const war = hasTreaty(sim, sim.playerId, c.id, TREATY_WAR);
             const ally = hasTreaty(sim, sim.playerId, c.id, TREATY_ALLIANCE);
@@ -94,7 +94,7 @@ export function CountrySearchModal({
                   onPickCountry(c.id);
                   onClose();
                 }}
-                className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-slate-800/70 text-left cursor-pointer"
+                className="w-full px-3.5 sm:px-4 py-3 sm:py-2.5 flex items-center justify-between hover:bg-slate-800/70 text-left cursor-pointer"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <PixelFlag country={c.seed} size="sm" />

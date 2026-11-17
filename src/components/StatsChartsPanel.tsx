@@ -23,7 +23,8 @@ function formatCompact(v: number): string {
 }
 
 export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
-  const first = history[0];
+  const chartData = history.map((pt) => ({ ...pt }));
+  const first = chartData[0];
   const latestKm2 = player.pixels * 100;
   const startKm2 = first ? first.km2 : player.initialPixels * 100;
   const km2Diff = latestKm2 - startKm2;
@@ -58,7 +59,7 @@ export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
 
         <div className="h-[135px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={history} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
+            <LineChart data={chartData} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
               <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
               <XAxis
                 dataKey="label"
@@ -137,7 +138,7 @@ export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
 
         <div className="h-[130px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={history} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
+            <LineChart data={chartData} margin={{ top: 6, right: 8, left: -16, bottom: 0 }}>
               <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
               <XAxis
                 dataKey="label"
@@ -191,7 +192,7 @@ export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
 
         <div className="h-[130px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={history} margin={{ top: 6, right: 8, left: -10, bottom: 0 }}>
+            <LineChart data={chartData} margin={{ top: 6, right: 8, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" />
               <XAxis
                 dataKey="label"

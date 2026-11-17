@@ -24,8 +24,8 @@ export function EventModal({
     const isVictory = sim.outcome === 'victory';
     const player = sim.countries[sim.playerId];
     return (
-      <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-6">
-        <div className="w-full max-w-lg bg-[#111B2B] border border-slate-700 p-6 space-y-5 shadow-2xl">
+      <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-3 sm:p-6">
+        <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-[#111B2B] border border-slate-700 p-4 sm:p-6 space-y-4 sm:space-y-5 shadow-2xl">
           <div className="flex items-center gap-3">
             {isVictory ? (
               <Trophy className="w-8 h-8 text-amber-400 shrink-0" />
@@ -93,8 +93,8 @@ export function EventModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6">
-      <div className="w-full max-w-xl bg-[#111B2B] border border-slate-700 p-6 space-y-4 shadow-2xl">
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-3 sm:p-6">
+      <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-[#111B2B] border border-slate-700 p-4 sm:p-6 space-y-4 shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-3">
           <div className="space-y-1">
             <div className="text-[11px] font-mono-num text-amber-400">

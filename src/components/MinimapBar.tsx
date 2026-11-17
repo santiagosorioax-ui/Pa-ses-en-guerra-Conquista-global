@@ -2,9 +2,11 @@ import { useEffect, useRef } from 'react';
 import { Globe, Minus, Plus, Users } from 'lucide-react';
 import { MAP_H, MAP_W } from '../engine/mapRasterizer';
 import { type MapMode, type SimulationState } from '../engine/gameSimulation';
+import type { DeviceMode } from './DeviceModeScreen';
 import type { CameraView } from './WorldMapCanvas';
 
 interface MinimapBarProps {
+  deviceMode: DeviceMode;
   simRef: React.MutableRefObject<SimulationState>;
   renderTick: number;
   mapMode: MapMode;
@@ -18,6 +20,7 @@ const MINI_W = 228;
 const MINI_H = 88;
 
 export function MinimapBar({
+  deviceMode,
   simRef,
   renderTick,
   mapMode,
@@ -86,6 +89,51 @@ export function MinimapBar({
     { id: 'political', label: 'Político', key: '1', icon: Globe },
     { id: 'diplomatic', label: 'Diplomático', key: '2', icon: Users },
   ];
+
+  if (deviceMode === 'mobile') {
+    return (
+      <div className="pointer-events-auto flex items-center gap-1.5 bg-[#111B2B]/92 border border-slate-700/90 p-1.5 shadow-xl">
+        {modes.map((m) => {
+          const Icon = m.icon;
+          const active = mapMode === m.id;
+          return (
+            <button
+              key={m.id}
+              onClick={() => onChangeMapMode(m.id)}
+              className={`flex items-center gap-1 px-2 py-1.5 text-[11px] font-medium border cursor-pointer ${
+                active
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/60'
+                  : 'bg-slate-900/80 text-slate-300 border-slate-800'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              <span>{m.label}</span>
+            </button>
+          );
+        })}
+        <button
+          onClick={() => onJumpTo(camera.x, camera.y, Math.min(14, camera.zoom * 1.3))}
+          className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
+          aria-label="Acercar"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => onJumpTo(camera.x, camera.y, Math.max(0.55, camera.zoom / 1.3))}
+          className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
+          aria-label="Alejar"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={() => onJumpTo(MAP_W / 2, MAP_H / 2, 1.0)}
+          className="h-8 px-2 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 text-[10px] font-mono-num cursor-pointer"
+        >
+          1:1
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-auto flex flex-col gap-2 bg-[#111B2B]/95 border border-slate-700/90 p-2.5 shadow-2xl">

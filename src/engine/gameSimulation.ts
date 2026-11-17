@@ -294,16 +294,14 @@ export function pushChronicle(
   text: string,
   focusCountryId?: number
 ) {
-  sim.chronicle.unshift({
+  const entry: ChronicleEntry = {
     id: sim.nextIdCounter++,
     dateLabel: formatDate(sim.month, sim.year),
     type,
     text,
     focusCountryId,
-  });
-  if (sim.chronicle.length > 70) {
-    sim.chronicle.length = 70;
-  }
+  };
+  sim.chronicle = [entry, ...sim.chronicle.slice(0, 69)];
 }
 
 export function getCoastalCandidates(sim: SimulationState, countryId: number): PortCoord[] {
@@ -1170,7 +1168,7 @@ export function stepSimulationSecond(sim: SimulationState) {
 
   if (sim.elapsedSeconds <= 4 || sim.elapsedSeconds % 3 === 0) {
     const p = sim.countries[sim.playerId];
-    sim.playerHistory.push({
+    const nextPoint: PlayerHistoryPoint = {
       label: `${sim.elapsedSeconds}s`,
       dateLabel: formatFullDate(sim.day, sim.month, sim.year),
       elapsedSeconds: sim.elapsedSeconds,
@@ -1178,10 +1176,8 @@ export function stepSimulationSecond(sim: SimulationState) {
       netIncome: Math.round(p.netIncome),
       army: Math.round(p.army),
       km2: p.pixels * 100,
-    });
-    if (sim.playerHistory.length > 60) {
-      sim.playerHistory.shift();
-    }
+    };
+    sim.playerHistory = [...sim.playerHistory.slice(-59), nextPoint];
   }
 }
 
