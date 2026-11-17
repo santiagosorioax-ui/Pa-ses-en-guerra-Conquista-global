@@ -344,7 +344,7 @@ export function OnlineLobbyScreen({
       className={`bg-[#111B2B] flex flex-col overflow-hidden ${
         mobileView
           ? 'flex-1 min-h-0'
-          : 'md:col-span-7 border border-slate-800 h-full min-h-0'
+          : 'sm:col-span-7 border border-slate-800 h-[380px] sm:h-full min-h-0 shrink-0 sm:shrink'
       }`}
     >
       <div
@@ -558,7 +558,7 @@ export function OnlineLobbyScreen({
           roomCode && isMobile
             ? 'flex flex-col overflow-hidden'
             : roomCode
-              ? 'p-4 sm:p-5 overflow-y-auto md:overflow-hidden'
+              ? 'p-3 sm:p-5 overflow-y-auto sm:overflow-hidden'
               : 'p-3 sm:p-5 overflow-y-auto flex flex-col'
         }`}
       >
@@ -742,8 +742,8 @@ export function OnlineLobbyScreen({
           </div>
         ) : (
           /* DESKTOP WAITING ROOM LOBBY (2-Column PC Layout) */
-          <div className="max-w-6xl w-full mx-auto flex flex-col md:grid md:grid-cols-12 md:h-full gap-4">
-            <div className="md:col-span-5 flex flex-col gap-3 md:h-full md:min-h-0 shrink-0">
+          <div className="max-w-6xl w-full mx-auto flex flex-col sm:grid sm:grid-cols-12 sm:h-full gap-3 sm:gap-4">
+            <div className="sm:col-span-5 flex flex-col gap-3 sm:h-full sm:min-h-0">
               {renderRoomCodeCard(false)}
               {renderPlayersCard(false)}
             </div>
