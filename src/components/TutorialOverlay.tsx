@@ -69,7 +69,7 @@ export function TutorialOverlay({
           icon: Pickaxe,
           color: 'text-amber-400',
           label: 'Minas de Oro y Ciudades',
-          desc: 'Las Minas de Oro (máx. 1/mes) y Ciudades (máx. 5/mes) aumentan tu ingreso por segundo.',
+          desc: 'Las Minas de Oro (máx. 1/mes) y Ciudades (máx. 2/mes) aumentan tu ingreso por segundo; las Ciudades además amplían tu capacidad militar.',
         },
         {
           icon: Coins,
@@ -88,10 +88,10 @@ export function TutorialOverlay({
         {
           icon: Swords,
           color: 'text-rose-400',
-          label: 'Gestión del Ejército ($100 = +10 soldados)',
+          label: 'Gestión del Ejército ($100 = +25 soldados)',
           desc: isMobile
-            ? 'Toca «Mando» → «Ejército» para reclutar tropas. Si capturas una capital enemiga, pierde 50% de su ejército.'
-            : 'Pulsa «Ejército» en el panel Mando para reclutar tropas. Si capturas una capital enemiga, pierde 50% de su ejército.',
+            ? 'Toca «Mando» → «Ejército» para reclutar tropas hasta tu límite militar. Capturar una capital enemiga reduce 50% de su ejército.'
+            : 'Pulsa «Ejército» en el panel Mando para reclutar tropas hasta tu límite militar. Capturar una capital enemiga reduce 50% de su ejército.',
         },
         {
           icon: Shield,

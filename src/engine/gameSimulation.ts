@@ -176,41 +176,52 @@ const MONTH_NAMES = [
   'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic',
 ];
 
-export const GOLD_MINE_COST = 90;
-export const GOLD_MINE_PRICE_STEP = 10;
-export const GOLD_MINE_INCOME = 1; // +$1 cada segundo
-export const CITY_COST = 140;
-export const CITY_PRICE_STEP = 5;
-export const CITY_INCOME = 2; // +$2 cada segundo
-export const PORT_COST = 100;
+export const GOLD_MINE_COST = 120;
+export const GOLD_MINE_PRICE_STEP = 30;
+export const GOLD_MINE_INCOME = 2; // +$2 cada segundo
+export const CITY_COST = 180;
+export const CITY_PRICE_STEP = 45;
+export const CITY_INCOME = 3; // +$3 cada segundo (+120 capacidad militar)
+export const PORT_COST = 150;
 export const ARMY_RECRUIT_COST = 100;
-export const ARMY_RECRUIT_AMOUNT = 10;
+export const ARMY_RECRUIT_AMOUNT = 25;
 export const GIFT_MONEY_PER_REL = 100;
 export const ALLIANCE_REL_THRESHOLD = 70; // escala 1..100
 export const MAX_WAR_DAYS = 3 * 12 * 30; // 3 años máximos por guerra (1080 días)
-export const MIN_INITIAL_ARMY = 500;
-export const MAX_INITIAL_ARMY = 1500;
-export const MONTHLY_INCOME_GROWTH = 1; // +$1/seg acumulado cada mes
+export const MIN_INITIAL_ARMY = 350;
+export const MAX_INITIAL_ARMY = 1400;
+export const MONTHLY_INCOME_GROWTH = 1; // +$1/seg acumulado cada año (máx. +10)
+export const MAX_MONTHLY_INCOME_BONUS = 10;
 export const MAX_GOLD_MINES_PER_MONTH = 1;
-export const MAX_CITIES_PER_MONTH = 5;
-export const DEFENSE_COST = 85;
+export const MAX_CITIES_PER_MONTH = 2;
+export const MAX_GOLD_MINES_TOTAL = 40;
+export const MAX_CITIES_TOTAL = 50;
+export const DEFENSE_COST = 120;
 export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
 export const REBEL_RECRUIT_COST = 100;
-export const REBEL_RECRUIT_AMOUNT = 20;
-export const REBEL_INCOME_PER_SECOND = 120;
+export const REBEL_RECRUIT_AMOUNT = 35;
+export const REBEL_INCOME_PER_SECOND = 60;
 
 export function isHumanCountry(sim: SimulationState, countryId: number): boolean {
   return Boolean(sim.humanPlayers[countryId]);
 }
 
 export function computeInitialMoney(seedGdp: number, seedMilitary: number): number {
-  return Math.round(80 + Math.sqrt(Math.max(0, seedGdp)) * 3.5 + seedMilitary * 0.8);
+  return Math.round(100 + Math.sqrt(Math.max(0, seedGdp)) * 3.0 + seedMilitary * 0.65);
 }
 
 export function computeInitialArmy(seedMilitary: number): number {
   const t = Math.max(0, Math.min(1, (seedMilitary - 1) / (240 - 1)));
   return Math.round(MIN_INITIAL_ARMY + t * (MAX_INITIAL_ARMY - MIN_INITIAL_ARMY));
+}
+
+export function getArmyCap(c: CountryState): number {
+  return Math.round(900 + c.cities * 120 + Math.sqrt(Math.max(1, c.pixels)) * 135);
+}
+
+export function getMoneyCap(c: CountryState): number {
+  return Math.round(12000 + c.cities * 1800 + Math.sqrt(Math.max(1, c.pixels)) * 900);
 }
 
 export function getGoldMineCost(c: CountryState): number {
@@ -478,8 +489,8 @@ export function createSimulation(
       netIncome: 0,
       monthlyIncomeBonus: 0,
       army: startArmy,
-      goldMines: Math.max(1, Math.min(8, Math.round(Math.sqrt(seed.gdp) / 22) + 1)),
-      cities: Math.max(1, Math.min(8, Math.round(Math.sqrt(seed.popM) / 2.6) + 1)),
+      goldMines: Math.max(1, Math.min(5, Math.round(Math.sqrt(seed.gdp) / 28) + 1)),
+      cities: Math.max(1, Math.min(6, Math.round(Math.sqrt(seed.popM) / 3.0) + 1)),
       goldMinePurchases: 0,
       cityPurchases: 0,
       goldMinesBuiltThisMonth: 0,
@@ -629,7 +640,7 @@ export function createSimulation(
     outcome: 'none',
     sandboxAfterVictory: false,
     dirtyPixels: true,
-    nextEventDay: 42,
+    nextEventDay: 110,
     nextIdCounter: 1,
     aiCursor: 0,
     lastAiWarMonth: -1,
@@ -882,7 +893,7 @@ export function sendDiplomaticGift(
   }
 
   from.money -= cost;
-  to.money += cost;
+  to.money = Math.min(getMoneyCap(to), to.money + cost);
   addRelation(sim, fromId, toId, actualPoints);
   soundEngine.playClick();
   return { ok: true, gained: actualPoints };
@@ -1366,11 +1377,14 @@ export function respondToPendingProposal(sim: SimulationState, accept: boolean) 
 
 export function buildGoldMine(sim: SimulationState, countryId: number): string | null {
   const c = sim.countries[countryId];
+  if (c.goldMines >= MAX_GOLD_MINES_TOTAL) {
+    return `Ya alcanzaste el límite máximo de ${MAX_GOLD_MINES_TOTAL} Minas de Oro.`;
+  }
   if (c.goldMinesBuiltThisMonth >= MAX_GOLD_MINES_PER_MONTH) {
     return `Solo puedes construir ${MAX_GOLD_MINES_PER_MONTH} Mina de Oro por mes.`;
   }
   const cost = getGoldMineCost(c);
-  if (c.money < cost) return `Necesitas $${cost} de dinero.`;
+  if (c.money < cost) return `Necesitas $${cost.toLocaleString('es-ES')} de dinero.`;
   c.money -= cost;
   c.goldMines++;
   c.goldMinePurchases++;
@@ -1382,11 +1396,14 @@ export function buildGoldMine(sim: SimulationState, countryId: number): string |
 
 export function buildCity(sim: SimulationState, countryId: number): string | null {
   const c = sim.countries[countryId];
+  if (c.cities >= MAX_CITIES_TOTAL) {
+    return `Ya alcanzaste el límite máximo de ${MAX_CITIES_TOTAL} Ciudades.`;
+  }
   if (c.citiesBuiltThisMonth >= MAX_CITIES_PER_MONTH) {
     return `Solo puedes construir ${MAX_CITIES_PER_MONTH} Ciudades por mes.`;
   }
   const cost = getCityCost(c);
-  if (c.money < cost) return `Necesitas $${cost} de dinero.`;
+  if (c.money < cost) return `Necesitas $${cost.toLocaleString('es-ES')} de dinero.`;
   c.money -= cost;
   c.cities++;
   c.cityPurchases++;
@@ -1445,11 +1462,15 @@ export function buildPort(
 
 export function recruitSoldiers(sim: SimulationState, countryId: number): string | null {
   const c = sim.countries[countryId];
+  const armyCap = getArmyCap(c);
+  if (c.army >= armyCap) {
+    return `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`;
+  }
   if (c.money < ARMY_RECRUIT_COST) {
     return `Necesitas $${ARMY_RECRUIT_COST} para reclutar ${ARMY_RECRUIT_AMOUNT} soldados.`;
   }
   c.money -= ARMY_RECRUIT_COST;
-  c.army += ARMY_RECRUIT_AMOUNT;
+  c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
   updateAllEconomies(sim, false);
   if (countryId === sim.playerId) soundEngine.playRecruit();
   return null;
@@ -1543,6 +1564,26 @@ function launchNavalLandingFromPort(sim: SimulationState, attackerId: number, de
   });
 }
 
+export function stabilizeSimulationStats(sim: SimulationState) {
+  for (const c of sim.countries) {
+    c.goldMines = Math.max(0, Math.min(MAX_GOLD_MINES_TOTAL, Math.round(c.goldMines)));
+    c.cities = Math.max(0, Math.min(MAX_CITIES_TOTAL, Math.round(c.cities)));
+    c.monthlyIncomeBonus = Math.max(
+      0,
+      Math.min(MAX_MONTHLY_INCOME_BONUS, Math.round(c.monthlyIncomeBonus))
+    );
+    if (!c.alive) {
+      c.netIncome = 0;
+      continue;
+    }
+    const armyCap = getArmyCap(c);
+    const moneyCap = getMoneyCap(c);
+    if (c.army > armyCap) c.army = armyCap;
+    if (c.money > moneyCap) c.money = moneyCap;
+  }
+  updateAllEconomies(sim, false);
+}
+
 function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
   for (const c of sim.countries) {
     if (!c.alive) {
@@ -1550,24 +1591,45 @@ function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
       continue;
     }
 
-    if (applyMonthlyGrowth) {
-      // Todos los países mejoran progresivamente su ejército a medida que pasa el tiempo
-      const monthlyArmyGrowth = Math.max(6, Math.round(c.army * 0.012 + c.cities * 2));
-      c.army += monthlyArmyGrowth;
+    const armyCap = getArmyCap(c);
 
-      // Cada mes el ingreso por segundo sube en +1
-      c.monthlyIncomeBonus += MONTHLY_INCOME_GROWTH;
+    if (applyMonthlyGrowth) {
+      // Crecimiento logístico del ejército: frena suavemente al acercarse a la capacidad militar
+      if (c.army < armyCap) {
+        const headroom = Math.max(0, 1 - c.army / armyCap);
+        const baseGrowth =
+          5 + Math.min(30, Math.floor(c.cities * 1.1 + Math.sqrt(Math.max(1, c.pixels)) * 0.4));
+        const monthlyArmyGrowth = Math.max(1, Math.round(baseGrowth * headroom));
+        c.army = Math.min(armyCap, c.army + monthlyArmyGrowth);
+      } else if (c.army > armyCap) {
+        const excess = c.army - armyCap;
+        c.army = Math.max(armyCap, Math.round(c.army - Math.max(5, excess * 0.15)));
+      }
+
+      // Crecimiento económico moderado: +$1/seg cada enero (hasta +10 máximo)
+      if (sim.month === 1 && c.monthlyIncomeBonus < MAX_MONTHLY_INCOME_BONUS) {
+        c.monthlyIncomeBonus = Math.min(
+          MAX_MONTHLY_INCOME_BONUS,
+          c.monthlyIncomeBonus + MONTHLY_INCOME_GROWTH
+        );
+      }
+
+      if (c.aggressiveExpansion > 0) {
+        c.aggressiveExpansion = Math.max(0, c.aggressiveExpansion - 1);
+      }
     }
 
-    const baseTerritoryIncome = Math.max(2, Math.round(Math.sqrt(c.pixels) * 0.25));
+    const baseTerritoryIncome = Math.max(3, Math.round(Math.sqrt(Math.max(1, c.pixels)) * 0.45));
     const minesIncome = c.goldMines * GOLD_MINE_INCOME;
     const citiesIncome = c.cities * CITY_INCOME;
-    const armyUpkeep = Math.round(c.army * 0.0015);
+    const cappedBonus = Math.min(MAX_MONTHLY_INCOME_BONUS, Math.max(0, c.monthlyIncomeBonus));
 
-    c.netIncome = Math.max(
-      1,
-      baseTerritoryIncome + minesIncome + citiesIncome + c.monthlyIncomeBonus - armyUpkeep
-    );
+    const normalArmy = Math.min(c.army, armyCap);
+    const excessArmy = Math.max(0, c.army - armyCap);
+    const armyUpkeep = Math.round(normalArmy * 0.004 + excessArmy * 0.015);
+    const rawNet = baseTerritoryIncome + minesIncome + citiesIncome + cappedBonus - armyUpkeep;
+
+    c.netIncome = excessArmy > 0 ? Math.max(-25, rawNet) : Math.max(2, rawNet);
   }
 }
 
@@ -1583,7 +1645,8 @@ export function stepSimulationSecond(sim: SimulationState) {
   updateAllEconomies(sim, false);
   for (const c of sim.countries) {
     if (!c.alive) continue;
-    c.money = Math.max(0, Math.round(c.money + c.netIncome));
+    const moneyCap = getMoneyCap(c);
+    c.money = Math.max(0, Math.min(moneyCap, Math.round(c.money + c.netIncome)));
   }
   if (sim.countries[sim.playerId]?.alive && sim.countries[sim.playerId].netIncome > 0) {
     soundEngine.playMoneyEarned(true);
@@ -1596,7 +1659,7 @@ export function stepSimulationSecond(sim: SimulationState) {
       const slot = sim.humanPlayers[cid];
       const country = sim.countries[cid];
       if (slot && country && !country.alive) {
-        slot.rebelMoney += REBEL_INCOME_PER_SECOND;
+        slot.rebelMoney = Math.min(25000, slot.rebelMoney + REBEL_INCOME_PER_SECOND);
       }
     }
   }
@@ -1920,10 +1983,20 @@ function processFrontlineBattles(sim: SimulationState) {
       }
     }
 
-    // Combat casualties scaled for 500..1500+ army sizes
-    const lossScale = 1.5 + Math.min(14, skirmishes * 0.32) * 0.45;
-    a.army = Math.max(10, Math.round(a.army - lossScale * (1 - probA + 0.25)));
-    b.army = Math.max(10, Math.round(b.army - lossScale * (probA + 0.25)));
+    // Proportional combat casualties so wars genuinely consume armies and prevent runaway snowballs
+    const frontForce = Math.min(a.army, b.army);
+    const intensity = Math.min(1, skirmishes / 48);
+    const baseCasualties = Math.max(4, Math.round(frontForce * (0.004 + intensity * 0.01)));
+    const lossA = Math.min(
+      Math.round(a.army * 0.035),
+      Math.max(3, Math.round(baseCasualties * (1.25 - probA)))
+    );
+    const lossB = Math.min(
+      Math.round(b.army * 0.035),
+      Math.max(3, Math.round(baseCasualties * (0.25 + probA)))
+    );
+    a.army = Math.max(10, Math.round(a.army - lossA));
+    b.army = Math.max(10, Math.round(b.army - lossB));
 
     // Evitar guerras eternas por los últimos 1-4 píxeles sueltos de un país derrotado
     const capThreshA = a.initialPixels >= 8 ? Math.min(4, Math.floor(a.initialPixels * 0.2)) : 0;
@@ -1970,12 +2043,19 @@ function processFrontlineBattles(sim: SimulationState) {
     if (sim.isMultiplayer && sim.humanPlayers[loser]) {
       const slot = sim.humanPlayers[loser];
       slot.rebelMoney = Math.max(slot.rebelMoney, 300);
-      slot.rebelArmy = Math.max(slot.rebelArmy, 20);
+      slot.rebelArmy = Math.max(slot.rebelArmy, 35);
     }
 
-    w.money += Math.round(l.money * 0.4);
-    w.goldMines += Math.max(0, Math.floor(l.goldMines * 0.5));
-    w.cities += Math.max(0, Math.floor(l.cities * 0.5));
+    const warLoot = Math.min(2500, Math.round(l.money * 0.25));
+    w.money = Math.min(getMoneyCap(w), w.money + warLoot);
+    w.goldMines = Math.min(
+      MAX_GOLD_MINES_TOTAL,
+      w.goldMines + Math.min(3, Math.floor(l.goldMines * 0.25))
+    );
+    w.cities = Math.min(
+      MAX_CITIES_TOTAL,
+      w.cities + Math.min(4, Math.floor(l.cities * 0.25))
+    );
     w.aggressiveExpansion += 18;
 
     for (let j = 0; j < N_COUNTRIES; j++) {
@@ -2054,35 +2134,43 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
   const enemies = getEnemies(sim, c.id);
   const atWar = enemies.length > 0;
 
-  // 1. Improve army and build economy over time (respecting monthly build limits)
-  if (atWar && c.money >= ARMY_RECRUIT_COST) {
-    c.money -= ARMY_RECRUIT_COST;
-    c.army += ARMY_RECRUIT_AMOUNT;
+  // 1. Improve army and build economy over time (respecting supply & monthly build limits)
+  const armyCap = getArmyCap(c);
+  if (atWar) {
+    let recruits = 0;
+    while (recruits < 3 && c.army < armyCap && c.money >= ARMY_RECRUIT_COST) {
+      c.money -= ARMY_RECRUIT_COST;
+      c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
+      recruits++;
+    }
   } else {
     const cityCost = getCityCost(c);
     const mineCost = getGoldMineCost(c);
     if (
+      c.cities < MAX_CITIES_TOTAL &&
       c.citiesBuiltThisMonth < MAX_CITIES_PER_MONTH &&
       c.money >= cityCost &&
-      Math.random() < 0.35
+      Math.random() < 0.32
     ) {
       c.money -= cityCost;
       c.cities++;
       c.cityPurchases++;
       c.citiesBuiltThisMonth++;
     } else if (
+      c.goldMines < MAX_GOLD_MINES_TOTAL &&
       c.goldMinesBuiltThisMonth < MAX_GOLD_MINES_PER_MONTH &&
       c.money >= mineCost &&
-      Math.random() < 0.45
+      Math.random() < 0.42
     ) {
       c.money -= mineCost;
       c.goldMines++;
       c.goldMinePurchases++;
       c.goldMinesBuiltThisMonth++;
     }
-    if (c.money >= ARMY_RECRUIT_COST && Math.random() < 0.65) {
+    const targetPeaceArmy = Math.round(armyCap * 0.78);
+    if (c.army < targetPeaceArmy && c.money >= ARMY_RECRUIT_COST && Math.random() < 0.6) {
       c.money -= ARMY_RECRUIT_COST;
-      c.army += ARMY_RECRUIT_AMOUNT;
+      c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
     }
     if (c.defenses.length < 3 && c.money >= DEFENSE_COST && Math.random() < 0.14) {
       buildDefenseAt(sim, c.id, c.capitalX, c.capitalY);
@@ -2226,9 +2314,15 @@ function triggerHistoricalEvent(sim: SimulationState) {
 export function resolveEventChoice(sim: SimulationState, choice: EventChoice) {
   const p = sim.countries[sim.playerId];
   const e = choice.effects;
-  if (e.moneyDelta) p.money = Math.max(0, p.money + e.moneyDelta);
+  const armyCap = getArmyCap(p);
+  const moneyCap = getMoneyCap(p);
+  if (e.moneyDelta) {
+    p.money = Math.max(0, Math.min(moneyCap, Math.round(p.money + e.moneyDelta)));
+  }
   if (e.armyDeltaPct) {
-    p.army = Math.max(2, Math.round(p.army * (1 + e.armyDeltaPct)));
+    const rawDelta = Math.round(p.army * e.armyDeltaPct);
+    const boundedDelta = e.armyDeltaPct > 0 ? Math.min(350, rawDelta) : rawDelta;
+    p.army = Math.max(10, Math.min(armyCap, Math.round(p.army + boundedDelta)));
   }
   if (e.globalTensionDelta) {
     sim.globalTension = Math.max(0, Math.min(100, sim.globalTension + e.globalTensionDelta));
@@ -2236,6 +2330,7 @@ export function resolveEventChoice(sim: SimulationState, choice: EventChoice) {
   if (e.globalStabilityDelta) {
     sim.globalStability = Math.max(10, Math.min(100, sim.globalStability + e.globalStabilityDelta));
   }
+  updateAllEconomies(sim, false);
   sim.activeEvent = null;
   if (e.moneyDelta && e.moneyDelta > 0) {
     soundEngine.playMoneyEarned(false);
@@ -2258,7 +2353,7 @@ export function stepSimulationDay(sim: SimulationState) {
 
   if (sim.totalDays >= sim.nextEventDay) {
     triggerHistoricalEvent(sim);
-    sim.nextEventDay = sim.totalDays + 60 + Math.floor(Math.random() * 45);
+    sim.nextEventDay = sim.totalDays + 150 + Math.floor(Math.random() * 90);
   }
 
   if (sim.day > 30) {

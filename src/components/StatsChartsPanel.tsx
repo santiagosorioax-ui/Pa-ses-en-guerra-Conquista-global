@@ -52,8 +52,11 @@ export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
             <span>Crecimiento Económico</span>
           </div>
           <div className="font-mono-num text-[11px] text-amber-300">
-            ${Math.round(player.money)} ·{' '}
-            <span className="text-emerald-400">+{Math.round(player.netIncome)}/seg</span>
+            ${Math.round(player.money).toLocaleString('es-ES')} ·{' '}
+            <span className={player.netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+              {player.netIncome >= 0 ? '+' : ''}
+              {Math.round(player.netIncome).toLocaleString('es-ES')}/seg
+            </span>
           </div>
         </div>
 
@@ -129,9 +132,10 @@ export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
             <span>Poder Militar</span>
           </div>
           <div className="font-mono-num text-[11px] text-rose-300">
-            {Math.round(player.army)} sold.{' '}
+            {Math.round(player.army).toLocaleString('es-ES')} sold.{' '}
             <span className={armyDiff >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-              ({armyDiff >= 0 ? '+' : ''}{armyDiff})
+              ({armyDiff >= 0 ? '+' : ''}
+              {armyDiff.toLocaleString('es-ES')})
             </span>
           </div>
         </div>

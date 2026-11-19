@@ -75,16 +75,22 @@ export function RebellionPanel({
       <div className="grid grid-cols-3 gap-2 bg-[#0B121E] border border-slate-800 p-2 text-center font-mono-num">
         <div>
           <div className="text-[10px] text-slate-400 font-sans">Fondos</div>
-          <div className="text-xs font-bold text-emerald-300">${status.rebelMoney}</div>
+          <div className="text-xs font-bold text-emerald-300">
+            ${Math.round(status.rebelMoney).toLocaleString('es-ES')}
+          </div>
           <div className="text-[9px] text-emerald-400">+${REBEL_INCOME_PER_SECOND}/s</div>
         </div>
         <div>
           <div className="text-[10px] text-slate-400 font-sans">Rebeldes</div>
-          <div className="text-xs font-bold text-amber-300">{status.rebelArmy}</div>
+          <div className="text-xs font-bold text-amber-300">
+            {Math.round(status.rebelArmy).toLocaleString('es-ES')}
+          </div>
         </div>
         <div>
           <div className="text-[10px] text-slate-400 font-sans">Ocupante</div>
-          <div className="text-xs font-bold text-red-400">{status.occupierArmy}</div>
+          <div className="text-xs font-bold text-red-400">
+            {Math.round(status.occupierArmy).toLocaleString('es-ES')}
+          </div>
         </div>
       </div>
 
@@ -96,7 +102,8 @@ export function RebellionPanel({
             <span className="truncate">Requisito (≥ 50% de {status.occupierName})</span>
           </span>
           <span className="font-mono-num font-bold text-amber-300 shrink-0">
-            {status.rebelArmy} / {status.requiredArmy}
+            {Math.round(status.rebelArmy).toLocaleString('es-ES')} /{' '}
+            {Math.round(status.requiredArmy).toLocaleString('es-ES')}
           </span>
         </div>
         <div className="w-full h-2 bg-[#0B121E] border border-slate-800 overflow-hidden">

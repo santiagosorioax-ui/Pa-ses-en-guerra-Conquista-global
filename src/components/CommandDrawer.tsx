@@ -20,15 +20,19 @@ import {
   DEFENSE_RADIUS,
   GOLD_MINE_INCOME,
   MAX_CITIES_PER_MONTH,
+  MAX_CITIES_TOTAL,
   MAX_GOLD_MINES_PER_MONTH,
+  MAX_GOLD_MINES_TOTAL,
   PORT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
   getAllies,
+  getArmyCap,
   getCityCost,
   getCountryDefensePct,
   getEnemies,
   getGoldMineCost,
+  getMoneyCap,
   getRelation,
   getTopRelations,
   hasCoast,
@@ -96,6 +100,8 @@ export function CommandDrawer({
   const playerWars = getEnemies(sim, player.id);
   const playerAllies = getAllies(sim, player.id);
   const canBuildPort = hasCoast(sim, player.id);
+  const armyCap = getArmyCap(player);
+  const moneyCap = getMoneyCap(player);
 
   const topPowers = [...sim.countries]
     .filter((c) => c.alive && c.id !== player.id)
@@ -183,17 +189,32 @@ export function CommandDrawer({
 
             {/* Resumen Dinero y Ejército */}
             <div className="grid grid-cols-2 gap-2 bg-[#0B121E] border border-slate-800 p-3 font-mono-num">
-              <div>
+              <div className="min-w-0">
                 <div className="text-[11px] text-slate-400 font-sans">Dinero Actual</div>
-                <div className="text-lg font-bold text-amber-300">${Math.round(player.money)}</div>
-                <div className="text-[11px] text-emerald-400">
-                  +{Math.round(player.netIncome)} / seg
+                <div className="text-base font-bold text-amber-300 truncate">
+                  ${Math.round(player.money).toLocaleString('es-ES')}
+                </div>
+                <div
+                  className={`text-[11px] ${
+                    player.netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'
+                  }`}
+                >
+                  {player.netIncome >= 0 ? '+' : ''}
+                  {Math.round(player.netIncome).toLocaleString('es-ES')} / seg
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">
+                  Reserva máx. ${moneyCap.toLocaleString('es-ES')}
                 </div>
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="text-[11px] text-slate-400 font-sans">Tu Ejército</div>
-                <div className="text-lg font-bold text-rose-400">{Math.round(player.army)}</div>
-                <div className="text-[11px] text-emerald-400">
+                <div className="text-base font-bold text-rose-400 truncate">
+                  {Math.round(player.army).toLocaleString('es-ES')}
+                </div>
+                <div className="text-[11px] text-slate-300 truncate">
+                  Cap. {armyCap.toLocaleString('es-ES')}
+                </div>
+                <div className="text-[10px] text-emerald-400 truncate">
                   Defensa país +{getCountryDefensePct(player)}%
                 </div>
               </div>
@@ -204,7 +225,9 @@ export function CommandDrawer({
               <button
                 disabled={busy || !player.alive}
                 onClick={() => void runAction({ type: 'recruit_soldiers' })}
-                className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-sm flex items-center justify-between transition-colors cursor-pointer"
+                className={`w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-sm flex items-center justify-between transition-colors cursor-pointer ${
+                  Math.round(player.army) >= armyCap ? 'opacity-65' : ''
+                }`}
               >
                 <span className="flex items-center gap-2">
                   <Swords className="w-4 h-4" />
@@ -215,7 +238,7 @@ export function CommandDrawer({
                 </span>
               </button>
               <p className="text-[11px] text-slate-400">
-                Gasta dinero para sumar soldados. Si alcanzan una capital en guerra, ese país pierde 50% de su ejército.
+                Gasta dinero para sumar soldados hasta tu capacidad militar. Construye ciudades o conquista territorio para ampliarla.
               </p>
             </div>
 
@@ -229,14 +252,17 @@ export function CommandDrawer({
                 disabled={busy || !player.alive}
                 onClick={() => void runAction({ type: 'build_gold_mine' })}
                 className={`w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 disabled:opacity-45 border border-slate-800 flex items-center justify-between text-left cursor-pointer ${
-                  player.goldMinesBuiltThisMonth >= MAX_GOLD_MINES_PER_MONTH ? 'opacity-60' : ''
+                  player.goldMinesBuiltThisMonth >= MAX_GOLD_MINES_PER_MONTH ||
+                  player.goldMines >= MAX_GOLD_MINES_TOTAL
+                    ? 'opacity-60'
+                    : ''
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   <Pickaxe className="w-4 h-4 text-amber-400 shrink-0" />
                   <div>
                     <div className="text-xs font-semibold text-slate-100">
-                      Mina de Oro ({player.goldMines}) ·{' '}
+                      Mina de Oro ({player.goldMines}/{MAX_GOLD_MINES_TOTAL}) ·{' '}
                       <span className="font-mono-num text-[11px] text-amber-300">
                         {player.goldMinesBuiltThisMonth}/{MAX_GOLD_MINES_PER_MONTH} este mes
                       </span>
@@ -247,7 +273,7 @@ export function CommandDrawer({
                   </div>
                 </div>
                 <span className="font-mono-num text-xs text-amber-300 font-semibold shrink-0">
-                  ${getGoldMineCost(player)}
+                  ${getGoldMineCost(player).toLocaleString('es-ES')}
                 </span>
               </button>
 
@@ -255,25 +281,28 @@ export function CommandDrawer({
                 disabled={busy || !player.alive}
                 onClick={() => void runAction({ type: 'build_city' })}
                 className={`w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 disabled:opacity-45 border border-slate-800 flex items-center justify-between text-left cursor-pointer ${
-                  player.citiesBuiltThisMonth >= MAX_CITIES_PER_MONTH ? 'opacity-60' : ''
+                  player.citiesBuiltThisMonth >= MAX_CITIES_PER_MONTH ||
+                  player.cities >= MAX_CITIES_TOTAL
+                    ? 'opacity-60'
+                    : ''
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   <Building2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <div>
                     <div className="text-xs font-semibold text-slate-100">
-                      Ciudad ({player.cities}) ·{' '}
+                      Ciudad ({player.cities}/{MAX_CITIES_TOTAL}) ·{' '}
                       <span className="font-mono-num text-[11px] text-emerald-300">
                         {player.citiesBuiltThisMonth}/{MAX_CITIES_PER_MONTH} este mes
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      Genera +${CITY_INCOME} dinero / seg
+                      +${CITY_INCOME}/seg y +120 cap. militar
                     </div>
                   </div>
                 </div>
                 <span className="font-mono-num text-xs text-amber-300 font-semibold shrink-0">
-                  ${getCityCost(player)}
+                  ${getCityCost(player).toLocaleString('es-ES')}
                 </span>
               </button>
 
@@ -374,7 +403,7 @@ export function CommandDrawer({
                               {enemy.seed.name}
                             </div>
                             <div className="text-[11px] text-slate-400 font-mono-num">
-                              Ejército {Math.round(enemy.army)} · {warMonths}/36 meses
+                              Ejército {Math.round(enemy.army).toLocaleString('es-ES')} · {warMonths}/36 meses
                             </div>
                           </div>
                         </button>
@@ -428,7 +457,7 @@ export function CommandDrawer({
                           <span className="text-sky-200 font-medium truncate">{ally.seed.name}</span>
                         </span>
                         <span className="font-mono-num text-slate-400 shrink-0 ml-2">
-                          Ejército {Math.round(ally.army)}
+                          Ejército {Math.round(ally.army).toLocaleString('es-ES')}
                         </span>
                       </button>
                     );
@@ -519,7 +548,9 @@ export function CommandDrawer({
                         </span>
                       </span>
                       <span className="font-mono-num text-[11px] shrink-0 ml-2">
-                        <span className="text-slate-400">Ej. {Math.round(c.army)} · </span>
+                        <span className="text-slate-400">
+                          Ej. {Math.round(c.army).toLocaleString('es-ES')} ·{' '}
+                        </span>
                         <span
                           className={
                             war

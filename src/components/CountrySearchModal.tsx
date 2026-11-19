@@ -112,9 +112,13 @@ export function CountrySearchModal({
                     <span className="text-slate-500">Anexado</span>
                   ) : (
                     <>
-                      <span className="text-amber-300">${Math.round(c.money)}</span>
+                      <span className="text-amber-300">
+                        ${Math.round(c.money).toLocaleString('es-ES')}
+                      </span>
                       <span className="text-slate-500"> · </span>
-                      <span className="text-rose-300">Ej. {Math.round(c.army)}</span>
+                      <span className="text-rose-300">
+                        Ej. {Math.round(c.army).toLocaleString('es-ES')}
+                      </span>
                       {war && <span className="text-red-400 ml-1.5">· Guerra</span>}
                       {ally && <span className="text-sky-400 ml-1.5">· Aliado</span>}
                     </>

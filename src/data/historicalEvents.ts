@@ -42,8 +42,8 @@ export const HISTORICAL_EVENTS: HistoricalEventTemplate[] = [
       },
       {
         label: 'Financiar reclutamiento inmediato',
-        summary: 'Convierte la bonanza en nuevos soldados.',
-        effects: { moneyDelta: 60, armyDeltaPct: 0.12 },
+        summary: 'Convierte la bonanza en nuevos soldados (hasta el límite militar).',
+        effects: { moneyDelta: 60, armyDeltaPct: 0.06 },
       },
     ],
   },
@@ -67,7 +67,7 @@ export const HISTORICAL_EVENTS: HistoricalEventTemplate[] = [
       {
         label: 'Recorte militar de austeridad',
         summary: 'Protege las arcas reduciendo tropas activas.',
-        effects: { moneyDelta: 40, armyDeltaPct: -0.1 },
+        effects: { moneyDelta: 60, armyDeltaPct: -0.08 },
       },
     ],
   },
@@ -86,12 +86,12 @@ export const HISTORICAL_EVENTS: HistoricalEventTemplate[] = [
       {
         label: 'Respaldar la cumbre',
         summary: 'Recibe ayuda económica internacional.',
-        effects: { moneyDelta: 120, globalTensionDelta: -4 },
+        effects: { moneyDelta: 150, globalTensionDelta: -4 },
       },
       {
         label: 'Reforzar defensa nacional',
         summary: 'Amplía el ejército aprovechando la calma global.',
-        effects: { armyDeltaPct: 0.1, globalTensionDelta: 3 },
+        effects: { armyDeltaPct: 0.05, globalTensionDelta: 3 },
       },
     ],
   },
@@ -109,13 +109,13 @@ export const HISTORICAL_EVENTS: HistoricalEventTemplate[] = [
     choices: [
       {
         label: 'Movilización general',
-        summary: 'Invierte dinero para sumar un 18% más de soldados.',
-        effects: { moneyDelta: -130, armyDeltaPct: 0.18 },
+        summary: 'Invierte dinero para sumar un 8% más de soldados (máx. +350).',
+        effects: { moneyDelta: -150, armyDeltaPct: 0.08 },
       },
       {
         label: 'Vender equipamiento militar',
         summary: 'Obtén dinero rápido en el mercado internacional.',
-        effects: { moneyDelta: 180 },
+        effects: { moneyDelta: 200 },
       },
     ],
   },
@@ -130,7 +130,7 @@ export const HISTORICAL_EVENTS: HistoricalEventTemplate[] = [
       {
         label: 'Reforzar guarniciones',
         summary: 'Contrata tropas adicionales para proteger la capital.',
-        effects: { moneyDelta: -100, armyDeltaPct: 0.14 },
+        effects: { moneyDelta: -110, armyDeltaPct: 0.06 },
       },
       {
         label: 'Desescalada diplomática',

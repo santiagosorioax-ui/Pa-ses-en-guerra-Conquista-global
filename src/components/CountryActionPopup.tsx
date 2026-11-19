@@ -165,10 +165,10 @@ export function CountryActionPopup({
                 <span>Dinero</span>
               </div>
               <div className="text-sm font-bold text-amber-300">
-                ${Math.round(target.money)}
+                ${Math.round(target.money).toLocaleString('es-ES')}
               </div>
               <div className="text-[10px] text-slate-500">
-                Tuyo: ${Math.round(player.money)}
+                Tuyo: ${Math.round(player.money).toLocaleString('es-ES')}
               </div>
             </div>
             <div>
@@ -177,10 +177,10 @@ export function CountryActionPopup({
                 <span>Ejército</span>
               </div>
               <div className="text-sm font-bold text-rose-400">
-                {Math.round(target.army)}
+                {Math.round(target.army).toLocaleString('es-ES')}
               </div>
               <div className="text-[10px] text-slate-500">
-                Tuyo: {Math.round(player.army)}
+                Tuyo: {Math.round(player.army).toLocaleString('es-ES')}
               </div>
             </div>
           </div>

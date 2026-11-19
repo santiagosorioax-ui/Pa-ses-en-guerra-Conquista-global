@@ -3,6 +3,7 @@ import { COUNTRIES_195 } from '../data/countries195';
 import {
   N_COUNTRIES,
   formatFullDate,
+  stabilizeSimulationStats,
   type AiDoctrine,
   type ChronicleEntry,
   type CountryState,
@@ -357,7 +358,7 @@ export function restoreSimulationFromSnapshot(
 
   const countries = hydrateCountries(raw.countries as SerializedCountry[], mapData);
 
-  return {
+  const restored: SimulationState = {
     playerId: Number(raw.playerId),
     isMultiplayer: false,
     winnerCountryId: null,
@@ -393,6 +394,9 @@ export function restoreSimulationFromSnapshot(
     aiCursor: Number(raw.aiCursor),
     lastAiWarMonth: Number(raw.lastAiWarMonth),
   };
+
+  stabilizeSimulationStats(restored);
+  return restored;
 }
 
 export function buildRoomWorldStatePayload(

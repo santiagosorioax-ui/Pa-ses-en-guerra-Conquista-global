@@ -64,7 +64,7 @@ export function EventModal({
                 ? `¡Has eliminado a los 195 países del planeta al mando de ${player.seed.name}! Victoria mundial total en el modo Online.`
                 : `${winnerCountry?.seed.name ?? 'Un imperio'}${winnerPlayerSlot ? ` dirigido por ${winnerPlayerSlot.displayName}` : ''} ha eliminado a todos los demás países del planeta.`
               : isVictory
-                ? `${player.seed.name} domina más del 35% del territorio habitable del planeta (${(player.pixels * 100).toLocaleString('es-ES')} km²) con $${Math.round(player.money)} de dinero y un ejército de ${Math.round(player.army)} soldados.`
+                ? `${player.seed.name} domina más del 35% del territorio habitable del planeta (${(player.pixels * 100).toLocaleString('es-ES')} km²) con $${Math.round(player.money).toLocaleString('es-ES')} de dinero y un ejército de ${Math.round(player.army).toLocaleString('es-ES')} soldados.`
                 : `El último territorio de ${player.seed.name} ha caído bajo control enemigo. Tu campaña estratégica ha concluido.`}
           </p>
 

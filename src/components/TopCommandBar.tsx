@@ -139,14 +139,19 @@ export function TopCommandBar({
             )}
             <span className="flex items-center gap-1 text-emerald-300 font-bold">
               <Coins className="w-3 h-3 text-amber-400 shrink-0" />
-              ${player.money}
-              <span className="text-[10px] text-emerald-400 font-normal">
-                (+{player.netIncome}/s)
+              ${Math.round(player.money).toLocaleString('es-ES')}
+              <span
+                className={`text-[10px] font-normal ${
+                  player.netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'
+                }`}
+              >
+                ({player.netIncome >= 0 ? '+' : ''}
+                {Math.round(player.netIncome).toLocaleString('es-ES')}/s)
               </span>
             </span>
             <span className="flex items-center gap-1 text-rose-300 font-bold">
               <Swords className="w-3 h-3 text-rose-400 shrink-0" />
-              {player.army}
+              {Math.round(player.army).toLocaleString('es-ES')}
             </span>
             <span className="flex items-center gap-1 text-sky-300 font-bold">
               <Anchor className="w-3 h-3 text-sky-400 shrink-0" />
@@ -206,9 +211,12 @@ export function TopCommandBar({
           <div>
             <div className="text-[10px] text-slate-400 font-sans leading-none">Dinero</div>
             <div className="flex items-baseline gap-1.5 mt-0.5 whitespace-nowrap">
-              <span className="text-sm font-bold text-emerald-300">${player.money}</span>
+              <span className="text-sm font-bold text-emerald-300">
+                ${Math.round(player.money).toLocaleString('es-ES')}
+              </span>
               <span className={`text-[11px] ${player.netIncome >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                ({player.netIncome >= 0 ? '+' : ''}{player.netIncome}/seg)
+                ({player.netIncome >= 0 ? '+' : ''}
+                {Math.round(player.netIncome).toLocaleString('es-ES')}/seg)
               </span>
             </div>
           </div>
@@ -221,7 +229,7 @@ export function TopCommandBar({
           <div>
             <div className="text-[10px] text-slate-400 font-sans leading-none">Ejército</div>
             <div className="text-sm font-bold text-slate-100 mt-0.5 whitespace-nowrap">
-              {player.army} soldados
+              {Math.round(player.army).toLocaleString('es-ES')} soldados
             </div>
           </div>
         </div>
