@@ -12,7 +12,11 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { formatFullDate, type SimulationState } from '../engine/gameSimulation';
+import {
+  formatFullDate,
+  getCountryDisplayName,
+  type SimulationState,
+} from '../engine/gameSimulation';
 import type { DeviceMode } from './DeviceModeScreen';
 import { PWAInstallButton } from './PWAInstallPrompt';
 import { PixelFlag } from './PixelFlag';
@@ -64,8 +68,8 @@ export function TopCommandBar({
           >
             <PixelFlag country={player.seed} size="sm" />
             <div className="min-w-0">
-              <div className="text-xs font-bold text-amber-300 truncate max-w-[84px]">
-                {player.seed.name}
+              <div className="text-xs font-bold text-amber-300 truncate max-w-[96px]">
+                {getCountryDisplayName(player)}
               </div>
               <div className="text-[10px] text-slate-400 font-mono-num leading-none">
                 {formatFullDate(sim.day, sim.month, sim.year)}
@@ -195,8 +199,8 @@ export function TopCommandBar({
       >
         <PixelFlag country={player.seed} size="md" />
         <div className="min-w-0">
-          <div className="text-xs font-bold text-amber-300 truncate max-w-[160px]">
-            {player.seed.name}
+          <div className="text-xs font-bold text-amber-300 truncate max-w-[180px]">
+            {getCountryDisplayName(player)}
           </div>
           <div className="text-[11px] text-slate-400 font-mono-num whitespace-nowrap">
             Capital: {player.seed.capital} · {(player.pixels * 100).toLocaleString('es-ES')} km²

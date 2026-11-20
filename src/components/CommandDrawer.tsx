@@ -3,8 +3,10 @@ import {
   Anchor,
   Building2,
   Coins,
+  GitBranch,
   Handshake,
   Pickaxe,
+  Radiation,
   ScrollText,
   Shield,
   Swords,
@@ -15,6 +17,7 @@ import type { DeviceMode } from './DeviceModeScreen';
 import {
   ARMY_RECRUIT_AMOUNT,
   ARMY_RECRUIT_COST,
+  CITY_ARMY_CAP_BONUS,
   CITY_INCOME,
   DEFENSE_COST,
   DEFENSE_RADIUS,
@@ -23,6 +26,8 @@ import {
   MAX_CITIES_TOTAL,
   MAX_GOLD_MINES_PER_MONTH,
   MAX_GOLD_MINES_TOTAL,
+  NUKE_COST,
+  NUKE_RADIUS,
   PORT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
@@ -30,9 +35,12 @@ import {
   getArmyCap,
   getCityCost,
   getCountryDefensePct,
+  getCountryDisplayName,
   getEnemies,
   getGoldMineCost,
+  getMaxRecruitsPerMonth,
   getMoneyCap,
+  getNukeCooldownRemainingDays,
   getRelation,
   getTopRelations,
   hasCoast,
@@ -40,10 +48,11 @@ import {
   type SimulationState,
 } from '../engine/gameSimulation';
 import type { GameActionPayload, GameActionResult } from '../engine/gameActions';
+import { CountryTreeView } from './CountryTreeView';
 import { PixelFlag } from './PixelFlag';
 import { StatsChartsPanel } from './StatsChartsPanel';
 
-export type DrawerTab = 'manage' | 'diplomacy' | 'charts' | 'chronicle';
+export type DrawerTab = 'manage' | 'tree' | 'diplomacy' | 'charts' | 'chronicle';
 
 interface CommandDrawerProps {
   deviceMode: DeviceMode;
@@ -54,9 +63,12 @@ interface CommandDrawerProps {
   onChangeTab: (tab: DrawerTab) => void;
   onSelectCountry: (id: number | null) => void;
   onJumpToCountry: (id: number) => void;
+  onOpenTreeModal: (countryId: number) => void;
   onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
   placingDefense: boolean;
   onTogglePlaceDefense: () => void;
+  launchingNuke: boolean;
+  onToggleLaunchNuke: () => void;
   defenseFeedback: { text: string; ok: boolean } | null;
 }
 
@@ -69,9 +81,12 @@ export function CommandDrawer({
   onChangeTab,
   onSelectCountry,
   onJumpToCountry,
+  onOpenTreeModal,
   onExecuteAction,
   placingDefense,
   onTogglePlaceDefense,
+  launchingNuke,
+  onToggleLaunchNuke,
   defenseFeedback,
 }: CommandDrawerProps) {
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
@@ -92,6 +107,7 @@ export function CommandDrawer({
 
   const tabs: Array<{ id: DrawerTab; label: string; icon: typeof Coins }> = [
     { id: 'manage', label: 'Mando', icon: Swords },
+    { id: 'tree', label: 'Árbol', icon: GitBranch },
     { id: 'diplomacy', label: 'Alianzas', icon: Handshake },
     { id: 'charts', label: 'Gráficos', icon: TrendingUp },
     { id: 'chronicle', label: 'Crónica', icon: ScrollText },
@@ -102,6 +118,8 @@ export function CommandDrawer({
   const canBuildPort = hasCoast(sim, player.id);
   const armyCap = getArmyCap(player);
   const moneyCap = getMoneyCap(player);
+  const maxRecruits = getMaxRecruitsPerMonth(player);
+  const nukeCooldown = getNukeCooldownRemainingDays(sim, player.id);
 
   const topPowers = [...sim.countries]
     .filter((c) => c.alive && c.id !== player.id)
@@ -112,27 +130,45 @@ export function CommandDrawer({
     <aside
       className={
         deviceMode === 'mobile'
-          ? 'absolute inset-x-0 bottom-0 z-30 h-[62vh] bg-[#111B2B]/98 border-t border-slate-600 shadow-2xl flex flex-col overflow-hidden'
-          : 'w-[365px] shrink-0 bg-[#111B2B] border-l border-slate-800 flex flex-col h-full overflow-hidden'
+          ? 'absolute inset-x-0 bottom-0 z-30 h-[66vh] bg-[#111B2B]/98 border-t border-slate-600 shadow-2xl flex flex-col overflow-hidden'
+          : 'w-[385px] shrink-0 bg-[#111B2B] border-l border-slate-800 flex flex-col h-full overflow-hidden'
       }
     >
       {deviceMode === 'mobile' && (
-        <div className="px-3 py-2 border-b border-slate-800 bg-[#0E1726] flex items-center justify-between shrink-0">
-          <span className="text-xs font-bold text-amber-300">
-            {tabs.find((t) => t.id === activeTab)?.label ?? 'Panel'}
-          </span>
+        <div className="px-2.5 py-1.5 border-b border-slate-800 bg-[#0E1726] flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-1 overflow-x-auto min-w-0">
+            {tabs.map((t) => {
+              const active = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setFeedback(null);
+                    onChangeTab(t.id);
+                  }}
+                  className={`px-2 py-1 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer border ${
+                    active
+                      ? 'border-amber-400/80 bg-amber-500/15 text-amber-300'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
           <button
             onClick={onCloseMobileDrawer}
-            className="px-2.5 py-1 bg-slate-900 border border-slate-700 text-xs text-slate-200 flex items-center gap-1 cursor-pointer"
+            className="px-2 py-1 bg-slate-900 border border-slate-700 text-xs text-slate-200 flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
           >
             <X className="w-3.5 h-3.5" />
-            <span>Ver Mapa</span>
+            <span>Mapa</span>
           </button>
         </div>
       )}
 
       {/* Tab Selector */}
-      <div className={deviceMode === 'mobile' ? 'hidden' : 'grid grid-cols-4 border-b border-slate-800 bg-[#0E1726]'}>
+      <div className={deviceMode === 'mobile' ? 'hidden' : 'grid grid-cols-5 border-b border-slate-800 bg-[#0E1726]'}>
         {tabs.map((t) => {
           const Icon = t.icon;
           const active = activeTab === t.id;
@@ -143,13 +179,13 @@ export function CommandDrawer({
                 setFeedback(null);
                 onChangeTab(t.id);
               }}
-              className={`py-2.5 px-2 flex items-center justify-center gap-1.5 text-xs font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+              className={`py-2.5 px-1 flex items-center justify-center gap-1 text-[11px] font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
                 active
                   ? 'border-amber-400 text-amber-300 bg-[#111B2B]'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
+              <Icon className="w-3.5 h-3.5 shrink-0" />
               <span>{t.label}</span>
             </button>
           );
@@ -226,19 +262,23 @@ export function CommandDrawer({
                 disabled={busy || !player.alive}
                 onClick={() => void runAction({ type: 'recruit_soldiers' })}
                 className={`w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-sm flex items-center justify-between transition-colors cursor-pointer ${
-                  Math.round(player.army) >= armyCap ? 'opacity-65' : ''
+                  Math.round(player.army) >= armyCap || player.recruitsThisMonth >= maxRecruits
+                    ? 'opacity-65'
+                    : ''
                 }`}
               >
-                <span className="flex items-center gap-2">
-                  <Swords className="w-4 h-4" />
-                  <span>Ejército (+{ARMY_RECRUIT_AMOUNT} Soldados)</span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <Swords className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
+                    Ejército (+{ARMY_RECRUIT_AMOUNT}) · {player.recruitsThisMonth}/{maxRecruits} mes
+                  </span>
                 </span>
-                <span className="font-mono-num text-xs bg-rose-800/80 px-2 py-0.5">
+                <span className="font-mono-num text-xs bg-rose-800/80 px-2 py-0.5 shrink-0">
                   ${ARMY_RECRUIT_COST}
                 </span>
               </button>
               <p className="text-[11px] text-slate-400">
-                Gasta dinero para sumar soldados hasta tu capacidad militar. Construye ciudades o conquista territorio para ampliarla.
+                Recluta hasta {maxRecruits} veces al mes sin superar tu capacidad militar. Estar en guerra aumenta el costo de mantenimiento del ejército.
               </p>
             </div>
 
@@ -297,7 +337,7 @@ export function CommandDrawer({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      +${CITY_INCOME}/seg y +120 cap. militar
+                      +${CITY_INCOME}/seg y +{CITY_ARMY_CAP_BONUS} cap. militar
                     </div>
                   </div>
                 </div>
@@ -321,7 +361,7 @@ export function CommandDrawer({
                       {!canBuildPort
                         ? 'Sin costa marítima disponible'
                         : inspected
-                          ? `Orientado hacia ${inspected.seed.name}`
+                          ? `Orientado hacia ${getCountryDisplayName(inspected)}`
                           : 'Necesario para atacar países por mar'}
                     </div>
                   </div>
@@ -362,6 +402,40 @@ export function CommandDrawer({
                   {placingDefense ? 'Cancelar' : `$${DEFENSE_COST}`}
                 </span>
               </button>
+
+              <button
+                disabled={busy || !player.alive || (nukeCooldown > 0 && !launchingNuke)}
+                onClick={() => {
+                  setFeedback(null);
+                  onToggleLaunchNuke();
+                }}
+                className={`w-full p-2.5 border flex items-center justify-between text-left cursor-pointer transition-colors disabled:opacity-45 ${
+                  launchingNuke
+                    ? 'bg-orange-950/75 border-orange-500'
+                    : 'bg-[#0B121E] hover:bg-slate-800/80 border-red-900/60'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Radiation className="w-4 h-4 text-orange-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-100 truncate">
+                      {launchingNuke
+                        ? 'Apuntando Bomba Nuclear (Clic en objetivo)'
+                        : nukeCooldown > 0
+                          ? `Bomba Nuclear · Recarga ${nukeCooldown}d`
+                          : 'Bomba Nuclear'}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {launchingNuke
+                        ? 'Elige un país enemigo en el mapa o pulsa Esc'
+                        : `Radio de impacto ${NUKE_RADIUS * 10} km (menor que Defensa)`}
+                    </div>
+                  </div>
+                </div>
+                <span className="font-mono-num text-xs text-orange-300 font-semibold shrink-0 ml-2">
+                  {launchingNuke ? 'Cancelar' : `$${NUKE_COST}`}
+                </span>
+              </button>
             </div>
 
             {/* Guerras Activas */}
@@ -400,7 +474,7 @@ export function CommandDrawer({
                           <PixelFlag country={enemy.seed} size="sm" />
                           <div className="min-w-0">
                             <div className="text-xs font-semibold text-red-300 truncate">
-                              {enemy.seed.name}
+                              {getCountryDisplayName(enemy)}
                             </div>
                             <div className="text-[11px] text-slate-400 font-mono-num">
                               Ejército {Math.round(enemy.army).toLocaleString('es-ES')} · {warMonths}/36 meses
@@ -421,6 +495,20 @@ export function CommandDrawer({
               )}
             </div>
           </>
+        )}
+
+        {activeTab === 'tree' && (
+          <CountryTreeView
+            sim={sim}
+            countryId={player.id}
+            compact
+            onUnlockNode={(nodeId) => void runAction({ type: 'unlock_tree_node', nodeId })}
+            onFocusCountry={(cid) => {
+              onSelectCountry(cid);
+              onJumpToCountry(cid);
+            }}
+            onExpandModal={() => onOpenTreeModal(player.id)}
+          />
         )}
 
         {activeTab === 'diplomacy' && (
@@ -454,7 +542,9 @@ export function CommandDrawer({
                       >
                         <span className="flex items-center gap-2 min-w-0">
                           <PixelFlag country={ally.seed} size="sm" />
-                          <span className="text-sky-200 font-medium truncate">{ally.seed.name}</span>
+                          <span className="text-sky-200 font-medium truncate">
+                            {getCountryDisplayName(ally)}
+                          </span>
                         </span>
                         <span className="font-mono-num text-slate-400 shrink-0 ml-2">
                           Ejército {Math.round(ally.army).toLocaleString('es-ES')}
@@ -482,7 +572,9 @@ export function CommandDrawer({
                     >
                       <span className="flex items-center gap-2 min-w-0">
                         <PixelFlag country={c.seed} size="sm" />
-                        <span className="text-slate-200 truncate">{c.seed.name}</span>
+                        <span className="text-slate-200 truncate">
+                          {getCountryDisplayName(c)}
+                        </span>
                       </span>
                       <span className="font-mono-num text-emerald-400 font-semibold shrink-0 ml-2">
                         {item.rel}/100
@@ -509,7 +601,9 @@ export function CommandDrawer({
                     >
                       <span className="flex items-center gap-2 min-w-0">
                         <PixelFlag country={c.seed} size="sm" />
-                        <span className="text-slate-200 truncate">{c.seed.name}</span>
+                        <span className="text-slate-200 truncate">
+                          {getCountryDisplayName(c)}
+                        </span>
                       </span>
                       <span className="font-mono-num text-red-400 font-semibold shrink-0 ml-2">
                         {item.rel}/100
@@ -539,7 +633,7 @@ export function CommandDrawer({
                       <span className="flex items-center gap-2 min-w-0">
                         <PixelFlag country={c.seed} size="sm" />
                         <span className="text-slate-200 truncate">
-                          {c.seed.name}
+                          {getCountryDisplayName(c)}
                           {sim.isMultiplayer && sim.humanPlayers[c.id] && (
                             <span className="ml-1 text-[10px] text-emerald-400">
                               ({sim.humanPlayers[c.id].displayName})

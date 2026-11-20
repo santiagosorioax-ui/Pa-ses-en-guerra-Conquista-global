@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { MAP_H, MAP_W } from '../engine/mapRasterizer';
 import {
   DEFENSE_RADIUS,
+  NUKE_RADIUS,
   TREATY_ALLIANCE,
   TREATY_WAR,
+  getCountryDisplayName,
   getRelation,
   hasTreaty,
   type MapMode,
@@ -29,6 +31,9 @@ interface WorldMapCanvasProps {
   placingDefense: boolean;
   onPlaceDefense: (mx: number, my: number) => void;
   onCancelPlaceDefense: () => void;
+  launchingNuke: boolean;
+  onLaunchNuke: (mx: number, my: number) => void;
+  onCancelLaunchNuke: () => void;
 }
 
 export function WorldMapCanvas({
@@ -42,6 +47,9 @@ export function WorldMapCanvas({
   placingDefense,
   onPlaceDefense,
   onCancelPlaceDefense,
+  launchingNuke,
+  onLaunchNuke,
+  onCancelLaunchNuke,
 }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -68,6 +76,8 @@ export function WorldMapCanvas({
   const hoverMapPosRef = useRef<{ mx: number; my: number } | null>(null);
   const placingDefenseRef = useRef<boolean>(placingDefense);
   placingDefenseRef.current = placingDefense;
+  const launchingNukeRef = useRef<boolean>(launchingNuke);
+  launchingNukeRef.current = launchingNuke;
 
   const [hoverInfo, setHoverInfo] = useState<{
     id: number;
@@ -269,12 +279,20 @@ export function WorldMapCanvas({
       for (const c of sim.countries) {
         if (!c.alive || c.defenses.length === 0) continue;
         const showDefenses =
-          c.id === sim.playerId || c.id === selectedId || c.id === hoveredIdRef.current || cam.zoom >= 1.8;
+          c.id === sim.playerId ||
+          c.id === selectedId ||
+          c.id === hoveredIdRef.current ||
+          launchingNukeRef.current ||
+          cam.zoom >= 1.8;
         if (!showDefenses) continue;
 
         const isPlayer = c.id === sim.playerId;
         const showRadius =
-          isPlayer || c.id === selectedId || c.id === hoveredIdRef.current || placingDefenseRef.current;
+          isPlayer ||
+          c.id === selectedId ||
+          c.id === hoveredIdRef.current ||
+          placingDefenseRef.current ||
+          launchingNukeRef.current;
 
         for (const d of c.defenses) {
           const dx = offsetX + (d.x + 0.5) * scale;
@@ -346,6 +364,111 @@ export function WorldMapCanvas({
         }
       }
 
+      // Draw Active Nuclear Blast Shockwaves & Fallout Glow
+      if (Array.isArray(sim.nukeBlasts) && sim.nukeBlasts.length > 0) {
+        const nowMs = Date.now();
+        for (let i = sim.nukeBlasts.length - 1; i >= 0; i--) {
+          const b = sim.nukeBlasts[i];
+          const elapsed = nowMs - b.startMs;
+          if (elapsed >= b.durationMs) {
+            sim.nukeBlasts.splice(i, 1);
+            continue;
+          }
+          const t = Math.max(0, Math.min(1, elapsed / b.durationMs));
+          const bx = offsetX + (b.x + 0.5) * scale;
+          const by = offsetY + (b.y + 0.5) * scale;
+          const maxR = b.radius * scale;
+          if (bx + maxR < -30 || bx - maxR > cw + 30 || by + maxR < -30 || by - maxR > ch + 30) {
+            continue;
+          }
+
+          ctx.save();
+          // 1. Fallout glow covering the exact nuclear blast radius
+          const falloutAlpha = Math.max(0, (1 - t) * 0.42);
+          const grad = ctx.createRadialGradient(bx, by, 0, bx, by, Math.max(2, maxR));
+          grad.addColorStop(0, `rgba(255, 250, 210, ${(falloutAlpha * 1.45).toFixed(3)})`);
+          grad.addColorStop(0.42, `rgba(251, 146, 60, ${falloutAlpha.toFixed(3)})`);
+          grad.addColorStop(0.85, `rgba(220, 38, 38, ${(falloutAlpha * 0.72).toFixed(3)})`);
+          grad.addColorStop(1, 'rgba(220, 38, 38, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(bx, by, maxR, 0, Math.PI * 2);
+          ctx.fill();
+
+          // 2. Expanding shockwave ring during first 55% of animation
+          if (t < 0.58) {
+            const waveT = t / 0.58;
+            const waveEase = 1 - Math.pow(1 - waveT, 2.4);
+            const waveR = Math.max(2, maxR * waveEase);
+            const ringAlpha = Math.max(0, (1 - waveT) * 0.95);
+            ctx.beginPath();
+            ctx.arc(bx, by, waveR, 0, Math.PI * 2);
+            ctx.lineWidth = Math.max(1.5, 3.5 * (1 - waveT * 0.6));
+            ctx.strokeStyle = `rgba(254, 240, 138, ${ringAlpha.toFixed(3)})`;
+            ctx.stroke();
+          }
+
+          // 3. Initial blinding white-amber flash core
+          if (t < 0.28) {
+            const flashT = 1 - t / 0.28;
+            const flashR = Math.max(3, maxR * (0.28 + 0.35 * (1 - flashT)));
+            ctx.beginPath();
+            ctx.arc(bx, by, flashR, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 240, ${(flashT * 0.92).toFixed(3)})`;
+            ctx.fill();
+          }
+
+          // 4. Outer dashed perimeter ring showing exact blast radius
+          ctx.beginPath();
+          ctx.arc(bx, by, maxR, 0, Math.PI * 2);
+          ctx.setLineDash([4, 3]);
+          ctx.lineWidth = 1.25;
+          ctx.strokeStyle = `rgba(248, 113, 113, ${((1 - t) * 0.75).toFixed(3)})`;
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // Draw Live Nuclear Bomb Targeting Preview under Cursor (NUKE_RADIUS < DEFENSE_RADIUS)
+      if (launchingNukeRef.current && hoverMapPosRef.current) {
+        const { mx, my } = hoverMapPosRef.current;
+        if (mx >= 0 && mx < MAP_W && my >= 0 && my < MAP_H) {
+          const cid = sim.ownerGrid[my * MAP_W + mx];
+          const isValidTarget =
+            cid >= 0 &&
+            cid !== sim.playerId &&
+            sim.countries[cid]?.alive &&
+            !hasTreaty(sim, sim.playerId, cid, TREATY_ALLIANCE);
+          const px = offsetX + (mx + 0.5) * scale;
+          const py = offsetY + (my + 0.5) * scale;
+          const rPx = NUKE_RADIUS * scale;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(px, py, rPx, 0, Math.PI * 2);
+          ctx.fillStyle = isValidTarget
+            ? 'rgba(239, 68, 68, 0.24)'
+            : 'rgba(148, 163, 184, 0.16)';
+          ctx.fill();
+          ctx.setLineDash([5, 3]);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = isValidTarget ? '#FB923C' : '#94A3B8';
+          ctx.stroke();
+
+          // Inner tactical crosshair
+          ctx.setLineDash([]);
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = isValidTarget ? '#FEF08A' : '#CBD5E1';
+          ctx.beginPath();
+          ctx.moveTo(px - 7, py);
+          ctx.lineTo(px + 7, py);
+          ctx.moveTo(px, py - 7);
+          ctx.lineTo(px, py + 7);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
       // Draw Capital Markers & Country Names when zoomed in
       for (const c of sim.countries) {
         if (!c.alive) continue;
@@ -380,11 +503,12 @@ export function WorldMapCanvas({
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
           const labelY = Math.round(cy - 6);
+          const labelName = getCountryDisplayName(c);
           ctx.fillStyle = 'rgba(7, 16, 29, 0.85)';
-          ctx.fillText(c.seed.name, Math.round(cx) + 1, labelY + 1);
+          ctx.fillText(labelName, Math.round(cx) + 1, labelY + 1);
           ctx.fillStyle =
             c.id === sim.playerId ? '#FDE68A' : isImportant ? '#FFFFFF' : '#CBD5E1';
-          ctx.fillText(c.seed.name, Math.round(cx), labelY);
+          ctx.fillText(labelName, Math.round(cx), labelY);
         }
       }
 
@@ -547,9 +671,15 @@ export function WorldMapCanvas({
     dragRef.current.active = false;
     if (wasMoved) return;
 
-    if (e.button === 2 && placingDefenseRef.current) {
-      onCancelPlaceDefense();
-      return;
+    if (e.button === 2) {
+      if (placingDefenseRef.current) {
+        onCancelPlaceDefense();
+        return;
+      }
+      if (launchingNukeRef.current) {
+        onCancelLaunchNuke();
+        return;
+      }
     }
 
     if (e.button === 0 || e.pointerType === 'touch') {
@@ -557,6 +687,8 @@ export function WorldMapCanvas({
       if (pos) {
         if (placingDefenseRef.current) {
           onPlaceDefense(pos.mx, pos.my);
+        } else if (launchingNukeRef.current) {
+          onLaunchNuke(pos.mx, pos.my);
         } else {
           const cid = getCountryAt(pos.mx, pos.my);
           onSelectCountry(cid);
@@ -615,11 +747,14 @@ export function WorldMapCanvas({
       onContextMenu={(e) => {
         e.preventDefault();
         if (placingDefenseRef.current) onCancelPlaceDefense();
+        if (launchingNukeRef.current) onCancelLaunchNuke();
       }}
     >
       <canvas
         ref={canvasRef}
-        className={`w-full h-full block pixelated touch-none ${placingDefense ? 'cursor-cell' : 'cursor-crosshair'}`}
+        className={`w-full h-full block pixelated touch-none ${
+          placingDefense || launchingNuke ? 'cursor-cell' : 'cursor-crosshair'
+        }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -655,7 +790,7 @@ export function WorldMapCanvas({
                     backgroundColor: `rgb(${hoveredCountry.color[0]},${hoveredCountry.color[1]},${hoveredCountry.color[2]})`,
                   }}
                 />
-                <span className="truncate">{hoveredCountry.seed.name}</span>
+                <span className="truncate">{getCountryDisplayName(hoveredCountry)}</span>
               </div>
               <div className="text-[10px] text-amber-300 truncate">
                 Capital: {hoveredCountry.seed.capital}

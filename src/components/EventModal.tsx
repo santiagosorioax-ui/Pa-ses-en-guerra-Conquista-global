@@ -1,5 +1,6 @@
 import { Globe, RotateCcw, Trophy, AlertTriangle } from 'lucide-react';
 import {
+  getCountryDisplayName,
   resolveEventChoice,
   type ActiveEventModal,
   type SimulationState,
@@ -52,8 +53,8 @@ export function EventModal({
               </h2>
               <p className="text-xs text-slate-400">
                 {sim.isMultiplayer && winnerCountry
-                  ? `Ganador: ${winnerCountry.seed.name}${winnerPlayerSlot ? ` (${winnerPlayerSlot.displayName})` : ' (IA)'} · Año ${sim.year}`
-                  : `${player.seed.name} · Año ${sim.year}`}
+                  ? `Ganador: ${getCountryDisplayName(winnerCountry)}${winnerPlayerSlot ? ` (${winnerPlayerSlot.displayName})` : ' (IA)'} · Año ${sim.year}`
+                  : `${getCountryDisplayName(player)} · Año ${sim.year}`}
               </p>
             </div>
           </div>
@@ -61,11 +62,11 @@ export function EventModal({
           <p className="text-sm text-slate-300 leading-relaxed">
             {sim.isMultiplayer
               ? isMpVictory
-                ? `¡Has eliminado a los 195 países del planeta al mando de ${player.seed.name}! Victoria mundial total en el modo Online.`
-                : `${winnerCountry?.seed.name ?? 'Un imperio'}${winnerPlayerSlot ? ` dirigido por ${winnerPlayerSlot.displayName}` : ''} ha eliminado a todos los demás países del planeta.`
+                ? `¡Has eliminado a los 195 países del planeta al mando de ${getCountryDisplayName(player)}! Victoria mundial total en el modo Online.`
+                : `${winnerCountry ? getCountryDisplayName(winnerCountry) : 'Un imperio'}${winnerPlayerSlot ? ` dirigido por ${winnerPlayerSlot.displayName}` : ''} ha eliminado a todos los demás países del planeta.`
               : isVictory
-                ? `${player.seed.name} domina más del 35% del territorio habitable del planeta (${(player.pixels * 100).toLocaleString('es-ES')} km²) con $${Math.round(player.money).toLocaleString('es-ES')} de dinero y un ejército de ${Math.round(player.army).toLocaleString('es-ES')} soldados.`
-                : `El último territorio de ${player.seed.name} ha caído bajo control enemigo. Tu campaña estratégica ha concluido.`}
+                ? `${getCountryDisplayName(player)} domina más del 35% del territorio habitable del planeta (${(player.pixels * 100).toLocaleString('es-ES')} km²) con $${Math.round(player.money).toLocaleString('es-ES')} de dinero y un ejército de ${Math.round(player.army).toLocaleString('es-ES')} soldados.`
+                : `El último territorio de ${getCountryDisplayName(player)} ha caído bajo control enemigo. Tu campaña estratégica ha concluido.`}
           </p>
 
           <div className="flex items-center gap-3 pt-2">

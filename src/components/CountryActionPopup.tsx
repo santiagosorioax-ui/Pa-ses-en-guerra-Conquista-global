@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Anchor, Coins, Handshake, Shield, Swords, UserCheck, X } from 'lucide-react';
+import { Anchor, Coins, GitBranch, Handshake, Shield, Swords, UserCheck, X } from 'lucide-react';
 import {
   ALLIANCE_REL_THRESHOLD,
   GIFT_MONEY_PER_REL,
@@ -7,6 +7,7 @@ import {
   TREATY_ALLIANCE,
   TREATY_WAR,
   canReachToAttack,
+  getCountryDisplayName,
   getEnemies,
   getRelation,
   hasCoast,
@@ -22,6 +23,7 @@ interface CountryActionPopupProps {
   sim: SimulationState;
   targetId: number;
   onClose: () => void;
+  onOpenTreeModal: (countryId: number) => void;
   onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
 }
 
@@ -30,6 +32,7 @@ export function CountryActionPopup({
   sim,
   targetId,
   onClose,
+  onOpenTreeModal,
   onExecuteAction,
 }: CountryActionPopupProps) {
   const [feedback, setFeedback] = useState<{
@@ -117,8 +120,13 @@ export function CountryActionPopup({
                 }}
                 title="Color del país en el mapa"
               />
-              <span className="truncate">{target.seed.name}</span>
+              <span className="truncate">{getCountryDisplayName(target)}</span>
             </h3>
+            {target.customName && target.customName !== target.seed.name && (
+              <div className="text-[10px] font-mono text-amber-300/85 truncate">
+                Antes: {target.seed.name}
+              </div>
+            )}
             <div className="text-xs text-amber-300 font-medium truncate">
               Capital: {target.seed.capital}
             </div>
@@ -135,16 +143,28 @@ export function CountryActionPopup({
             )}
           </div>
         </div>
-        <button
-          onClick={onClose}
-          title="Salir (Esc)"
-          aria-label="Cerrar"
-          className={`flex items-center justify-center bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs cursor-pointer shrink-0 ${
-            isMobile ? 'w-9 h-9' : 'w-7 h-7'
-          }`}
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={() => onOpenTreeModal(target.id)}
+            title="Ver árbol genealógico de este país"
+            className={`px-2 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-amber-300 hover:text-amber-200 font-semibold text-[11px] flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+              isMobile ? 'h-9' : 'h-7'
+            }`}
+          >
+            <GitBranch className="w-3.5 h-3.5 shrink-0" />
+            <span>Árbol</span>
+          </button>
+          <button
+            onClick={onClose}
+            title="Salir (Esc)"
+            aria-label="Cerrar"
+            className={`flex items-center justify-center bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs cursor-pointer shrink-0 ${
+              isMobile ? 'w-9 h-9' : 'w-7 h-7'
+            }`}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {!target.alive ? (
@@ -243,7 +263,9 @@ export function CountryActionPopup({
                   }`}
                 >
                   <Anchor className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Construir Puerto hacia {target.seed.name} (${PORT_COST})</span>
+                  <span className="truncate">
+                    Construir Puerto hacia {getCountryDisplayName(target)} (${PORT_COST})
+                  </span>
                 </button>
               )}
             </div>

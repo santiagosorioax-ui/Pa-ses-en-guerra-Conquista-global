@@ -206,6 +206,47 @@ class SoundEngine {
     this.tone(392, 0.09, 'triangle', 0.04);
     this.tone(587.33, 0.14, 'triangle', 0.04, 0.08);
   }
+
+  playNuclearExplosion() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // 1. Onda expansiva de ruido filtrado (detonación + retumbo largo)
+    const duration = 1.45;
+    const bufferSize = Math.floor(ctx.sampleRate * duration);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1150, now);
+    filter.frequency.exponentialRampToValueAtTime(120, now + duration);
+
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.001, now);
+    noiseGain.gain.linearRampToValueAtTime(0.14, now + 0.03);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noise.start(now);
+    noise.stop(now + duration + 0.02);
+
+    // 2. Golpe sub-grave profundo del impacto
+    this.tone(95, 1.25, 'sine', 0.11, 0, 24);
+    this.tone(145, 0.65, 'triangle', 0.06, 0.02, 36);
+
+    // 3. Eco metálico breve de alerta
+    this.tone(520, 0.22, 'sawtooth', 0.026, 0.08, 220);
+  }
 }
 
 export const soundEngine = new SoundEngine();

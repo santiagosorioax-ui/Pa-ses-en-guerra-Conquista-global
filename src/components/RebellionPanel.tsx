@@ -4,6 +4,7 @@ import {
   REBEL_INCOME_PER_SECOND,
   REBEL_RECRUIT_AMOUNT,
   REBEL_RECRUIT_COST,
+  getCountryDisplayName,
   getRebellionStatus,
   type SimulationState,
 } from '../engine/gameSimulation';
@@ -61,7 +62,7 @@ export function RebellionPanel({
           <PixelFlag country={player.seed} size="md" />
           <div className="min-w-0">
             <div className="text-xs font-extrabold uppercase tracking-wide text-amber-300 truncate">
-              {player.seed.name} Anexado · Resistencia
+              {getCountryDisplayName(player)} Anexado · Resistencia
             </div>
             <div className="text-[11px] text-slate-300 truncate flex items-center gap-1.5 mt-0.5">
               <span>Ocupado por:</span>

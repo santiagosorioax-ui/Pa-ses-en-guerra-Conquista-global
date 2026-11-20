@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Handshake, Map as MapIcon, ScrollText, Swords, TrendingUp } from 'lucide-react';
+import { GitBranch, Handshake, Map as MapIcon, ScrollText, Swords } from 'lucide-react';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
 import { CountrySearchModal } from './components/CountrySearchModal';
 import { CountrySelectScreen } from './components/CountrySelectScreen';
+import { CountryTreeModal } from './components/CountryTreeView';
 import { DeviceModeScreen, type DeviceMode } from './components/DeviceModeScreen';
 import { EventModal } from './components/EventModal';
 import { MinimapBar } from './components/MinimapBar';
@@ -22,8 +23,10 @@ import {
   type GameActionResult,
 } from './engine/gameActions';
 import {
+  NUKE_RADIUS,
   canReachToAttack,
   createSimulation,
+  getCountryDisplayName,
   respondToPendingProposal,
   stepSimulationDay,
   stepSimulationSecond,
@@ -90,8 +93,12 @@ export default function App() {
   const [drawerTab, setDrawerTab] = useState<DrawerTab>('manage');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [treeModalCountryId, setTreeModalCountryId] = useState<number | null>(null);
   const [placingDefense, setPlacingDefense] = useState(false);
+  const [launchingNuke, setLaunchingNuke] = useState(false);
   const [defenseFeedback, setDefenseFeedback] = useState<{ text: string; ok: boolean } | null>(null);
+  const [mapToast, setMapToast] = useState<{ text: string; ok: boolean } | null>(null);
+  const mapToastTimerRef = useRef<number | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
 
   const [focusRequest, setFocusRequest] = useState<{
@@ -110,6 +117,17 @@ export default function App() {
 
   const bumpRender = useCallback(() => {
     setRenderTick((t) => t + 1);
+  }, []);
+
+  const showMapToast = useCallback((text: string, ok: boolean) => {
+    setMapToast({ text, ok });
+    if (mapToastTimerRef.current !== null) {
+      window.clearTimeout(mapToastTimerRef.current);
+    }
+    mapToastTimerRef.current = window.setTimeout(() => {
+      setMapToast(null);
+      mapToastTimerRef.current = null;
+    }, 4500);
   }, []);
 
   const isOnlineMatch = Boolean(mpRoomCode && simRef.current?.isMultiplayer);
@@ -615,8 +633,12 @@ export default function App() {
       } else if (e.key === 'Escape') {
         if (showTutorial) {
           dismissTutorial();
+        } else if (treeModalCountryId !== null) {
+          setTreeModalCountryId(null);
         } else if (placingDefense) {
           setPlacingDefense(false);
+        } else if (launchingNuke) {
+          setLaunchingNuke(false);
         } else if (searchOpen) {
           setSearchOpen(false);
         } else if (simRef.current) {
@@ -627,7 +649,16 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [screen, isRemoteGuest, searchOpen, placingDefense, showTutorial, dismissTutorial]);
+  }, [
+    screen,
+    isRemoteGuest,
+    searchOpen,
+    placingDefense,
+    launchingNuke,
+    treeModalCountryId,
+    showTutorial,
+    dismissTutorial,
+  ]);
 
   // Simulation Day Accumulator (Singleplayer or Multiplayer Host only)
   useEffect(() => {
@@ -810,6 +841,8 @@ export default function App() {
 
   const handleExitToMenu = async () => {
     setSpeed(0);
+    setPlacingDefense(false);
+    setLaunchingNuke(false);
     setMobileDrawerOpen(false);
     if (sim.isMultiplayer) {
       await handleLeaveOnlineRoom();
@@ -873,11 +906,22 @@ export default function App() {
             onPlaceDefense={async (mx, my) => {
               const res = await handleExecuteAction({ type: 'build_defense', x: mx, y: my });
               setDefenseFeedback({ text: res.message, ok: res.ok });
+              showMapToast(res.message, res.ok);
               if (res.ok) {
                 setPlacingDefense(false);
               }
             }}
             onCancelPlaceDefense={() => setPlacingDefense(false)}
+            launchingNuke={launchingNuke}
+            onLaunchNuke={async (mx, my) => {
+              const res = await handleExecuteAction({ type: 'launch_nuke', x: mx, y: my });
+              setDefenseFeedback({ text: res.message, ok: res.ok });
+              showMapToast(res.message, res.ok);
+              if (res.ok) {
+                setLaunchingNuke(false);
+              }
+            }}
+            onCancelLaunchNuke={() => setLaunchingNuke(false)}
           />
 
           {placingDefense && (
@@ -896,8 +940,44 @@ export default function App() {
             </div>
           )}
 
+          {launchingNuke && (
+            <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(94vw,540px)] bg-orange-950/95 border border-orange-500 px-3 sm:px-4 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-orange-100">
+              <span>
+                {isMobile
+                  ? `Toca un país enemigo para lanzar la Bomba Nuclear (radio ${NUKE_RADIUS * 10} km)`
+                  : `Haz clic sobre un país enemigo para detonar la Bomba Nuclear (radio ${NUKE_RADIUS * 10} km · clic derecho o Esc cancela)`}
+              </span>
+              <button
+                onClick={() => setLaunchingNuke(false)}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 shrink-0 cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+
+          {mapToast && (
+            <div
+              className={`absolute left-1/2 -translate-x-1/2 z-30 w-[min(94vw,520px)] px-3.5 py-2 border shadow-2xl text-xs flex items-center justify-between gap-2 ${
+                placingDefense || launchingNuke ? 'top-14 sm:top-16' : 'top-2.5 sm:top-3'
+              } ${
+                mapToast.ok
+                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100'
+                  : 'bg-red-950/95 border-red-600/80 text-red-100'
+              }`}
+            >
+              <span>{mapToast.text}</span>
+              <button
+                onClick={() => setMapToast(null)}
+                className="px-2 py-0.5 bg-slate-900/80 border border-slate-700 text-slate-300 shrink-0 cursor-pointer"
+              >
+                OK
+              </button>
+            </div>
+          )}
+
           {/* Live Autonomous AI Geopolitical Feed (top-left of map) */}
-          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense)) && (
+          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || launchingNuke)) && (
             <div
               className={`absolute z-20 space-y-1.5 pointer-events-none ${
                 isMobile
@@ -958,6 +1038,10 @@ export default function App() {
               sim={sim}
               targetId={selectedId}
               onClose={() => setSelectedId(sim.playerId)}
+              onOpenTreeModal={(cid) => {
+                setTreeModalCountryId(cid);
+                soundEngine.playClick();
+              }}
               onExecuteAction={handleExecuteAction}
             />
           )}
@@ -990,7 +1074,7 @@ export default function App() {
                     {sim.humanPlayers[activeHumanOffer.fromCountryId]
                       ? `${sim.humanPlayers[activeHumanOffer.fromCountryId].displayName} · `
                       : ''}
-                    {sim.countries[activeHumanOffer.fromCountryId].seed.name}
+                    {getCountryDisplayName(sim.countries[activeHumanOffer.fromCountryId])}
                   </div>
                   <div className="text-slate-200 leading-snug">
                     {activeHumanOffer.type === 'alliance'
@@ -1050,7 +1134,7 @@ export default function App() {
                 />
                 <div className="text-xs min-w-0 flex-1">
                   <div className="font-bold text-amber-300 truncate">
-                    Propuesta · {sim.countries[sim.pendingProposal.fromId].seed.name}
+                    Propuesta · {getCountryDisplayName(sim.countries[sim.pendingProposal.fromId])}
                   </div>
                   <div className="text-slate-200 leading-snug">
                     {sim.pendingProposal.type === 'alliance'
@@ -1118,7 +1202,7 @@ export default function App() {
 
           {showTutorial && (
             <TutorialOverlay
-              countryName={sim.countries[sim.playerId].seed.name}
+              countryName={getCountryDisplayName(sim.countries[sim.playerId])}
               deviceMode={deviceMode}
               onFinish={dismissTutorial}
             />
@@ -1144,6 +1228,10 @@ export default function App() {
               soundEngine.playSelectCountry();
             }}
             onJumpToCountry={handleJumpToCountry}
+            onOpenTreeModal={(cid) => {
+              setTreeModalCountryId(cid);
+              soundEngine.playClick();
+            }}
             onExecuteAction={async (act) => {
               setDefenseFeedback(null);
               return handleExecuteAction(act);
@@ -1151,7 +1239,17 @@ export default function App() {
             placingDefense={placingDefense}
             onTogglePlaceDefense={() => {
               setDefenseFeedback(null);
+              setLaunchingNuke(false);
               setPlacingDefense((v) => !v);
+              if (isMobile) {
+                setMobileDrawerOpen(false);
+              }
+            }}
+            launchingNuke={launchingNuke}
+            onToggleLaunchNuke={() => {
+              setDefenseFeedback(null);
+              setPlacingDefense(false);
+              setLaunchingNuke((v) => !v);
               if (isMobile) {
                 setMobileDrawerOpen(false);
               }
@@ -1195,6 +1293,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => openMobileTab('tree')}
+            className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold cursor-pointer ${
+              mobileDrawerOpen && drawerTab === 'tree'
+                ? 'text-amber-300 bg-[#131F33] border-t-2 border-amber-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <GitBranch className="w-4 h-4" />
+            <span>Árbol</span>
+          </button>
+
+          <button
             onClick={() => openMobileTab('diplomacy')}
             className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold cursor-pointer ${
               mobileDrawerOpen && drawerTab === 'diplomacy'
@@ -1204,18 +1314,6 @@ export default function App() {
           >
             <Handshake className="w-4 h-4" />
             <span>Alianzas</span>
-          </button>
-
-          <button
-            onClick={() => openMobileTab('charts')}
-            className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold cursor-pointer ${
-              mobileDrawerOpen && drawerTab === 'charts'
-                ? 'text-amber-300 bg-[#131F33] border-t-2 border-amber-400'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            <span>Gráficos</span>
           </button>
 
           <button
@@ -1230,6 +1328,24 @@ export default function App() {
             <span>Crónica</span>
           </button>
         </nav>
+      )}
+
+      {treeModalCountryId !== null && (
+        <CountryTreeModal
+          sim={sim}
+          countryId={treeModalCountryId}
+          onClose={() => setTreeModalCountryId(null)}
+          onUnlockNode={(nodeId) => {
+            void handleExecuteAction({ type: 'unlock_tree_node', nodeId });
+          }}
+          onFocusCountry={(cid) => {
+            setSelectedId(cid);
+            if (isMobile) setMobileDrawerOpen(false);
+            handleJumpToCountry(cid);
+            soundEngine.playSelectCountry();
+          }}
+          onSwitchToPlayerTree={() => setTreeModalCountryId(sim.playerId)}
+        />
       )}
 
       <CountrySearchModal
