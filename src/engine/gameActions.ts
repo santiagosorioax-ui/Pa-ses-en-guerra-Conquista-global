@@ -17,6 +17,7 @@ import {
   proposeAlliance,
   recruitRebelArmy,
   recruitSoldiers,
+  recruitSoldiersMax,
   requestAllyHelp,
   requestHumanPeace,
   respondToHumanDiplomaticOffer,
@@ -28,6 +29,7 @@ import {
 
 export type GameActionPayload =
   | { type: 'recruit_soldiers' }
+  | { type: 'recruit_soldiers_max' }
   | { type: 'build_gold_mine' }
   | { type: 'build_city' }
   | { type: 'build_port'; towardsId?: number }
@@ -61,6 +63,14 @@ export function executeGameAction(
       return {
         ok: !err,
         message: err ?? `¡+${ARMY_RECRUIT_AMOUNT} soldados reclutados para tu Ejército!`,
+      };
+    }
+
+    case 'recruit_soldiers_max': {
+      const res = recruitSoldiersMax(sim, actorCountryId);
+      return {
+        ok: res.ok,
+        message: res.message,
       };
     }
 

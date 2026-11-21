@@ -1715,6 +1715,65 @@ export function recruitSoldiers(sim: SimulationState, countryId: number): string
   return null;
 }
 
+export function getMaxRecruitableSoldiers(c: CountryState): number {
+  if (!c.alive) return 0;
+  const armyCap = getArmyCap(c);
+  const remainingCap = Math.max(0, armyCap - c.army);
+  if (remainingCap <= 0) return 0;
+  const affordable = Math.floor((c.money * ARMY_RECRUIT_AMOUNT) / ARMY_RECRUIT_COST);
+  return Math.max(0, Math.min(Math.floor(remainingCap), affordable));
+}
+
+export function recruitSoldiersMax(
+  sim: SimulationState,
+  countryId: number
+): { ok: boolean; message: string; soldiersAdded: number; moneySpent: number } {
+  const c = sim.countries[countryId];
+  if (!c || !c.alive) {
+    return { ok: false, message: 'País inactivo.', soldiersAdded: 0, moneySpent: 0 };
+  }
+  const armyCap = getArmyCap(c);
+  const remainingCap = Math.max(0, armyCap - c.army);
+  if (remainingCap < 1) {
+    return {
+      ok: false,
+      message: `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`,
+      soldiersAdded: 0,
+      moneySpent: 0,
+    };
+  }
+  const minCostPerSoldier = Math.ceil(ARMY_RECRUIT_COST / ARMY_RECRUIT_AMOUNT);
+  const affordableSoldiers = Math.floor((c.money * ARMY_RECRUIT_AMOUNT) / ARMY_RECRUIT_COST);
+  if (affordableSoldiers < 1) {
+    return {
+      ok: false,
+      message: `Necesitas al menos $${minCostPerSoldier} para reclutar soldados.`,
+      soldiersAdded: 0,
+      moneySpent: 0,
+    };
+  }
+
+  const soldiersAdded = Math.min(Math.floor(remainingCap), affordableSoldiers);
+  const exactCost = (soldiersAdded * ARMY_RECRUIT_COST) / ARMY_RECRUIT_AMOUNT;
+  const hitsCap = soldiersAdded < affordableSoldiers;
+  // Spend all available money if not capped by military capacity, otherwise spend exact cost for reaching cap
+  const moneySpent = hitsCap ? Math.min(c.money, exactCost) : c.money;
+
+  c.money = Math.max(0, c.money - moneySpent);
+  c.army = Math.min(armyCap, c.army + soldiersAdded);
+  updateAllEconomies(sim, false);
+  if (countryId === sim.playerId) soundEngine.playRecruit();
+
+  return {
+    ok: true,
+    soldiersAdded,
+    moneySpent: Math.round(moneySpent),
+    message: hitsCap
+      ? `¡+${soldiersAdded.toLocaleString('es-ES')} soldados reclutados por $${Math.round(moneySpent).toLocaleString('es-ES')} (capacidad militar llena)!`
+      : `¡+${soldiersAdded.toLocaleString('es-ES')} soldados reclutados gastando todo tu dinero ($${Math.round(moneySpent).toLocaleString('es-ES')})!`,
+  };
+}
+
 export function buildDefenseAt(
   sim: SimulationState,
   countryId: number,
@@ -2042,6 +2101,119 @@ export interface FocusNodeStatus {
   checks: FocusRequirementCheck[];
 }
 
+export interface EmpireTargetStatus {
+  countryId: number;
+  iso2: string;
+  name: string;
+  conquered: boolean;
+  ownedPct: number;
+}
+
+export function getEmpireTargetProgress(
+  sim: SimulationState,
+  countryId: number,
+  targetIso2s: string[]
+): EmpireTargetStatus[] {
+  const targets = targetIso2s
+    .map((iso) => sim.countries.find((other) => other.seed.iso2 === iso))
+    .filter((other): other is CountryState => Boolean(other && other.id !== countryId));
+
+  if (targets.length === 0) return [];
+
+  const targetIndexById = new Int16Array(sim.countries.length).fill(-1);
+  targets.forEach((t, idx) => {
+    targetIndexById[t.id] = idx;
+  });
+
+  const origCounts = new Int32Array(targets.length);
+  const ownedCounts = new Int32Array(targets.length);
+  const origGrid = sim.mapData.ownerGrid;
+  const curGrid = sim.ownerGrid;
+
+  for (let i = 0; i < origGrid.length; i++) {
+    const orig = origGrid[i];
+    if (orig < 0) continue;
+    const tIdx = targetIndexById[orig];
+    if (tIdx < 0) continue;
+    origCounts[tIdx]++;
+    if (curGrid[i] === countryId) {
+      ownedCounts[tIdx]++;
+    }
+  }
+
+  return targets.map((t, idx) => {
+    const origPx = origCounts[idx];
+    const ownedPx = ownedCounts[idx];
+    const annexedDirectly = !t.alive && t.annexedById === countryId;
+    const ownedPct =
+      origPx > 0
+        ? Math.min(100, Math.round((ownedPx / origPx) * 100))
+        : annexedDirectly
+          ? 100
+          : 0;
+    const conquered =
+      annexedDirectly ||
+      (origPx > 0 && ownedPx >= Math.max(1, Math.ceil(origPx * 0.75)));
+    return {
+      countryId: t.id,
+      iso2: t.seed.iso2,
+      name: getCountryName(t),
+      conquered,
+      ownedPct: conquered ? 100 : ownedPct,
+    };
+  });
+}
+
+export function getEmpirePreviewBounds(
+  sim: SimulationState,
+  ownerCountryId: number,
+  targetCountryIds: number[]
+): { x: number; y: number; zoom: number } {
+  const included = new Set<number>([ownerCountryId, ...targetCountryIds]);
+  const origGrid = sim.mapData.ownerGrid;
+  let minX = MAP_W;
+  let maxX = 0;
+  let minY = MAP_H;
+  let maxY = 0;
+  let found = false;
+
+  for (let y = 0; y < MAP_H; y++) {
+    const row = y * MAP_W;
+    for (let x = 0; x < MAP_W; x++) {
+      const orig = origGrid[row + x];
+      if (orig >= 0 && included.has(orig)) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        found = true;
+      }
+    }
+  }
+
+  if (!found) {
+    const owner = sim.countries[ownerCountryId];
+    return {
+      x: owner ? owner.capitalX : MAP_W / 2,
+      y: owner ? owner.capitalY : MAP_H / 2,
+      zoom: 2.2,
+    };
+  }
+
+  const spanX = Math.max(24, maxX - minX + 16);
+  const spanY = Math.max(18, maxY - minY + 14);
+  // Fit bounding box comfortably with padding on both desktop & mobile
+  const zoomX = (MAP_W / spanX) * 0.62;
+  const zoomY = (MAP_H / spanY) * 0.56;
+  const zoom = Math.max(1.05, Math.min(4.8, Math.min(zoomX, zoomY)));
+
+  return {
+    x: (minX + maxX) * 0.5,
+    y: (minY + maxY) * 0.5,
+    zoom,
+  };
+}
+
 export function evaluateFocusNodeStatus(
   sim: SimulationState,
   countryId: number,
@@ -2063,10 +2235,12 @@ export function evaluateFocusNodeStatus(
   const checks: FocusRequirementCheck[] = [];
   const req = node.requirements;
 
-  checks.push({
-    label: `Tesoro: $${req.moneyCost.toLocaleString('es-ES')} (tienes $${Math.round(c.money).toLocaleString('es-ES')})`,
-    met: completed || c.money >= req.moneyCost,
-  });
+  if (req.moneyCost > 0) {
+    checks.push({
+      label: `Tesoro: $${req.moneyCost.toLocaleString('es-ES')} (tienes $${Math.round(c.money).toLocaleString('es-ES')})`,
+      met: completed || c.money >= req.moneyCost,
+    });
+  }
 
   if (req.minGoldMines) {
     checks.push({
@@ -2098,28 +2272,17 @@ export function evaluateFocusNodeStatus(
   }
 
   if (req.historicalTargetIso2 && req.historicalTargetIso2.length > 0) {
-    const expansionPct = req.minExpansionPct ?? 25;
-    const expandedEnough =
-      c.pixels >= Math.round(c.initialPixels * (1 + expansionPct / 100)) ||
-      c.pixels - c.initialPixels >= 15;
-    const targetCountries = req.historicalTargetIso2
-      .map((iso) => sim.countries.find((other) => other.seed.iso2 === iso))
-      .filter((other): other is CountryState => Boolean(other && other.id !== countryId));
-    const hasHistoricalPartner = targetCountries.some(
-      (other) =>
-        (!other.alive && other.annexedById === countryId) ||
-        (other.alive && hasTreaty(sim, countryId, other.id, TREATY_ALLIANCE))
-    );
-    const partnerNames = targetCountries
-      .slice(0, 3)
-      .map((other) => getCountryName(other))
-      .join(', ');
-    checks.push({
-      label: partnerNames
-        ? `Anexar o aliarse con ${partnerNames} (o expandir +${expansionPct}% territorio)`
-        : `Expandir territorio +${expansionPct}%`,
-      met: completed || hasHistoricalPartner || expandedEnough,
-    });
+    const targetProgress = getEmpireTargetProgress(sim, countryId, req.historicalTargetIso2);
+    for (const tp of targetProgress) {
+      checks.push({
+        label: tp.conquered
+          ? `Invadir ${tp.name} (Conquistado)`
+          : tp.ownedPct > 0
+            ? `Invadir ${tp.name} (${tp.ownedPct}% controlado)`
+            : `Invadir ${tp.name}`,
+        met: completed || tp.conquered,
+      });
+    }
   } else if (req.minExpansionPct) {
     const expandedEnough =
       c.pixels >= Math.round(c.initialPixels * (1 + req.minExpansionPct / 100)) ||

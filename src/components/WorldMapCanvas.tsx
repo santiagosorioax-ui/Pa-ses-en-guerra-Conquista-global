@@ -12,7 +12,7 @@ import {
   type MapMode,
   type SimulationState,
 } from '../engine/gameSimulation';
-import { PixelMapRenderer } from '../engine/pixelRenderer';
+import { PixelMapRenderer, type EmpireHighlightConfig } from '../engine/pixelRenderer';
 import { soundEngine } from '../engine/soundEngine';
 import { PixelFlag } from './PixelFlag';
 
@@ -36,6 +36,7 @@ interface WorldMapCanvasProps {
   launchingNuke: boolean;
   onLaunchNuke: (mx: number, my: number) => void;
   onCancelLaunchNuke: () => void;
+  empireHighlight?: EmpireHighlightConfig | null;
 }
 
 export function WorldMapCanvas({
@@ -52,6 +53,7 @@ export function WorldMapCanvas({
   launchingNuke,
   onLaunchNuke,
   onCancelLaunchNuke,
+  empireHighlight = null,
 }: WorldMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -80,6 +82,8 @@ export function WorldMapCanvas({
   placingDefenseRef.current = placingDefense;
   const launchingNukeRef = useRef<boolean>(launchingNuke);
   launchingNukeRef.current = launchingNuke;
+  const empireHighlightRef = useRef<EmpireHighlightConfig | null>(empireHighlight);
+  empireHighlightRef.current = empireHighlight;
   const nukeAnimStartRef = useRef<Map<number, number>>(new Map());
 
   const [hoverInfo, setHoverInfo] = useState<{
@@ -169,8 +173,20 @@ export function WorldMapCanvas({
 
       const sim = simRef.current;
       const cam = camRef.current;
+      const nowFrameMs = Date.now();
+      const rawEmp = empireHighlightRef.current;
+      const activeEmp = rawEmp && rawEmp.expiresAtMs > nowFrameMs ? rawEmp : null;
+      const pulseStep = activeEmp ? Math.floor(nowFrameMs / 170) % 6 : 0;
 
-      renderer.renderToBuffer(sim, mapMode, selectedId, hoveredIdRef.current);
+      renderer.renderToBuffer(
+        sim,
+        mapMode,
+        selectedId,
+        hoveredIdRef.current,
+        false,
+        activeEmp,
+        pulseStep
+      );
 
       const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) {
@@ -518,6 +534,64 @@ export function WorldMapCanvas({
           ctx.fillStyle =
             c.id === sim.playerId ? '#FDE68A' : isImportant ? '#FFFFFF' : '#CBD5E1';
           ctx.fillText(labelText, Math.round(cx), labelY);
+        }
+      }
+
+      // Draw Pulsing Invasion Objective Markers during 10-second Empire Territory Preview
+      if (activeEmp) {
+        const pulse = 0.5 + 0.5 * Math.sin(nowFrameMs / 220);
+        for (const tid of activeEmp.targetCountryIds) {
+          const tc = sim.countries[tid];
+          if (!tc) continue;
+          const tx = offsetX + (tc.capitalX + 0.5) * scale;
+          const ty = offsetY + (tc.capitalY + 0.5) * scale;
+          if (tx < -80 || tx > cw + 80 || ty < -40 || ty > ch + 40) continue;
+
+          const curOwnerAtCap =
+            sim.ownerGrid[tc.capitalY * MAP_W + tc.capitalX];
+          const isConquered =
+            (!tc.alive && tc.annexedById === activeEmp.ownerCountryId) ||
+            curOwnerAtCap === activeEmp.ownerCountryId;
+
+          ctx.save();
+          // Pulsing target ring
+          const ringR = (isConquered ? 7 : 9 + pulse * 6);
+          ctx.beginPath();
+          ctx.arc(tx, ty, ringR, 0, Math.PI * 2);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = isConquered
+            ? 'rgba(52, 211, 153, 0.9)'
+            : `rgba(253, 224, 71, ${(0.55 + 0.45 * pulse).toFixed(2)})`;
+          ctx.stroke();
+
+          // Center pin
+          ctx.fillStyle = isConquered ? '#10B981' : '#EF4444';
+          ctx.fillRect(Math.round(tx - 3), Math.round(ty - 3), 6, 6);
+
+          // Crisp boxed target label
+          const tagText = isConquered
+            ? `✓ ${getCountryName(tc)}`
+            : `INVADIR: ${getCountryName(tc)}`;
+          ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
+          const textW = ctx.measureText(tagText).width;
+          const boxW = Math.ceil(textW + 12);
+          const boxH = 19;
+          const bx = Math.round(tx - boxW / 2);
+          const by = Math.round(ty - ringR - boxH - 4);
+
+          ctx.fillStyle = isConquered
+            ? 'rgba(6, 78, 59, 0.92)'
+            : 'rgba(17, 27, 43, 0.94)';
+          ctx.fillRect(bx, by, boxW, boxH);
+          ctx.strokeStyle = isConquered ? '#34D399' : '#FBBF24';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(bx + 0.5, by + 0.5, boxW - 1, boxH - 1);
+
+          ctx.fillStyle = isConquered ? '#A7F3D0' : '#FEF08A';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tagText, Math.round(tx), by + boxH / 2 + 0.5);
+          ctx.restore();
         }
       }
 

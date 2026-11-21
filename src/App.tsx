@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Handshake, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
+import { Crown, Handshake, Lock, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
 import { AchievementsModal } from './components/AchievementsModal';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
@@ -25,6 +25,7 @@ import {
   type AchievementProfile,
   type AchievementStats,
 } from './data/achievements';
+import type { FocusNode } from './data/countryTrees';
 import { restoreRoomWorldState } from './engine/campaignSerializer';
 import {
   executeGameAction,
@@ -37,6 +38,8 @@ import {
   createSimulation,
   getCountryName,
   getCountryRebellionStrength,
+  getEmpirePreviewBounds,
+  getEmpireTargetProgress,
   getEnemies,
   respondToPendingProposal,
   stepSimulationDay,
@@ -44,6 +47,7 @@ import {
   type MapMode,
   type SimulationState,
 } from './engine/gameSimulation';
+import type { EmpireHighlightConfig } from './engine/pixelRenderer';
 import { isQuotaExceededError } from './firebase';
 import { MAP_H, MAP_W, buildWorldMapData, type WorldMapData } from './engine/mapRasterizer';
 import { soundEngine } from './engine/soundEngine';
@@ -72,7 +76,9 @@ export default function App() {
   const { user } = useFirebase();
 
   const [screen, setScreen] = useState<GameScreen>('DEVICE_SELECT');
-  const [deviceMode, setDeviceMode] = useState<DeviceMode>('desktop');
+  const deviceMode: DeviceMode = 'mobile';
+  const [onlineDevNotice, setOnlineDevNotice] = useState(false);
+  const onlineNoticeTimerRef = useRef<number | null>(null);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const simRef = useRef<SimulationState | null>(null);
   const cachedMapDataRef = useRef<WorldMapData | null>(null);
@@ -105,6 +111,9 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [treeCountryId, setTreeCountryId] = useState<number | null>(null);
+  const [treeInitialNodeId, setTreeInitialNodeId] = useState<FocusNode['id'] | undefined>(undefined);
+  const [empireHighlight, setEmpireHighlight] = useState<EmpireHighlightConfig | null>(null);
+  const [empireRemainingMs, setEmpireRemainingMs] = useState<number>(0);
   const [achievementsOpen, setAchievementsOpen] = useState(false);
   const [achievementProfile, setAchievementProfile] = useState<AchievementProfile>(() =>
     loadAchievementProfile(null)
@@ -150,7 +159,21 @@ export default function App() {
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
       }
+      if (onlineNoticeTimerRef.current !== null) {
+        window.clearTimeout(onlineNoticeTimerRef.current);
+      }
     };
+  }, []);
+
+  const triggerOnlineDevNotice = useCallback(() => {
+    setOnlineDevNotice(true);
+    if (onlineNoticeTimerRef.current !== null) {
+      window.clearTimeout(onlineNoticeTimerRef.current);
+    }
+    onlineNoticeTimerRef.current = window.setTimeout(() => {
+      onlineNoticeTimerRef.current = null;
+      setOnlineDevNotice(false);
+    }, 4200);
   }, []);
 
   const triggerAchievementToast = useCallback((newlyUnlocked: AchievementDef[]) => {
@@ -197,8 +220,10 @@ export default function App() {
   );
 
   const openCountryTree = useCallback(
-    (countryId: number) => {
+    (countryId: number, initialNode?: FocusNode['id']) => {
       soundEngine.playClick();
+      setEmpireHighlight(null);
+      setTreeInitialNodeId(initialNode);
       setTreeCountryId(countryId);
       updateAchievements((s) => {
         s.treeOpened += 1;
@@ -206,6 +231,59 @@ export default function App() {
     },
     [updateAchievements]
   );
+
+  const handlePreviewEmpireTerritory = useCallback(
+    (ownerCountryId: number, empireName: string, targetCountryIds: number[]) => {
+      const sim = simRef.current;
+      if (!sim || targetCountryIds.length === 0) return;
+      soundEngine.playClick();
+      setTreeCountryId(null);
+      setTreeInitialNodeId(undefined);
+      setMobileDrawerOpen(false);
+      setPlacingDefense(false);
+      setLaunchingNuke(false);
+      setSelectedId(sim.playerId);
+
+      const durationMs = 10_000;
+      setEmpireHighlight({
+        ownerCountryId,
+        empireName,
+        targetCountryIds,
+        expiresAtMs: Date.now() + durationMs,
+        durationMs,
+      });
+      setEmpireRemainingMs(durationMs);
+
+      const bounds = getEmpirePreviewBounds(sim, ownerCountryId, targetCountryIds);
+      setFocusRequest({
+        x: bounds.x,
+        y: bounds.y,
+        zoom: bounds.zoom,
+        nonce: Date.now(),
+      });
+    },
+    []
+  );
+
+  // Manage exact 10-second countdown for Empire Territory preview
+  useEffect(() => {
+    if (!empireHighlight) {
+      setEmpireRemainingMs(0);
+      return;
+    }
+    const tick = () => {
+      const rem = empireHighlight.expiresAtMs - Date.now();
+      if (rem <= 0) {
+        setEmpireHighlight(null);
+        setEmpireRemainingMs(0);
+      } else {
+        setEmpireRemainingMs(rem);
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 100);
+    return () => window.clearInterval(timer);
+  }, [empireHighlight]);
 
   const isOnlineMatch = Boolean(mpRoomCode && simRef.current?.isMultiplayer);
   const isOnlineHost = Boolean(
@@ -331,6 +409,7 @@ export default function App() {
         updateAchievements((s) => {
           switch (action.type) {
             case 'recruit_soldiers':
+            case 'recruit_soldiers_max':
               s.recruitsDone += 1;
               break;
             case 'declare_war':
@@ -797,6 +876,8 @@ export default function App() {
           setAchievementsOpen(false);
         } else if (treeCountryId !== null) {
           setTreeCountryId(null);
+        } else if (empireHighlight) {
+          setEmpireHighlight(null);
         } else if (showTutorial) {
           dismissTutorial();
         } else if (launchingNuke) {
@@ -818,6 +899,7 @@ export default function App() {
     isRemoteGuest,
     searchOpen,
     treeCountryId,
+    empireHighlight,
     achievementsOpen,
     launchingNuke,
     placingDefense,
@@ -983,18 +1065,37 @@ export default function App() {
     };
   }, [screen, user?.uid, performCloudSave]);
 
+  const renderOnlineDevBanner = () =>
+    onlineDevNotice ? (
+      <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[90] w-[min(94vw,440px)] bg-[#111B2B]/98 border border-amber-500/80 shadow-2xl px-3.5 py-2.5 flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-7 h-7 bg-amber-500/15 border border-amber-500/50 flex items-center justify-center shrink-0">
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+          </div>
+          <span className="text-xs sm:text-sm font-bold text-amber-200 leading-snug">
+            El modo online está en desarrollo.
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOnlineDevNotice(false)}
+          aria-label="Cerrar aviso"
+          className="p-1 text-slate-400 hover:text-white cursor-pointer shrink-0"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    ) : null;
+
   if (screen === 'DEVICE_SELECT') {
     return (
       <>
+        {renderOnlineDevBanner()}
         <DeviceModeScreen
-          onSelectMode={(mode) => {
-            setDeviceMode(mode);
+          onStartPlay={() => {
             setScreen('COUNTRY_SELECT');
           }}
-          onSelectOnline={(autoMode) => {
-            setDeviceMode(autoMode);
-            setScreen('ONLINE_LOBBY');
-          }}
+          onPressOnline={triggerOnlineDevNotice}
         />
         <PWAInstallBanner />
         <OfflineIndicator />
@@ -1005,9 +1106,10 @@ export default function App() {
   if (screen === 'ONLINE_LOBBY') {
     return (
       <>
+        {renderOnlineDevBanner()}
         <OnlineLobbyScreen
           deviceMode={deviceMode}
-          onChangeDeviceMode={setDeviceMode}
+          onChangeDeviceMode={() => {}}
           roomCode={mpRoomCode}
           room={mpRoom}
           members={mpMembers}
@@ -1073,12 +1175,13 @@ export default function App() {
   if (screen === 'COUNTRY_SELECT' || !simRef.current) {
     return (
       <>
+        {renderOnlineDevBanner()}
         <CountrySelectScreen
           deviceMode={deviceMode}
-          onChangeDeviceMode={setDeviceMode}
+          onChangeDeviceMode={() => {}}
           onStartCampaign={handleStartCampaign}
           onResumeCampaign={handleResumeCampaign}
-          onOpenOnline={() => setScreen('ONLINE_LOBBY')}
+          onOpenOnline={triggerOnlineDevNotice}
           onOpenAchievements={() => setAchievementsOpen(true)}
           achievementsUnlockedCount={achievementsUnlockedCount}
         />
@@ -1118,6 +1221,8 @@ export default function App() {
     setSpeed(0);
     setMobileDrawerOpen(false);
     setTreeCountryId(null);
+    setTreeInitialNodeId(undefined);
+    setEmpireHighlight(null);
     setPlacingDefense(false);
     setLaunchingNuke(false);
     if (sim.isMultiplayer) {
@@ -1132,10 +1237,7 @@ export default function App() {
     <div className="w-screen h-screen flex flex-col bg-[#0B121E] text-slate-100 overflow-hidden">
       <TopCommandBar
         deviceMode={deviceMode}
-        onSwitchDeviceMode={(mode) => {
-          setDeviceMode(mode);
-          setMobileDrawerOpen(false);
-        }}
+        onSwitchDeviceMode={() => {}}
         sim={sim}
         speed={speed}
         onSetSpeed={handleSetSpeed}
@@ -1203,6 +1305,7 @@ export default function App() {
               }
             }}
             onCancelLaunchNuke={() => setLaunchingNuke(false)}
+            empireHighlight={empireHighlight}
           />
 
           {placingDefense && (
@@ -1237,8 +1340,91 @@ export default function App() {
             </div>
           )}
 
+          {empireHighlight && !placingDefense && !launchingNuke && (() => {
+            const targetIso2s = empireHighlight.targetCountryIds
+              .map((tid) => sim.countries[tid]?.seed.iso2)
+              .filter((iso): iso is string => Boolean(iso));
+            const targetStatuses = getEmpireTargetProgress(
+              sim,
+              empireHighlight.ownerCountryId,
+              targetIso2s
+            );
+            const secLeft = Math.max(1, Math.ceil(empireRemainingMs / 1000));
+            const pctLeft = Math.max(
+              0,
+              Math.min(100, (empireRemainingMs / empireHighlight.durationMs) * 100)
+            );
+            return (
+              <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(95vw,580px)] bg-[#111B2B]/96 border border-amber-500/80 shadow-2xl overflow-hidden">
+                <div className="px-3 sm:px-3.5 py-2 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-amber-200 truncate">
+                        Territorio a invadir · {empireHighlight.empireName}
+                      </div>
+                      <div className="text-[10px] text-slate-300">
+                        Conquista las zonas resaltadas en rojo/dorado para proclamarlo gratis
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="font-mono-num text-xs font-bold text-amber-300 px-1.5 py-0.5 bg-[#0B121E] border border-amber-500/40">
+                      {secLeft}s
+                    </span>
+                    <button
+                      onClick={() => openCountryTree(empireHighlight.ownerCountryId, 'restore')}
+                      className="px-2 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-200 text-[11px] font-semibold cursor-pointer"
+                    >
+                      Árbol
+                    </button>
+                    <button
+                      onClick={() => setEmpireHighlight(null)}
+                      aria-label="Cerrar vista de territorio"
+                      className="p-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {targetStatuses.length > 0 && (
+                  <div className="px-3 sm:px-3.5 pb-2 flex flex-wrap items-center gap-1.5">
+                    {targetStatuses.map((ts) => (
+                      <button
+                        key={ts.countryId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedId(ts.countryId);
+                          handleJumpToCountry(ts.countryId);
+                          soundEngine.playSelectCountry();
+                        }}
+                        className={`px-2 py-0.5 border text-[11px] font-mono-num flex items-center gap-1 cursor-pointer transition-colors ${
+                          ts.conquered
+                            ? 'bg-emerald-950/60 border-emerald-600/70 text-emerald-300'
+                            : 'bg-rose-950/50 hover:bg-rose-900/60 border-amber-500/60 text-amber-200'
+                        }`}
+                      >
+                        <span>{ts.conquered ? '✓' : '⚔'}</span>
+                        <span>{ts.name}</span>
+                        {!ts.conquered && ts.ownedPct > 0 && (
+                          <span className="text-amber-300">({ts.ownedPct}%)</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="h-1 w-full bg-slate-900">
+                  <div
+                    className="h-full bg-amber-400 transition-[width] duration-100 ease-linear"
+                    style={{ width: `${pctLeft}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Live Autonomous AI Geopolitical Feed (top-left of map) */}
-          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || launchingNuke)) && (
+          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || launchingNuke || empireHighlight)) && (
             <div
               className={`absolute z-20 space-y-1.5 pointer-events-none ${
                 isMobile
@@ -1610,9 +1796,17 @@ export default function App() {
           sim={sim}
           countryId={treeCountryId}
           deviceMode={deviceMode}
-          onClose={() => setTreeCountryId(null)}
+          initialSelectedNodeId={treeInitialNodeId}
+          onClose={() => {
+            setTreeCountryId(null);
+            setTreeInitialNodeId(undefined);
+          }}
           onExecuteAction={handleExecuteAction}
-          onSwitchCountry={(id) => setTreeCountryId(id)}
+          onSwitchCountry={(id) => {
+            setTreeInitialNodeId(undefined);
+            setTreeCountryId(id);
+          }}
+          onPreviewEmpireTerritory={handlePreviewEmpireTerritory}
         />
       )}
 

@@ -5,9 +5,9 @@ import {
   Globe,
   List,
   Loader2,
+  Lock,
   LogIn,
   LogOut,
-  Monitor,
   Play,
   Search,
   Smartphone,
@@ -515,18 +515,36 @@ export function CountrySelectScreen({
                 soundEngine.playClick();
                 onOpenOnline();
               }}
-              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+              title="Online (En desarrollo)"
+              className="relative overflow-hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-600 text-slate-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
             >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Online</span>
-            </button>
-            <button
-              onClick={() => onChangeDeviceMode('desktop')}
-              title="Cambiar a modo Computador"
-              className="px-2 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-[11px] flex items-center gap-1 cursor-pointer"
-            >
-              <Monitor className="w-3.5 h-3.5" />
-              <span>PC</span>
+              <Lock className="w-3 h-3 text-amber-400 shrink-0" />
+              <span className="opacity-80">Online</span>
+              <svg
+                viewBox="0 0 68 28"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 w-full h-full opacity-55"
+                aria-hidden="true"
+              >
+                <line
+                  x1="0"
+                  y1="26"
+                  x2="68"
+                  y2="2"
+                  stroke="#94A3B8"
+                  strokeWidth="2"
+                  strokeDasharray="4 2"
+                />
+                <line
+                  x1="0"
+                  y1="2"
+                  x2="68"
+                  y2="26"
+                  stroke="#94A3B8"
+                  strokeWidth="2"
+                  strokeDasharray="4 2"
+                />
+              </svg>
             </button>
             <PWAInstallButton compact />
           </div>

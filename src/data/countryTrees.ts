@@ -2746,7 +2746,36 @@ const COUNTRY_QUICK_SPECS: Record<string, RegionalQuickSpec> = {
   },
 };
 
-function buildNodesFromSpec(spec: BespokeTreeSpec): FocusNode[] {
+function getNearestNeighborIso2s(seed: CountrySeed, count = 3): string[] {
+  const sameContinent = COUNTRIES_195.filter(
+    (other) => other.iso2 !== seed.iso2 && other.continent === seed.continent
+  );
+  const pool = sameContinent.length >= count ? sameContinent : COUNTRIES_195.filter((o) => o.iso2 !== seed.iso2);
+  const scored = pool.map((other) => {
+    const dLat = other.lat - seed.lat;
+    const dLon = other.lon - seed.lon;
+    return { iso2: other.iso2, distSq: dLat * dLat + dLon * dLon };
+  });
+  scored.sort((a, b) => a.distSq - b.distSq);
+  return scored.slice(0, count).map((s) => s.iso2);
+}
+
+function resolveEmpireTargetIso2s(seed: CountrySeed, rawTargets?: string[]): string[] {
+  const validSet = new Set(COUNTRIES_195.map((c) => c.iso2));
+  const cleaned: string[] = [];
+  if (rawTargets) {
+    for (const iso of rawTargets) {
+      if (iso !== seed.iso2 && validSet.has(iso) && !cleaned.includes(iso)) {
+        cleaned.push(iso);
+      }
+    }
+  }
+  if (cleaned.length > 0) return cleaned;
+  return getNearestNeighborIso2s(seed, 3);
+}
+
+function buildNodesFromSpec(seed: CountrySeed, spec: BespokeTreeSpec): FocusNode[] {
+  const empireTargets = resolveEmpireTargetIso2s(seed, spec.restore.targets);
   return [
     {
       id: 'root',
@@ -2842,18 +2871,14 @@ function buildNodesFromSpec(spec: BespokeTreeSpec): FocusNode[] {
       id: 'restore',
       tier: 3,
       lane: 'center',
-      parents: ['eco2', 'mil2'],
-      requireAnyParent: true,
+      parents: [],
       category: 'restoration',
       era: spec.restore.era,
       title: spec.restore.title,
       historicalFact: spec.restore.fact,
       requirements: {
-        moneyCost: 700,
-        minExpansionPct: 25,
-        ...(spec.restore.targets && spec.restore.targets.length > 0
-          ? { historicalTargetIso2: spec.restore.targets }
-          : {}),
+        moneyCost: 0,
+        historicalTargetIso2: empireTargets,
       },
       effects: {
         incomeBonus: 4,
@@ -3124,7 +3149,7 @@ function getSubregionFallback(seed: CountrySeed): {
       mil2Title: 'Doctrina de Proyección Regional',
       mil2Fact: `Amplía el límite militar y las fortificaciones estratégicas del país.`,
       restoreFact: `Culmina la trayectoria histórica de ${name} proclamando ${unionName}.`,
-      targets: ['EG', 'ET', 'NG', 'ZA', 'KE'],
+      targets: getNearestNeighborIso2s(seed, 3),
     };
   }
 
@@ -3156,7 +3181,7 @@ function buildCountryTree(seed: CountrySeed): CountryGenealogyTree {
       subtitle: bespoke.subtitle,
       ancestors: bespoke.ancestors,
       restoredName: bespoke.restore.newName,
-      nodes: buildNodesFromSpec(bespoke),
+      nodes: buildNodesFromSpec(seed, bespoke),
     };
   }
 
@@ -3203,7 +3228,7 @@ function buildCountryTree(seed: CountrySeed): CountryGenealogyTree {
       subtitle: spec.subtitle,
       ancestors: spec.ancestors,
       restoredName: spec.restore.newName,
-      nodes: buildNodesFromSpec(spec),
+      nodes: buildNodesFromSpec(seed, spec),
     };
   }
 
@@ -3230,7 +3255,7 @@ function buildCountryTree(seed: CountrySeed): CountryGenealogyTree {
     subtitle: spec.subtitle,
     ancestors: spec.ancestors,
     restoredName: spec.restore.newName,
-    nodes: buildNodesFromSpec(spec),
+    nodes: buildNodesFromSpec(seed, spec),
   };
 }
 

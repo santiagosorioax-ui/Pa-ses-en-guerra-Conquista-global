@@ -43,6 +43,7 @@ import {
   getCountryRebellionStrength,
   getEnemies,
   getGoldMineCost,
+  getMaxRecruitableSoldiers,
   getMoneyCap,
   getOccupiedNationsBy,
   getRelation,
@@ -121,6 +122,7 @@ export function CommandDrawer({
   const canBuildPort = hasCoast(sim, player.id);
   const armyCap = getArmyCap(player);
   const moneyCap = getMoneyCap(player);
+  const maxRecruitableSoldiers = getMaxRecruitableSoldiers(player);
   const playerTree = getCountryGenealogyTree(player.seed);
   const completedFocusCount = (player.completedFocusIds ?? []).length;
   const readyFocusCount = player.alive
@@ -279,25 +281,43 @@ export function CommandDrawer({
               </span>
             </button>
 
-            {/* Botón Ejército: gastar dinero en soldados */}
+            {/* Botón Ejército: gastar dinero en soldados + botón Max */}
             <div className="space-y-1.5">
-              <button
-                disabled={busy || !player.alive}
-                onClick={() => void runAction({ type: 'recruit_soldiers' })}
-                className={`w-full py-3 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-sm flex items-center justify-between transition-colors cursor-pointer ${
-                  Math.round(player.army) >= armyCap ? 'opacity-65' : ''
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <Swords className="w-4 h-4" />
-                  <span>Ejército (+{ARMY_RECRUIT_AMOUNT} Soldados)</span>
-                </span>
-                <span className="font-mono-num text-xs bg-rose-800/80 px-2 py-0.5">
-                  ${ARMY_RECRUIT_COST}
-                </span>
-              </button>
+              <div className="flex items-stretch gap-1.5">
+                <button
+                  disabled={busy || !player.alive}
+                  onClick={() => void runAction({ type: 'recruit_soldiers' })}
+                  className={`flex-1 min-w-0 py-3 px-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-45 text-white font-bold text-sm flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                    Math.round(player.army) >= armyCap ? 'opacity-65' : ''
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <Swords className="w-4 h-4 shrink-0" />
+                    <span className="truncate">Ejército (+{ARMY_RECRUIT_AMOUNT})</span>
+                  </span>
+                  <span className="font-mono-num text-xs bg-rose-800/80 px-2 py-0.5 shrink-0">
+                    ${ARMY_RECRUIT_COST}
+                  </span>
+                </button>
+
+                <button
+                  disabled={busy || !player.alive}
+                  onClick={() => void runAction({ type: 'recruit_soldiers_max' })}
+                  title="Gastar todo tu dinero en soldados hasta tu capacidad militar"
+                  className={`px-3.5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-45 text-slate-950 font-bold flex flex-col items-center justify-center leading-tight shrink-0 transition-colors cursor-pointer ${
+                    maxRecruitableSoldiers <= 0 ? 'opacity-65' : ''
+                  }`}
+                >
+                  <span className="text-sm font-extrabold tracking-wide">Max</span>
+                  {maxRecruitableSoldiers > 0 && (
+                    <span className="font-mono-num text-[10px] font-semibold text-slate-900">
+                      +{maxRecruitableSoldiers.toLocaleString('es-ES')}
+                    </span>
+                  )}
+                </button>
+              </div>
               <p className="text-[11px] text-slate-400">
-                Gasta dinero para sumar soldados hasta tu capacidad militar. Construye ciudades o conquista territorio para ampliarla.
+                Gasta dinero para sumar soldados hasta tu capacidad militar. Pulsa «Max» para invertir todo tu dinero en ejército.
               </p>
             </div>
 

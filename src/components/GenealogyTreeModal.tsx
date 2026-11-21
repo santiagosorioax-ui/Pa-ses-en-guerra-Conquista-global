@@ -8,6 +8,7 @@ import {
   GitFork,
   Landmark,
   Lock,
+  Map as MapIcon,
   Shield,
   Sparkles,
   Swords,
@@ -23,6 +24,7 @@ import type { GameActionPayload, GameActionResult } from '../engine/gameActions'
 import {
   evaluateFocusNodeStatus,
   getCountryName,
+  getEmpireTargetProgress,
   type FocusNodeStatus,
   type SimulationState,
 } from '../engine/gameSimulation';
@@ -33,9 +35,15 @@ interface GenealogyTreeModalProps {
   sim: SimulationState;
   countryId: number;
   deviceMode: DeviceMode;
+  initialSelectedNodeId?: FocusNode['id'];
   onClose: () => void;
   onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
   onSwitchCountry?: (id: number) => void;
+  onPreviewEmpireTerritory: (
+    ownerCountryId: number,
+    empireName: string,
+    targetCountryIds: number[]
+  ) => void;
 }
 
 const CATEGORY_LABELS: Record<FocusCategory, string> = {
@@ -92,9 +100,11 @@ export function GenealogyTreeModal({
   sim,
   countryId,
   deviceMode,
+  initialSelectedNodeId,
   onClose,
   onExecuteAction,
   onSwitchCountry,
+  onPreviewEmpireTerritory,
 }: GenealogyTreeModalProps) {
   const country = sim.countries[countryId];
   const player = sim.countries[sim.playerId];
@@ -106,14 +116,20 @@ export function GenealogyTreeModal({
     [country]
   );
 
-  const [selectedNodeId, setSelectedNodeId] = useState<FocusNode['id']>('root');
+  const [selectedNodeId, setSelectedNodeId] = useState<FocusNode['id']>(
+    initialSelectedNodeId ?? 'root'
+  );
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // When switching country, automatically highlight the next actionable node (or restore if done)
+  // When switching country, automatically highlight the next actionable node (or requested initial node)
   useEffect(() => {
     if (!tree || !country) return;
     setFeedback(null);
+    if (initialSelectedNodeId) {
+      setSelectedNodeId(initialSelectedNodeId);
+      return;
+    }
     const statuses = tree.nodes.map((n) => ({
       node: n,
       status: evaluateFocusNodeStatus(sim, countryId, n),
@@ -132,7 +148,7 @@ export function GenealogyTreeModal({
     setSelectedNodeId(lastCompleted ? lastCompleted.node.id : 'root');
     // Only reset selection when changing the inspected country
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countryId]);
+  }, [countryId, initialSelectedNodeId]);
 
   if (!country || !tree) return null;
 
@@ -156,6 +172,22 @@ export function GenealogyTreeModal({
   const selectedNode = nodeById(selectedNodeId) ?? rootNode;
   const selectedStatus = statusMap.get(selectedNode.id)!;
   const restoreCompleted = statusMap.get('restore')?.completed ?? false;
+  const empireTargets = getEmpireTargetProgress(
+    sim,
+    countryId,
+    restoreNode.requirements.historicalTargetIso2 ?? []
+  );
+  const empireTargetIds = empireTargets.map((t) => t.countryId);
+  const empireConqueredCount = empireTargets.filter((t) => t.conquered).length;
+
+  const triggerEmpireMapPreview = () => {
+    if (empireTargetIds.length === 0) return;
+    onPreviewEmpireTerritory(
+      countryId,
+      restoreNode.effects.newName ?? tree.restoredName,
+      empireTargetIds
+    );
+  };
 
   const handleCompleteSelected = async () => {
     if (!isOwnCountry || busy) return;
@@ -171,6 +203,11 @@ export function GenealogyTreeModal({
   const edgeColor = (fromId: FocusNode['id'], toId: FocusNode['id']) => {
     const fromDone = statusMap.get(fromId)?.completed ?? false;
     const toStatus = statusMap.get(toId);
+    if (toId === 'restore') {
+      if (toStatus?.completed) return '#F59E0B';
+      if (toStatus?.canComplete) return '#F59E0B';
+      return '#475569';
+    }
     if (fromDone && toStatus?.completed) return '#10B981';
     if (fromDone && toStatus?.canComplete) return '#F59E0B';
     if (fromDone) return '#64748B';
@@ -192,14 +229,19 @@ export function GenealogyTreeModal({
       borderCls = isRestore
         ? 'border-amber-400/80 bg-amber-950/25 hover:border-amber-300'
         : 'border-emerald-600/70 bg-emerald-950/25 hover:border-emerald-500';
-      stateLabel = 'Completado';
+      stateLabel = isRestore ? 'Proclamado' : 'Completado';
       stateColor = isRestore ? 'text-amber-300' : 'text-emerald-400';
       StateIcon = CheckCircle2;
     } else if (status.canComplete) {
       borderCls = 'border-amber-500/80 bg-[#142033] hover:border-amber-400';
-      stateLabel = 'Disponible';
+      stateLabel = isRestore ? '¡Listo!' : 'Disponible';
       stateColor = 'text-amber-300';
       StateIcon = Sparkles;
+    } else if (isRestore) {
+      borderCls = 'border-amber-500/45 bg-[#121D30] hover:border-amber-400';
+      stateLabel = `Ver mapa (10s)`;
+      stateColor = 'text-amber-300';
+      StateIcon = MapIcon;
     } else if (status.parentsMet) {
       borderCls = 'border-slate-700 bg-[#0E1829] hover:border-slate-500';
       stateLabel = 'En progreso';
@@ -213,6 +255,10 @@ export function GenealogyTreeModal({
         type="button"
         onClick={() => {
           setFeedback(null);
+          if (isRestore && !status.completed && !status.canComplete && empireTargetIds.length > 0) {
+            triggerEmpireMapPreview();
+            return;
+          }
           setSelectedNodeId(node.id);
         }}
         className={`w-full text-left border transition-colors cursor-pointer px-3 py-2.5 ${borderCls} ${
@@ -253,11 +299,18 @@ export function GenealogyTreeModal({
             {compactEffectPreview(node)}
           </span>
           {!status.completed && (
-            <span className="text-slate-300 shrink-0">
-              ${node.requirements.moneyCost.toLocaleString('es-ES')}
+            <span className={isRestore ? 'text-emerald-300 shrink-0 font-semibold' : 'text-slate-300 shrink-0'}>
+              {isRestore
+                ? `Invasión ${empireConqueredCount}/${empireTargets.length}`
+                : `$${node.requirements.moneyCost.toLocaleString('es-ES')}`}
             </span>
           )}
         </div>
+        {isRestore && !status.completed && !status.canComplete && (
+          <div className="mt-1 text-[10px] text-amber-200/80">
+            Clic para ver en el mapa qué territorio invadir (10s) · Sin costo en dinero
+          </div>
+        )}
       </button>
     );
   };
@@ -440,14 +493,14 @@ export function GenealogyTreeModal({
                   />
                 </svg>
                 <div className="absolute inset-x-0 top-1 flex justify-center pointer-events-none">
-                  <span className="px-1.5 bg-[#0D1625] text-[10px] text-slate-400 font-mono-num">
-                    Cualquier rama desbloquea
+                  <span className="px-1.5 bg-[#0D1625] text-[10px] text-amber-300/90 font-mono-num">
+                    Se forma invadiendo su territorio · Sin costo en dinero
                   </span>
                 </div>
               </div>
 
               {/* Tier 3: Historical Restoration */}
-              <div className="max-w-[340px] mx-auto">{renderNodeCard(restoreNode)}</div>
+              <div className="max-w-[360px] mx-auto">{renderNodeCard(restoreNode)}</div>
             </div>
           </div>
 
@@ -550,6 +603,19 @@ export function GenealogyTreeModal({
 
             {/* Bottom Action CTA */}
             <div className="pt-2 border-t border-slate-800 space-y-2">
+              {selectedNode.id === 'restore' && empireTargetIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={triggerEmpireMapPreview}
+                  className={`w-full px-3 bg-[#0B121E] hover:bg-slate-800 border border-amber-500/60 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                    isMobile ? 'min-h-[42px] py-2.5' : 'py-2'
+                  }`}
+                >
+                  <MapIcon className="w-3.5 h-3.5 shrink-0" />
+                  <span>Ver territorio a invadir en el mapa (10s)</span>
+                </button>
+              )}
+
               {isOwnCountry ? (
                 selectedStatus.completed ? (
                   <div className="w-full py-2.5 px-3 bg-emerald-950/50 border border-emerald-700/60 text-emerald-200 text-xs font-semibold flex items-center justify-center gap-2">
@@ -584,7 +650,9 @@ export function GenealogyTreeModal({
                         : 'Completar hito histórico'}
                     </span>
                     <span className="font-mono-num shrink-0">
-                      (${selectedNode.requirements.moneyCost.toLocaleString('es-ES')})
+                      {selectedNode.requirements.moneyCost > 0
+                        ? `($${selectedNode.requirements.moneyCost.toLocaleString('es-ES')})`
+                        : '· Gratis'}
                     </span>
                   </button>
                 )

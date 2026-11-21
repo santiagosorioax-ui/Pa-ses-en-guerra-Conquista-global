@@ -3,7 +3,6 @@ import {
   Coins,
   GitFork,
   HelpCircle,
-  Monitor,
   Pause,
   Play,
   RotateCcw,
@@ -143,14 +142,6 @@ export function TopCommandBar({
               className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
             >
               <Search className="w-3.5 h-3.5" />
-            </button>
-
-            <button
-              onClick={() => onSwitchDeviceMode('desktop')}
-              title="Cambiar a modo Computador"
-              className="w-8 h-8 flex items-center justify-center bg-slate-900 border border-slate-700 text-amber-300 cursor-pointer"
-            >
-              <Monitor className="w-3.5 h-3.5" />
             </button>
 
             <button

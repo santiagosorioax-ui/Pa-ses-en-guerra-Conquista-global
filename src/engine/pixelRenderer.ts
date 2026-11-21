@@ -18,6 +18,14 @@ function packAbgr(r: number, g: number, b: number): number {
   return (255 << 24) | (cb << 16) | (cg << 8) | cr;
 }
 
+export interface EmpireHighlightConfig {
+  ownerCountryId: number;
+  empireName: string;
+  targetCountryIds: number[];
+  expiresAtMs: number;
+  durationMs: number;
+}
+
 export class PixelMapRenderer {
   public offscreenCanvas: HTMLCanvasElement;
   private offscreenCtx: CanvasRenderingContext2D;
@@ -43,10 +51,15 @@ export class PixelMapRenderer {
     mapMode: MapMode,
     selectedId: number | null,
     hoveredId: number | null,
-    force = false
+    force = false,
+    empireHighlight: EmpireHighlightConfig | null = null,
+    pulseStep = 0
   ) {
     const focusId = selectedId ?? sim.playerId;
-    const sig = `${mapMode}|${selectedId ?? -1}|${hoveredId ?? -1}|${sim.totalDays}|${sim.dirtyPixels ? 1 : 0}`;
+    const empSig = empireHighlight
+      ? `${empireHighlight.ownerCountryId}:${empireHighlight.targetCountryIds.join(',')}:${pulseStep}`
+      : 'none';
+    const sig = `${mapMode}|${selectedId ?? -1}|${hoveredId ?? -1}|${sim.totalDays}|${sim.dirtyPixels ? 1 : 0}|${empSig}`;
     if (!force && !sim.dirtyPixels && sig === this.lastSignature) {
       return;
     }
@@ -54,7 +67,20 @@ export class PixelMapRenderer {
     sim.dirtyPixels = false;
 
     const { ownerGrid, mapData, countries } = sim;
-    const { oceanBand, terrainShade } = mapData;
+    const { oceanBand, terrainShade, ownerGrid: origOwnerGrid } = mapData;
+
+    let empireTargetLookup: Uint8Array | null = null;
+    if (empireHighlight && empireHighlight.targetCountryIds.length > 0) {
+      empireTargetLookup = new Uint8Array(countries.length);
+      for (const tid of empireHighlight.targetCountryIds) {
+        if (tid >= 0 && tid < countries.length) {
+          empireTargetLookup[tid] = 1;
+        }
+      }
+    }
+    const pulseMix = empireHighlight
+      ? 0.42 + 0.22 * (0.5 + 0.5 * Math.sin((pulseStep / 6) * Math.PI * 2))
+      : 0;
 
     const countryRgb = new Array<[number, number, number]>(countries.length);
     for (let i = 0; i < countries.length; i++) {
@@ -153,6 +179,62 @@ export class PixelMapRenderer {
           r += 14;
           g += 14;
           b += 8;
+        }
+
+        // 10-second Empire Territory Invasion Preview Highlight
+        if (empireHighlight && empireTargetLookup) {
+          const origOwner = origOwnerGrid[idx];
+          const isEmpireTarget = origOwner >= 0 && empireTargetLookup[origOwner] === 1;
+          const isEmpireBuilder = owner === empireHighlight.ownerCountryId;
+
+          if (isEmpireTarget) {
+            const origL = x > 0 ? origOwnerGrid[idx - 1] : -1;
+            const origR = x + 1 < MAP_W ? origOwnerGrid[idx + 1] : -1;
+            const origU = y > 0 ? origOwnerGrid[idx - MAP_W] : -1;
+            const origD = y + 1 < MAP_H ? origOwnerGrid[idx + MAP_W] : -1;
+            const isTargetEdge =
+              origL !== origOwner || origR !== origOwner || origU !== origOwner || origD !== origOwner;
+            const isTargetRing =
+              !isTargetEdge &&
+              ((x > 1 && origOwnerGrid[idx - 2] !== origOwner) ||
+                (x + 2 < MAP_W && origOwnerGrid[idx + 2] !== origOwner) ||
+                (y > 1 && origOwnerGrid[idx - MAP_W * 2] !== origOwner) ||
+                (y + 2 < MAP_H && origOwnerGrid[idx + MAP_W * 2] !== origOwner));
+
+            if (isEmpireBuilder) {
+              // Already conquered territory of the empire -> luminous emerald-gold
+              if (isTargetEdge || isTargetRing) {
+                r = 52;
+                g = 211;
+                b = 153;
+              } else {
+                r = Math.round(r * 0.62 + 16 * 0.38);
+                g = Math.round(g * 0.62 + 185 * 0.38);
+                b = Math.round(b * 0.62 + 129 * 0.38);
+              }
+            } else {
+              // Territory still to invade -> unmistakable glowing amber-crimson pulse + gold border
+              if (isTargetEdge || isTargetRing) {
+                r = 254;
+                g = 240;
+                b = 138;
+              } else {
+                const hatch = ((x + y) & 3) === 0;
+                const tr = hatch ? 251 : 239;
+                const tg = hatch ? 191 : 68;
+                const tb = hatch ? 36 : 68;
+                const m = hatch ? Math.min(0.85, pulseMix + 0.22) : pulseMix;
+                r = Math.round(r * (1 - m) + tr * m);
+                g = Math.round(g * (1 - m) + tg * m);
+                b = Math.round(b * (1 - m) + tb * m);
+              }
+            }
+          } else if (!isEmpireBuilder) {
+            // Dim surrounding non-target countries so invasion territory stands out clearly
+            r = Math.round(r * 0.52);
+            g = Math.round(g * 0.52);
+            b = Math.round(b * 0.52);
+          }
         }
 
         buf[idx] = packAbgr(r, g, b);
