@@ -3,7 +3,6 @@ import { COUNTRIES_195 } from '../data/countries195';
 import {
   N_COUNTRIES,
   formatFullDate,
-  getCountryDisplayName,
   stabilizeSimulationStats,
   type AiDoctrine,
   type ChronicleEntry,
@@ -12,6 +11,7 @@ import {
   type HumanDiplomaticOffer,
   type HumanPlayerSlot,
   type NavalInvasion,
+  type NukeStrikeRecord,
   type PendingDiplomaticProposal,
   type PlayerHistoryPoint,
   type PortCoord,
@@ -38,7 +38,6 @@ export interface SerializedCountry {
   cityPurchases: number;
   goldMinesBuiltThisMonth: number;
   citiesBuiltThisMonth: number;
-  recruitsThisMonth?: number;
   ports: PortCoord[];
   defenses: DefenseCoord[];
   aggressiveExpansion: number;
@@ -49,11 +48,13 @@ export interface SerializedCountry {
   bboxMaxY: number;
   annexedById?: number | null;
   customName?: string | null;
-  completedTreeNodes?: string[];
-  treeIncomeBonus?: number;
-  treeArmyCapBonus?: number;
-  annexedCount?: number;
-  lastNukeDay?: number;
+  completedFocusIds?: string[];
+  focusIncomeBonus?: number;
+  focusArmyCapBonus?: number;
+  focusDefenseBonus?: number;
+  nukeCooldownDays?: number;
+  lastNukeStrike?: NukeStrikeRecord | null;
+  rebelUnrest?: number;
 }
 
 export interface SerializedCampaignData {
@@ -184,7 +185,7 @@ export function buildCampaignMetaPayload(
     ownerId: uid,
     campaignId,
     countryId: sim.playerId,
-    countryName: getCountryDisplayName(p).slice(0, 80),
+    countryName: p.seed.name.slice(0, 80),
     countryIso2: p.seed.iso2,
     dateLabel: formatFullDate(sim.day, sim.month, sim.year),
     day: sim.day,
@@ -217,7 +218,6 @@ function serializeCountries(sim: SimulationState): SerializedCountry[] {
     cityPurchases: c.cityPurchases,
     goldMinesBuiltThisMonth: c.goldMinesBuiltThisMonth,
     citiesBuiltThisMonth: c.citiesBuiltThisMonth,
-    recruitsThisMonth: c.recruitsThisMonth,
     ports: c.ports.slice(0, 32).map((p) => ({ x: p.x, y: p.y, nx: p.nx, ny: p.ny })),
     defenses: c.defenses.slice(0, 32).map((d) => ({ x: d.x, y: d.y, radius: d.radius })),
     aggressiveExpansion: c.aggressiveExpansion,
@@ -227,12 +227,26 @@ function serializeCountries(sim: SimulationState): SerializedCountry[] {
     bboxMinY: c.bboxMinY,
     bboxMaxY: c.bboxMaxY,
     annexedById: c.annexedById ?? null,
-    customName: c.customName ?? null,
-    completedTreeNodes: (c.completedTreeNodes ?? []).slice(0, 16),
-    treeIncomeBonus: c.treeIncomeBonus ?? 0,
-    treeArmyCapBonus: c.treeArmyCapBonus ?? 0,
-    annexedCount: c.annexedCount ?? 0,
-    lastNukeDay: c.lastNukeDay ?? -999,
+    ...(c.customName ? { customName: c.customName.slice(0, 80) } : {}),
+    ...(c.completedFocusIds && c.completedFocusIds.length > 0
+      ? { completedFocusIds: c.completedFocusIds.slice(0, 12) }
+      : {}),
+    ...(c.focusIncomeBonus ? { focusIncomeBonus: Math.min(20, Math.round(c.focusIncomeBonus)) } : {}),
+    ...(c.focusArmyCapBonus ? { focusArmyCapBonus: Math.min(1200, Math.round(c.focusArmyCapBonus)) } : {}),
+    ...(c.focusDefenseBonus ? { focusDefenseBonus: Math.min(30, Math.round(c.focusDefenseBonus)) } : {}),
+    ...(c.nukeCooldownDays ? { nukeCooldownDays: Math.max(0, Math.round(c.nukeCooldownDays)) } : {}),
+    ...(c.lastNukeStrike
+      ? {
+          lastNukeStrike: {
+            id: c.lastNukeStrike.id,
+            x: c.lastNukeStrike.x,
+            y: c.lastNukeStrike.y,
+            radius: c.lastNukeStrike.radius,
+            totalDays: c.lastNukeStrike.totalDays,
+          },
+        }
+      : {}),
+    ...(c.rebelUnrest ? { rebelUnrest: Math.max(0, Math.min(100, Math.round(c.rebelUnrest))) } : {}),
   }));
 }
 
@@ -288,7 +302,6 @@ function hydrateCountries(
       cityPurchases: sc.cityPurchases,
       goldMinesBuiltThisMonth: sc.goldMinesBuiltThisMonth,
       citiesBuiltThisMonth: sc.citiesBuiltThisMonth,
-      recruitsThisMonth: sc.recruitsThisMonth ?? 0,
       ports: (sc.ports ?? []).map((p) => ({ ...p })),
       defenses: (sc.defenses ?? []).map((d) => ({ ...d })),
       aggressiveExpansion: sc.aggressiveExpansion,
@@ -299,12 +312,21 @@ function hydrateCountries(
       bboxMinY: sc.bboxMinY,
       bboxMaxY: sc.bboxMaxY,
       annexedById: sc.annexedById ?? null,
-      customName: sc.customName ?? null,
-      completedTreeNodes: Array.isArray(sc.completedTreeNodes) ? [...sc.completedTreeNodes] : [],
-      treeIncomeBonus: sc.treeIncomeBonus ?? 0,
-      treeArmyCapBonus: sc.treeArmyCapBonus ?? 0,
-      annexedCount: sc.annexedCount ?? 0,
-      lastNukeDay: sc.lastNukeDay ?? -999,
+      customName: typeof sc.customName === 'string' && sc.customName.trim().length > 0 ? sc.customName : null,
+      completedFocusIds: Array.isArray(sc.completedFocusIds)
+        ? sc.completedFocusIds.filter((id): id is string => typeof id === 'string')
+        : [],
+      focusIncomeBonus: typeof sc.focusIncomeBonus === 'number' ? sc.focusIncomeBonus : 0,
+      focusArmyCapBonus: typeof sc.focusArmyCapBonus === 'number' ? sc.focusArmyCapBonus : 0,
+      focusDefenseBonus: typeof sc.focusDefenseBonus === 'number' ? sc.focusDefenseBonus : 0,
+      nukeCooldownDays: typeof sc.nukeCooldownDays === 'number' ? Math.max(0, sc.nukeCooldownDays) : 0,
+      lastNukeStrike:
+        sc.lastNukeStrike &&
+        typeof sc.lastNukeStrike.x === 'number' &&
+        typeof sc.lastNukeStrike.y === 'number'
+          ? { ...sc.lastNukeStrike }
+          : null,
+      rebelUnrest: typeof sc.rebelUnrest === 'number' ? Math.max(0, Math.min(100, sc.rebelUnrest)) : 0,
     };
   });
 }
@@ -404,7 +426,6 @@ export function restoreSimulationFromSnapshot(
     })),
     invasions: ((raw.invasions as NavalInvasion[]) ?? []).map((inv) => ({ ...inv })),
     particles: [],
-    nukeBlasts: [],
     chronicle: ((raw.chronicle as ChronicleEntry[]) ?? []).map((entry) => ({ ...entry })),
     playerHistory: ((raw.playerHistory as PlayerHistoryPoint[]) ?? []).map((pt) => ({ ...pt })),
     activeEvent: null,
@@ -562,7 +583,6 @@ export function restoreRoomWorldState(
     })),
     invasions: ((raw.invasions as NavalInvasion[]) ?? []).map((inv) => ({ ...inv })),
     particles: [],
-    nukeBlasts: [],
     chronicle: ((raw.chronicle as ChronicleEntry[]) ?? []).map((entry) => ({ ...entry })),
     playerHistory: nextHistory,
     activeEvent: null,

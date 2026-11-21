@@ -12,6 +12,7 @@ import {
   Search,
   Smartphone,
   Trash2,
+  Trophy,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -32,6 +33,8 @@ interface CountrySelectScreenProps {
   onStartCampaign: (countryId: number) => void;
   onResumeCampaign: (summary: SavedCampaignSummary) => Promise<void>;
   onOpenOnline: () => void;
+  onOpenAchievements: () => void;
+  achievementsUnlockedCount: number;
 }
 
 const CONTINENTS: Array<'Todos' | Continent> = [
@@ -49,6 +52,8 @@ export function CountrySelectScreen({
   onStartCampaign,
   onResumeCampaign,
   onOpenOnline,
+  onOpenAchievements,
+  achievementsUnlockedCount,
 }: CountrySelectScreenProps) {
   const {
     user,
@@ -497,6 +502,17 @@ export function CountrySelectScreen({
             <button
               onClick={() => {
                 soundEngine.playClick();
+                onOpenAchievements();
+              }}
+              title={`Logros (${achievementsUnlockedCount}/100)`}
+              className="px-2 py-1.5 bg-slate-900 border border-amber-500/50 text-amber-300 hover:text-amber-200 text-[11px] font-mono-num flex items-center gap-1 cursor-pointer"
+            >
+              <Trophy className="w-3.5 h-3.5 shrink-0" />
+              <span>{achievementsUnlockedCount}</span>
+            </button>
+            <button
+              onClick={() => {
+                soundEngine.playClick();
                 onOpenOnline();
               }}
               className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer"
@@ -764,6 +780,19 @@ export function CountrySelectScreen({
               className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs cursor-pointer"
             >
               Centrar Mundo
+            </button>
+            <button
+              onClick={() => {
+                soundEngine.playClick();
+                onOpenAchievements();
+              }}
+              className="px-2.5 py-1.5 bg-slate-900 border border-amber-500/50 text-amber-300 hover:text-amber-200 hover:border-amber-400 text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+            >
+              <Trophy className="w-3.5 h-3.5 shrink-0" />
+              <span>Logros</span>
+              <span className="font-mono-num text-amber-200/90">
+                {achievementsUnlockedCount}/100
+              </span>
             </button>
             <button
               onClick={() => {

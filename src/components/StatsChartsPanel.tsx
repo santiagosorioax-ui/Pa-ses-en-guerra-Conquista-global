@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import { Coins, Globe, Swords } from 'lucide-react';
 import {
-  getCountryDisplayName,
+  getCountryName,
   type CountryState,
   type PlayerHistoryPoint,
 } from '../engine/gameSimulation';
@@ -45,9 +45,7 @@ export function StatsChartsPanel({ player, history }: StatsChartsPanelProps) {
   return (
     <div className="space-y-4">
       <div className="text-[11px] text-slate-400">
-        Evolución en tiempo real de{' '}
-        <span className="text-amber-300 font-semibold">{getCountryDisplayName(player)}</span> (
-        {history.length} muestras).
+        Evolución en tiempo real de <span className="text-amber-300 font-semibold">{getCountryName(player)}</span> ({history.length} muestras).
       </div>
 
       {/* 1. Crecimiento Económico (Dinero e Ingreso/seg) */}

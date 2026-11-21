@@ -1,8 +1,7 @@
 import { COUNTRIES_195, type CountrySeed } from '../data/countries195';
 import {
-  ISO2_TO_COUNTRY_ID,
   getCountryGenealogyTree,
-  type CountryTreeNode,
+  type FocusNode,
 } from '../data/countryTrees';
 import {
   BILATERAL_PRESETS,
@@ -44,6 +43,14 @@ export interface DefenseCoord {
   radius: number;
 }
 
+export interface NukeStrikeRecord {
+  id: number;
+  x: number;
+  y: number;
+  radius: number;
+  totalDays: number;
+}
+
 export interface CountryState {
   id: number;
   seed: CountrySeed;
@@ -63,7 +70,6 @@ export interface CountryState {
   cityPurchases: number;
   goldMinesBuiltThisMonth: number;
   citiesBuiltThisMonth: number;
-  recruitsThisMonth: number;
   ports: PortCoord[];
   defenses: DefenseCoord[];
   aggressiveExpansion: number;
@@ -75,20 +81,13 @@ export interface CountryState {
   bboxMaxY: number;
   annexedById: number | null;
   customName: string | null;
-  completedTreeNodes: string[];
-  treeIncomeBonus: number;
-  treeArmyCapBonus: number;
-  annexedCount: number;
-  lastNukeDay: number;
-}
-
-export interface NukeBlastEffect {
-  id: number;
-  x: number;
-  y: number;
-  radius: number;
-  startMs: number;
-  durationMs: number;
+  completedFocusIds: string[];
+  focusIncomeBonus: number;
+  focusArmyCapBonus: number;
+  focusDefenseBonus: number;
+  nukeCooldownDays: number;
+  lastNukeStrike: NukeStrikeRecord | null;
+  rebelUnrest: number; // 0..100 acumulado mientras está anexado
 }
 
 export interface BattleParticle {
@@ -179,7 +178,6 @@ export interface SimulationState {
   wars: Array<{ a: number; b: number; startTotalDays: number }>;
   invasions: NavalInvasion[];
   particles: BattleParticle[];
-  nukeBlasts: NukeBlastEffect[];
   chronicle: ChronicleEntry[];
   playerHistory: PlayerHistoryPoint[];
   activeEvent: ActiveEventModal | null;
@@ -198,50 +196,45 @@ const MONTH_NAMES = [
   'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic',
 ];
 
-export const GOLD_MINE_COST = 160;
-export const GOLD_MINE_PRICE_STEP = 50;
+export const GOLD_MINE_COST = 120;
+export const GOLD_MINE_PRICE_STEP = 30;
 export const GOLD_MINE_INCOME = 2; // +$2 cada segundo
-export const CITY_COST = 220;
-export const CITY_PRICE_STEP = 65;
-export const CITY_INCOME = 2; // +$2 cada segundo (+75 capacidad militar)
-export const CITY_ARMY_CAP_BONUS = 75;
-export const PORT_COST = 180;
-export const ARMY_RECRUIT_COST = 120;
-export const ARMY_RECRUIT_AMOUNT = 20;
+export const CITY_COST = 180;
+export const CITY_PRICE_STEP = 45;
+export const CITY_INCOME = 3; // +$3 cada segundo (+120 capacidad militar)
+export const PORT_COST = 150;
+export const ARMY_RECRUIT_COST = 100;
+export const ARMY_RECRUIT_AMOUNT = 25;
 export const GIFT_MONEY_PER_REL = 100;
 export const ALLIANCE_REL_THRESHOLD = 70; // escala 1..100
 export const MAX_WAR_DAYS = 3 * 12 * 30; // 3 años máximos por guerra (1080 días)
-export const MIN_INITIAL_ARMY = 250;
-export const MAX_INITIAL_ARMY = 850;
-export const MONTHLY_INCOME_GROWTH = 1; // +$1/seg acumulado cada año (máx. +6)
-export const MAX_MONTHLY_INCOME_BONUS = 6;
+export const MIN_INITIAL_ARMY = 350;
+export const MAX_INITIAL_ARMY = 1400;
+export const MONTHLY_INCOME_GROWTH = 1; // +$1/seg acumulado cada año (máx. +10)
+export const MAX_MONTHLY_INCOME_BONUS = 10;
 export const MAX_GOLD_MINES_PER_MONTH = 1;
-export const MAX_CITIES_PER_MONTH = 1;
-export const MAX_GOLD_MINES_TOTAL = 20;
-export const MAX_CITIES_TOTAL = 30;
-export const DEFENSE_COST = 150;
+export const MAX_CITIES_PER_MONTH = 2;
+export const MAX_GOLD_MINES_TOTAL = 40;
+export const MAX_CITIES_TOTAL = 50;
+export const DEFENSE_COST = 120;
 export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
-export const NUKE_COST = 900;
-export const NUKE_RADIUS = 19; // un poco menos de radio que la defensa (190 km vs 240 km)
+export const NUKE_COST = 1200;
+export const NUKE_RADIUS = 19; // un poco menos radio que la defensa (24 -> 19)
 export const NUKE_COOLDOWN_DAYS = 90; // 3 meses de recarga entre lanzamientos
+export const NUKE_FALLOUT_DAYS = 60; // 2 meses de zona irradiada visible
 export const REBEL_RECRUIT_COST = 100;
-export const REBEL_RECRUIT_AMOUNT = 25;
-export const REBEL_INCOME_PER_SECOND = 40;
-export const CAPITAL_CAPTURE_PENALTY_PCT = 0.3;
-export const MAX_TREE_INCOME_BONUS = 6;
-export const MAX_TREE_ARMY_CAP_BONUS = 450;
-
-export function getCountryDisplayName(c: CountryState): string {
-  return c.customName && c.customName.trim().length > 0 ? c.customName : c.seed.name;
-}
+export const REBEL_RECRUIT_AMOUNT = 35;
+export const REBEL_INCOME_PER_SECOND = 60;
+export const SUPPRESS_REBELLION_COST = 150;
+export const SUPPRESS_REBELLION_REDUCTION = 45;
 
 export function isHumanCountry(sim: SimulationState, countryId: number): boolean {
   return Boolean(sim.humanPlayers[countryId]);
 }
 
 export function computeInitialMoney(seedGdp: number, seedMilitary: number): number {
-  return Math.round(120 + Math.sqrt(Math.max(0, seedGdp)) * 2.0 + seedMilitary * 0.45);
+  return Math.round(100 + Math.sqrt(Math.max(0, seedGdp)) * 3.0 + seedMilitary * 0.65);
 }
 
 export function computeInitialArmy(seedMilitary: number): number {
@@ -249,19 +242,19 @@ export function computeInitialArmy(seedMilitary: number): number {
   return Math.round(MIN_INITIAL_ARMY + t * (MAX_INITIAL_ARMY - MIN_INITIAL_ARMY));
 }
 
+export function getCountryName(c: CountryState | undefined | null): string {
+  if (!c) return 'País';
+  return c.customName && c.customName.trim().length > 0 ? c.customName : c.seed.name;
+}
+
 export function getArmyCap(c: CountryState): number {
-  const treeBonus = Math.min(MAX_TREE_ARMY_CAP_BONUS, Math.max(0, c.treeArmyCapBonus ?? 0));
   return Math.round(
-    500 + c.cities * CITY_ARMY_CAP_BONUS + Math.sqrt(Math.max(1, c.pixels)) * 60 + treeBonus
+    900 + c.cities * 120 + Math.sqrt(Math.max(1, c.pixels)) * 135 + (c.focusArmyCapBonus ?? 0)
   );
 }
 
 export function getMoneyCap(c: CountryState): number {
-  return Math.round(3500 + c.cities * 600 + Math.sqrt(Math.max(1, c.pixels)) * 300);
-}
-
-export function getMaxRecruitsPerMonth(c: CountryState): number {
-  return Math.min(10, 4 + Math.floor(c.cities / 4));
+  return Math.round(12000 + c.cities * 1800 + Math.sqrt(Math.max(1, c.pixels)) * 900);
 }
 
 export function getGoldMineCost(c: CountryState): number {
@@ -273,7 +266,7 @@ export function getCityCost(c: CountryState): number {
 }
 
 export function getCountryDefensePct(c: CountryState): number {
-  return Math.min(120, c.defenses.length * DEFENSE_BONUS_PCT);
+  return Math.min(140, c.defenses.length * DEFENSE_BONUS_PCT + (c.focusDefenseBonus ?? 0));
 }
 
 export function isPixelProtectedByDefense(c: CountryState, px: number, py: number): boolean {
@@ -488,7 +481,7 @@ export function canReachToAttack(
     return {
       ok: false,
       viaSea: true,
-      reason: `Necesitas un Puerto orientado hacia la dirección de ${getCountryDisplayName(sim.countries[defenderId])}.`,
+      reason: `Necesitas un Puerto orientado hacia la dirección de ${getCountryName(sim.countries[defenderId])}.`,
     };
   }
   return { ok: true, viaSea: true };
@@ -529,13 +522,12 @@ export function createSimulation(
       netIncome: 0,
       monthlyIncomeBonus: 0,
       army: startArmy,
-      goldMines: Math.max(1, Math.min(3, Math.round(Math.sqrt(seed.gdp) / 55) + 1)),
-      cities: Math.max(1, Math.min(4, Math.round(Math.sqrt(seed.popM) / 5.0) + 1)),
+      goldMines: Math.max(1, Math.min(5, Math.round(Math.sqrt(seed.gdp) / 28) + 1)),
+      cities: Math.max(1, Math.min(6, Math.round(Math.sqrt(seed.popM) / 3.0) + 1)),
       goldMinePurchases: 0,
       cityPurchases: 0,
       goldMinesBuiltThisMonth: 0,
       citiesBuiltThisMonth: 0,
-      recruitsThisMonth: 0,
       ports: [],
       defenses: [],
       aggressiveExpansion: 0,
@@ -547,11 +539,13 @@ export function createSimulation(
       bboxMaxY: 0,
       annexedById: null,
       customName: null,
-      completedTreeNodes: [],
-      treeIncomeBonus: 0,
-      treeArmyCapBonus: 0,
-      annexedCount: 0,
-      lastNukeDay: -999,
+      completedFocusIds: [],
+      focusIncomeBonus: 0,
+      focusArmyCapBonus: 0,
+      focusDefenseBonus: 0,
+      nukeCooldownDays: 0,
+      lastNukeStrike: null,
+      rebelUnrest: 0,
     };
   });
 
@@ -680,7 +674,6 @@ export function createSimulation(
     wars: [],
     invasions: [],
     particles: [],
-    nukeBlasts: [],
     chronicle: [],
     playerHistory: [],
     activeEvent: null,
@@ -688,7 +681,7 @@ export function createSimulation(
     outcome: 'none',
     sandboxAfterVictory: false,
     dirtyPixels: true,
-    nextEventDay: 135,
+    nextEventDay: 110,
     nextIdCounter: 1,
     aiCursor: 0,
     lastAiWarMonth: -1,
@@ -737,7 +730,7 @@ export function createSimulation(
     'event',
     sim.isMultiplayer
       ? `¡Partida Online iniciada! Conquista los 195 países para ganar.`
-      : `Campaña iniciada al mando de ${getCountryDisplayName(countries[playerId])}.`,
+      : `Campaña iniciada al mando de ${getCountryName(countries[playerId])}.`,
     playerId
   );
 
@@ -781,7 +774,7 @@ export function declareWar(
   pushChronicle(
     sim,
     'war',
-    `${getCountryDisplayName(att)} declara la guerra a ${getCountryDisplayName(def)}.`,
+    `${getCountryName(att)} declara la guerra a ${getCountryName(def)}.`,
     attackerId
   );
 
@@ -803,7 +796,7 @@ export function declareWar(
       pushChronicle(
         sim,
         'alliance',
-        `${getCountryDisplayName(sim.countries[allyId])} entra en guerra en defensa de su aliado ${getCountryDisplayName(def)}.`,
+        `${getCountryName(sim.countries[allyId])} entra en guerra en defensa de su aliado ${getCountryName(def)}.`,
         allyId
       );
     }
@@ -839,8 +832,7 @@ export function makePeace(
   pushChronicle(
     sim,
     'peace',
-    customReason ??
-      `${getCountryDisplayName(sim.countries[aId])} y ${getCountryDisplayName(sim.countries[bId])} firman la paz.`,
+    customReason ?? `${getCountryName(sim.countries[aId])} y ${getCountryName(sim.countries[bId])} firman la paz.`,
     aId
   );
   if (aId === sim.playerId || bId === sim.playerId) {
@@ -874,7 +866,7 @@ export function proposeAlliance(
       return {
         accepted: false,
         pendingHuman: true,
-        reason: `Ya hay una solicitud de alianza pendiente con ${getCountryDisplayName(to)}.`,
+        reason: `Ya hay una solicitud de alianza pendiente con ${getCountryName(to)}.`,
       };
     }
     sim.diplomaticOffers = [
@@ -890,7 +882,7 @@ export function proposeAlliance(
     return {
       accepted: false,
       pendingHuman: true,
-      reason: `Propuesta de alianza enviada al jugador de ${getCountryDisplayName(to)}.`,
+      reason: `Propuesta de alianza enviada al jugador de ${getCountryName(to)}.`,
     };
   }
 
@@ -901,20 +893,20 @@ export function proposeAlliance(
     pushChronicle(
       sim,
       'alliance',
-      `${getCountryDisplayName(from)} y ${getCountryDisplayName(to)} firman una Alianza Estratégica.`,
+      `${getCountryName(from)} y ${getCountryName(to)} firman una Alianza Estratégica.`,
       fromId
     );
     if (fromId === sim.playerId || toId === sim.playerId) soundEngine.playAllianceFormed();
     return {
       accepted: true,
-      reason: `¡${getCountryDisplayName(to)} acepta formar una Alianza contigo!`,
+      reason: `¡${getCountryName(to)} acepta formar una Alianza contigo!`,
     };
   }
 
   soundEngine.playClick();
   return {
     accepted: false,
-    reason: `${getCountryDisplayName(to)} rechaza la alianza (relación ${rel}/100, requiere ${ALLIANCE_REL_THRESHOLD}/100).`,
+    reason: `${getCountryName(to)} rechaza la alianza (relación ${rel}/100, requiere ${ALLIANCE_REL_THRESHOLD}/100).`,
   };
 }
 
@@ -934,10 +926,7 @@ export function sendDiplomaticGift(
 
   const currentRel = getRelation(sim, fromId, toId);
   if (currentRel >= 100) {
-    return {
-      ok: false,
-      error: `Tu relación con ${getCountryDisplayName(to)} ya está al máximo (100/100).`,
-    };
+    return { ok: false, error: `Tu relación con ${getCountryName(to)} ya está al máximo (100/100).` };
   }
 
   const actualPoints = Math.max(1, Math.min(relPoints, 100 - currentRel));
@@ -966,10 +955,8 @@ export function requestAllyHelp(
   if (!ally || !ally.alive || !player.alive) {
     return { accepted: false, reason: 'País no disponible.' };
   }
-  const allyName = getCountryDisplayName(ally);
-  const playerName = getCountryDisplayName(player);
   if (!hasTreaty(sim, playerId, allyId, TREATY_ALLIANCE)) {
-    return { accepted: false, reason: `${allyName} no es tu aliado.` };
+    return { accepted: false, reason: `${getCountryName(ally)} no es tu aliado.` };
   }
 
   const playerEnemies = getEnemies(sim, playerId);
@@ -983,7 +970,7 @@ export function requestAllyHelp(
   if (unjoinedEnemies.length === 0) {
     return {
       accepted: true,
-      reason: `${allyName} ya está combatiendo junto a ti en todas tus guerras.`,
+      reason: `${getCountryName(ally)} ya está combatiendo junto a ti en todas tus guerras.`,
     };
   }
 
@@ -1005,7 +992,7 @@ export function requestAllyHelp(
     return {
       accepted: false,
       pendingHuman: true,
-      reason: `Solicitud de ayuda militar enviada a ${allyName}.`,
+      reason: `Solicitud de ayuda militar enviada a ${getCountryName(ally)}.`,
     };
   }
 
@@ -1029,7 +1016,7 @@ export function requestAllyHelp(
     soundEngine.playClick();
     return {
       accepted: false,
-      reason: `${allyName} rechaza ayudarte porque también es aliado de tu enemigo.`,
+      reason: `${getCountryName(ally)} rechaza ayudarte porque también es aliado de tu enemigo.`,
     };
   }
 
@@ -1038,7 +1025,7 @@ export function requestAllyHelp(
     soundEngine.playClick();
     return {
       accepted: false,
-      reason: `${allyName} decide no intervenir debido a su buena relación con tu enemigo.`,
+      reason: `${getCountryName(ally)} decide no intervenir debido a su buena relación con tu enemigo.`,
     };
   }
 
@@ -1046,7 +1033,7 @@ export function requestAllyHelp(
     soundEngine.playClick();
     return {
       accepted: false,
-      reason: `${allyName} rechaza ayudarte porque ya combate en ${allyCurrentWars} guerras.`,
+      reason: `${getCountryName(ally)} rechaza ayudarte porque ya combate en ${allyCurrentWars} guerras.`,
     };
   }
 
@@ -1063,7 +1050,7 @@ export function requestAllyHelp(
     soundEngine.playClick();
     return {
       accepted: false,
-      reason: `${allyName} decide mantenerse al margen y no ayudarte en esta guerra.`,
+      reason: `${getCountryName(ally)} decide mantenerse al margen y no ayudarte en esta guerra.`,
     };
   }
 
@@ -1086,14 +1073,14 @@ export function requestAllyHelp(
   pushChronicle(
     sim,
     'alliance',
-    `¡${allyName} responde al llamado de ${playerName} y entra en la guerra para ayudar!`,
+    `¡${getCountryName(ally)} responde al llamado de ${getCountryName(player)} y entra en la guerra para ayudar!`,
     allyId
   );
   soundEngine.playAllyJoinedWar();
 
   return {
     accepted: true,
-    reason: `¡${allyName} acepta ayudarte y declara la guerra a tus enemigos!`,
+    reason: `¡${getCountryName(ally)} acepta ayudarte y declara la guerra a tus enemigos!`,
   };
 }
 
@@ -1105,7 +1092,6 @@ export function requestHumanPeace(
   if (!hasTreaty(sim, fromId, toId, TREATY_WAR)) {
     return { ok: false, reason: 'No están en guerra.' };
   }
-  const toName = getCountryDisplayName(sim.countries[toId]);
   if (sim.isMultiplayer && isHumanCountry(sim, toId) && isHumanCountry(sim, fromId)) {
     const exists = sim.diplomaticOffers.some(
       (o) => o.fromCountryId === fromId && o.toCountryId === toId && o.type === 'peace'
@@ -1124,11 +1110,11 @@ export function requestHumanPeace(
     return {
       ok: true,
       pendingHuman: true,
-      reason: `Propuesta de paz enviada a ${toName}.`,
+      reason: `Propuesta de paz enviada a ${getCountryName(sim.countries[toId])}.`,
     };
   }
   makePeace(sim, fromId, toId);
-  return { ok: true, reason: `Paz firmada con ${toName}.` };
+  return { ok: true, reason: `Paz firmada con ${getCountryName(sim.countries[toId])}.` };
 }
 
 export function respondToHumanDiplomaticOffer(
@@ -1161,7 +1147,7 @@ export function respondToHumanDiplomaticOffer(
     pushChronicle(
       sim,
       'alliance',
-      `${getCountryDisplayName(from)} y ${getCountryDisplayName(to)} firman una Alianza Estratégica.`,
+      `${getCountryName(from)} y ${getCountryName(to)} firman una Alianza Estratégica.`,
       offer.fromCountryId
     );
     if (offer.fromCountryId === sim.playerId || offer.toCountryId === sim.playerId) {
@@ -1188,7 +1174,7 @@ export function respondToHumanDiplomaticOffer(
       pushChronicle(
         sim,
         'alliance',
-        `¡${getCountryDisplayName(to)} entra en la guerra en apoyo de su aliado ${getCountryDisplayName(from)}!`,
+        `¡${getCountryName(to)} entra en la guerra en apoyo de su aliado ${getCountryName(from)}!`,
         offer.toCountryId
       );
       soundEngine.playAllyJoinedWar();
@@ -1241,7 +1227,7 @@ export function getRebellionStatus(sim: SimulationState, countryId: number) {
   const rebelMoney = slot ? Math.round(slot.rebelMoney) : 0;
   return {
     occupierId,
-    occupierName: occupier ? getCountryDisplayName(occupier) : 'Ocupante',
+    occupierName: occupier ? getCountryName(occupier) : 'Ocupante',
     occupierArmy,
     requiredArmy,
     rebelArmy,
@@ -1265,32 +1251,71 @@ export function recruitRebelArmy(sim: SimulationState, countryId: number): strin
   return null;
 }
 
-export function startRebellion(
-  sim: SimulationState,
-  countryId: number
-): { ok: boolean; error?: string } {
-  const c = sim.countries[countryId];
-  const slot = sim.humanPlayers[countryId];
-  if (!c || c.alive || !slot) {
-    return { ok: false, error: 'Tu país ya es independiente.' };
-  }
-  if (sim.outcome !== 'none') {
-    return { ok: false, error: 'La partida ya ha terminado.' };
-  }
+export function getCountryRebellionStrength(c: CountryState): number {
+  const milScore = Math.min(1, c.seed.military / 150) * 45;
+  const popScore = Math.min(1, Math.sqrt(Math.max(0.1, c.seed.popM)) / 14) * 30;
+  const landScore = Math.min(1, Math.sqrt(Math.max(1, c.initialPixels)) / 24) * 25;
+  return Math.max(5, Math.min(100, Math.round(milScore + popScore + landScore)));
+}
 
-  const status = getRebellionStatus(sim, countryId);
-  if (status.occupierId === null) {
-    return { ok: false, error: 'No hay país ocupante activo.' };
+export function getOccupiedNationsBy(sim: SimulationState, occupierId: number): CountryState[] {
+  return sim.countries
+    .filter(
+      (c) =>
+        !c.alive &&
+        c.annexedById === occupierId &&
+        c.id !== sim.playerId &&
+        !isHumanCountry(sim, c.id)
+    )
+    .sort((a, b) => (b.rebelUnrest ?? 0) - (a.rebelUnrest ?? 0) || getCountryRebellionStrength(b) - getCountryRebellionStrength(a));
+}
+
+export function suppressRebellion(
+  sim: SimulationState,
+  occupierId: number,
+  targetId: number
+): { ok: boolean; message: string } {
+  const occ = sim.countries[occupierId];
+  const target = sim.countries[targetId];
+  if (!occ || !occ.alive) {
+    return { ok: false, message: 'Tu país debe estar activo.' };
   }
-  if (status.rebelArmy < status.requiredArmy) {
+  if (!target || target.alive || target.annexedById !== occupierId) {
+    return { ok: false, message: 'Ese territorio no está actualmente bajo tu ocupación.' };
+  }
+  if ((target.rebelUnrest ?? 0) <= 0) {
+    return { ok: false, message: `${getCountryName(target)} ya se encuentra calmado (0% rebeldía).` };
+  }
+  if (occ.money < SUPPRESS_REBELLION_COST) {
     return {
       ok: false,
-      error: `Necesitas al menos la mitad del ejército de ${status.occupierName} (${status.requiredArmy} soldados).`,
+      message: `Necesitas $${SUPPRESS_REBELLION_COST} para reprimir la rebelión en ${getCountryName(target)}.`,
     };
   }
 
-  const occId = status.occupierId;
+  occ.money -= SUPPRESS_REBELLION_COST;
+  target.rebelUnrest = Math.max(0, Math.round((target.rebelUnrest ?? 0) - SUPPRESS_REBELLION_REDUCTION));
+  if (occupierId === sim.playerId) {
+    soundEngine.playBuildStructure('defense');
+  }
+  return {
+    ok: true,
+    message: `Guarnición enviada a ${getCountryName(target)}. Rebeldía reducida al ${Math.round(target.rebelUnrest)}%.`,
+  };
+}
+
+function executeCountryIndependenceRebellion(
+  sim: SimulationState,
+  countryId: number,
+  occId: number,
+  rebelArmy: number,
+  rebelMoney: number,
+  isAiUprising: boolean
+): boolean {
+  const c = sim.countries[countryId];
   const occ = sim.countries[occId];
+  if (!c || c.alive || !occ || !occ.alive || occ.pixels <= 3) return false;
+
   const grid = sim.ownerGrid;
   const orig = sim.mapData.originalGrid;
 
@@ -1302,8 +1327,9 @@ export function startRebellion(
     }
   }
 
-  // Fallback: closest pixels of occupier around original capital
+  // Fallback for human rebellion if original homeland was taken by a third party
   if (homelandPixels.length === 0) {
+    if (isAiUprising) return false;
     const capX = sim.mapData.capitalX[countryId];
     const capY = sim.mapData.capitalY[countryId];
     const occPixels: Array<{ idx: number; dist: number }> = [];
@@ -1324,16 +1350,19 @@ export function startRebellion(
     }
   }
 
-  // Keep at least 2 pixels for occupier if possible so both fight cleanly
+  // Keep at least 2 pixels for occupier so both fight cleanly
   const maxTake = Math.max(1, occ.pixels - 2);
   const finalTake = homelandPixels.slice(0, Math.min(homelandPixels.length, maxTake));
-  if (finalTake.length === 0) {
-    return { ok: false, error: 'No hay suficiente territorio ocupable para rebelarse.' };
-  }
+  if (finalTake.length === 0) return false;
 
+  const reclaimedSet = new Set<number>(finalTake);
   for (const idx of finalTake) {
     grid[idx] = countryId;
   }
+
+  // Remove occupier ports and defenses sitting on reclaimed rebel territory
+  occ.ports = occ.ports.filter((p) => !reclaimedSet.has(p.y * MAP_W + p.x));
+  occ.defenses = occ.defenses.filter((d) => !reclaimedSet.has(d.y * MAP_W + d.x));
 
   // Recompute pixel counts & bounding boxes for both countries accurately
   c.pixels = 0;
@@ -1374,13 +1403,14 @@ export function startRebellion(
 
   c.alive = c.pixels > 0;
   c.annexedById = null;
+  c.rebelUnrest = 0;
   c.capitalX = bestCapIdx % MAP_W;
   c.capitalY = Math.floor(bestCapIdx / MAP_W);
   c.capitalLostPenaltyDone = false;
-  c.army = Math.max(10, Math.round(slot.rebelArmy));
-  c.money = Math.max(300, Math.round(slot.rebelMoney));
-  slot.rebelArmy = 0;
-  slot.rebelMoney = 0;
+  c.army = Math.max(10, Math.round(rebelArmy));
+  c.money = Math.max(250, Math.round(rebelMoney));
+  c.goldMines = Math.max(1, Math.min(c.goldMines, 4));
+  c.cities = Math.max(1, Math.min(c.cities, 4));
   sim.dirtyPixels = true;
 
   // Relocate occupier's capital if rebel took it
@@ -1396,13 +1426,162 @@ export function startRebellion(
   setRelation(sim, countryId, occId, 10);
   sim.wars.push({ a: countryId, b: occId, startTotalDays: sim.totalDays });
 
+  // Visual uprising flare particles over liberated territory
+  const step = Math.max(1, Math.floor(finalTake.length / 22));
+  for (let i = 0; i < finalTake.length && sim.particles.length < 220; i += step) {
+    const idx = finalTake[i];
+    sim.particles.push({
+      x: idx % MAP_W,
+      y: Math.floor(idx / MAP_W),
+      r: 251,
+      g: 146,
+      b: 60,
+      life: 10,
+      maxLife: 10,
+    });
+  }
+
+  updateAllEconomies(sim, false);
+
+  const strength = getCountryRebellionStrength(c);
   pushChronicle(
     sim,
     'war',
-    `¡REBELIÓN! ${getCountryDisplayName(c)} se independiza de ${getCountryDisplayName(occ)} con ${c.army} soldados.`,
+    isAiUprising
+      ? `¡REBELIÓN DE INDEPENDENCIA! ${getCountryName(c)} (fuerza ${strength}/100) se independiza y se rebela contra ${getCountryName(occ)} con ${c.army.toLocaleString('es-ES')} soldados.`
+      : `¡REBELIÓN! ${getCountryName(c)} se independiza de ${getCountryName(occ)} con ${c.army.toLocaleString('es-ES')} soldados.`,
     countryId
   );
-  soundEngine.playWarDeclared();
+
+  if (!isAiUprising || occId === sim.playerId || countryId === sim.playerId) {
+    soundEngine.playWarDeclared();
+  }
+  return true;
+}
+
+function processAbsorbedCountryRebellions(sim: SimulationState) {
+  if (sim.outcome !== 'none') return;
+
+  // Never interrupt a finished world conquest
+  let aliveCount = 0;
+  for (const c of sim.countries) {
+    if (c.alive) aliveCount++;
+  }
+  if (aliveCount <= 1) return;
+
+  let rebelTriggeredThisPulse = false;
+
+  for (const c of sim.countries) {
+    if (c.alive) {
+      if (c.rebelUnrest !== 0) c.rebelUnrest = 0;
+      continue;
+    }
+    // Human-controlled countries use their manual RebellionPanel in multiplayer
+    if (c.id === sim.playerId || isHumanCountry(sim, c.id)) continue;
+
+    const occId = c.annexedById;
+    if (occId === null) continue;
+    const occ = sim.countries[occId];
+    if (!occ || !occ.alive || occ.pixels <= 4) continue;
+
+    const strength = getCountryRebellionStrength(c);
+    const occWars = getEnemies(sim, occId).length;
+    const origCapX = sim.mapData.capitalX[c.id];
+    const origCapY = sim.mapData.capitalY[c.id];
+    const hasDefenseGarrison = occ.defenses.some(
+      (d) => Math.hypot(d.x - origCapX, d.y - origCapY) <= d.radius + 8
+    );
+
+    // Very weak absorbed countries rarely accumulate unrest unless the occupier is severely strained
+    if (strength < 16 && occ.army > 320 && occWars < 2) {
+      c.rebelUnrest = Math.max(0, (c.rebelUnrest ?? 0) - 0.5);
+      continue;
+    }
+
+    const strengthFactor = Math.max(0.04, (strength - 10) / 90);
+    const expectedGarrison = Math.max(300, computeInitialArmy(c.seed.military) * 1.15);
+    const gripRatio = occ.army / expectedGarrison;
+    const warStrain = occWars >= 2 ? 1.55 : occWars === 1 ? 1.2 : 0.88;
+    const garrisonMod = hasDefenseGarrison ? 0.42 : 1.0;
+
+    let delta =
+      (strengthFactor * 4.4 + (gripRatio < 1.0 ? (1.0 - gripRatio) * 3.8 : 0)) *
+      warStrain *
+      garrisonMod;
+
+    // A massive, well-garrisoned empire keeps weaker conquered nations calmer
+    if (gripRatio >= 2.2 && hasDefenseGarrison && strength < 55) {
+      delta *= 0.25;
+    }
+
+    c.rebelUnrest = Math.min(100, (c.rebelUnrest ?? 0) + delta);
+
+    if (c.rebelUnrest >= 100 && !rebelTriggeredThisPulse) {
+      // Chance scaled by national strength so powerful absorbed countries erupt decisively
+      const eruptionChance = Math.min(0.92, 0.28 + (strength / 100) * 0.65);
+      if (Math.random() < eruptionChance) {
+        const baseRebelArmy = Math.round(
+          computeInitialArmy(c.seed.military) * (0.42 + (strength / 100) * 0.48)
+        );
+        const rebelArmy = Math.max(
+          110,
+          Math.min(Math.round(occ.army * 0.62), baseRebelArmy)
+        );
+        const rebelMoney = Math.round(computeInitialMoney(c.seed.gdp, c.seed.military) * 0.75);
+        const ok = executeCountryIndependenceRebellion(
+          sim,
+          c.id,
+          occId,
+          rebelArmy,
+          rebelMoney,
+          true
+        );
+        if (ok) {
+          rebelTriggeredThisPulse = true;
+        }
+      }
+    }
+  }
+}
+
+export function startRebellion(
+  sim: SimulationState,
+  countryId: number
+): { ok: boolean; error?: string } {
+  const c = sim.countries[countryId];
+  const slot = sim.humanPlayers[countryId];
+  if (!c || c.alive || !slot) {
+    return { ok: false, error: 'Tu país ya es independiente.' };
+  }
+  if (sim.outcome !== 'none') {
+    return { ok: false, error: 'La partida ya ha terminado.' };
+  }
+
+  const status = getRebellionStatus(sim, countryId);
+  if (status.occupierId === null) {
+    return { ok: false, error: 'No hay país ocupante activo.' };
+  }
+  if (status.rebelArmy < status.requiredArmy) {
+    return {
+      ok: false,
+      error: `Necesitas al menos la mitad del ejército de ${status.occupierName} (${status.requiredArmy} soldados).`,
+    };
+  }
+
+  const ok = executeCountryIndependenceRebellion(
+    sim,
+    countryId,
+    status.occupierId,
+    Math.max(10, Math.round(slot.rebelArmy)),
+    Math.max(300, Math.round(slot.rebelMoney)),
+    false
+  );
+  if (!ok) {
+    return { ok: false, error: 'No hay suficiente territorio ocupable para rebelarse.' };
+  }
+
+  slot.rebelArmy = 0;
+  slot.rebelMoney = 0;
   return { ok: true };
 }
 
@@ -1428,7 +1607,7 @@ export function respondToPendingProposal(sim: SimulationState, accept: boolean) 
     pushChronicle(
       sim,
       'alliance',
-      `${getCountryDisplayName(from)} y ${getCountryDisplayName(player)} firman una Alianza Estratégica.`,
+      `${getCountryName(from)} y ${getCountryName(player)} firman una Alianza Estratégica.`,
       prop.fromId
     );
     soundEngine.playAllianceFormed();
@@ -1526,16 +1705,11 @@ export function recruitSoldiers(sim: SimulationState, countryId: number): string
   if (c.army >= armyCap) {
     return `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`;
   }
-  const maxRecruits = getMaxRecruitsPerMonth(c);
-  if (c.recruitsThisMonth >= maxRecruits) {
-    return `Límite de reclutamiento mensual alcanzado (${maxRecruits}/${maxRecruits} este mes). Espera al próximo mes o construye más Ciudades.`;
-  }
   if (c.money < ARMY_RECRUIT_COST) {
     return `Necesitas $${ARMY_RECRUIT_COST} para reclutar ${ARMY_RECRUIT_AMOUNT} soldados.`;
   }
   c.money -= ARMY_RECRUIT_COST;
   c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
-  c.recruitsThisMonth++;
   updateAllEconomies(sim, false);
   if (countryId === sim.playerId) soundEngine.playRecruit();
   return null;
@@ -1568,282 +1742,210 @@ export function buildDefenseAt(
   return null;
 }
 
-export function getNukeCooldownRemainingDays(sim: SimulationState, countryId: number): number {
-  const c = sim.countries[countryId];
-  if (!c) return 0;
-  const elapsed = sim.totalDays - (c.lastNukeDay ?? -999);
-  return Math.max(0, NUKE_COOLDOWN_DAYS - elapsed);
+export function isPixelIrradiated(sim: SimulationState, px: number, py: number): boolean {
+  for (const c of sim.countries) {
+    const s = c.lastNukeStrike;
+    if (!s) continue;
+    if (sim.totalDays - s.totalDays > NUKE_FALLOUT_DAYS) continue;
+    const dx = px - s.x;
+    const dy = py - s.y;
+    if (dx * dx + dy * dy <= s.radius * s.radius) {
+      return true;
+    }
+  }
+  return false;
 }
 
-export function launchNuclearBombAt(
+export function launchNukeAt(
   sim: SimulationState,
   attackerId: number,
   x: number,
   y: number
-): {
-  ok: boolean;
-  error?: string;
-  targetName?: string;
-  armyDestroyed?: number;
-  defensesDestroyed?: number;
-} {
+): { ok: boolean; message: string } {
   const att = sim.countries[attackerId];
-  if (!att || !att.alive) return { ok: false, error: 'Tu país no está activo.' };
-  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) {
-    return { ok: false, error: 'Posición fuera del mapa.' };
+  if (!att || !att.alive) {
+    return { ok: false, message: 'Tu país debe estar activo para lanzar bombas nucleares.' };
   }
-
-  const cooldown = getNukeCooldownRemainingDays(sim, attackerId);
-  if (cooldown > 0) {
+  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) {
+    return { ok: false, message: 'Objetivo fuera del mapa.' };
+  }
+  if ((att.nukeCooldownDays ?? 0) > 0) {
     return {
       ok: false,
-      error: `Arsenal nuclear recargando: espera ${cooldown} días para lanzar otra bomba.`,
+      message: `Misil nuclear en recarga (${att.nukeCooldownDays} días restantes).`,
     };
   }
   if (att.money < NUKE_COST) {
     return {
       ok: false,
-      error: `Necesitas $${NUKE_COST.toLocaleString('es-ES')} para lanzar una Bomba Nuclear.`,
+      message: `Necesitas $${NUKE_COST.toLocaleString('es-ES')} para lanzar una Bomba Nuclear.`,
     };
   }
 
-  // Resolver país objetivo en el punto elegido (con asistencia de 2 px para microestados)
-  let targetId = sim.ownerGrid[y * MAP_W + x];
-  if (targetId < 0 || targetId === attackerId) {
-    let bestDist = Infinity;
-    let bestId = -1;
-    for (let dy = -2; dy <= 2; dy++) {
-      const py = y + dy;
-      if (py < 0 || py >= MAP_H) continue;
-      for (let dx = -2; dx <= 2; dx++) {
-        const px = x + dx;
-        if (px < 0 || px >= MAP_W) continue;
-        const id = sim.ownerGrid[py * MAP_W + px];
-        if (id >= 0 && id !== attackerId) {
-          const d2 = dx * dx + dy * dy;
-          if (d2 < bestDist) {
-            bestDist = d2;
-            bestId = id;
-          }
-        }
-      }
-    }
-    targetId = bestId;
+  const centerOwner = sim.ownerGrid[y * MAP_W + x];
+  if (centerOwner === attackerId) {
+    return { ok: false, message: 'No puedes lanzar una bomba nuclear sobre tu propio territorio.' };
   }
-
-  if (targetId < 0 || targetId === attackerId) {
+  if (centerOwner >= 0 && hasTreaty(sim, attackerId, centerOwner, TREATY_ALLIANCE)) {
     return {
       ok: false,
-      error: 'Debes apuntar sobre territorio extranjero para lanzar la Bomba Nuclear.',
+      message: `No puedes lanzar una bomba nuclear sobre tu aliado ${getCountryName(sim.countries[centerOwner])}.`,
     };
   }
 
-  const target = sim.countries[targetId];
-  if (!target || !target.alive) {
-    return { ok: false, error: 'El país objetivo no está activo.' };
-  }
-  const targetName = getCountryDisplayName(target);
-  const attName = getCountryDisplayName(att);
-
-  if (hasTreaty(sim, attackerId, targetId, TREATY_ALLIANCE)) {
-    return {
-      ok: false,
-      error: `No puedes lanzar una Bomba Nuclear contra tu aliado ${targetName}.`,
-    };
-  }
-  const truce = sim.truceMonths[idxPair(attackerId, targetId)];
-  if (truce > 0) {
-    return {
-      ok: false,
-      error: `Tregua activa con ${targetName} (${truce} meses restantes).`,
-    };
-  }
-
-  // Cobrar coste y registrar recarga
-  att.money = Math.max(0, Math.round(att.money - NUKE_COST));
-  att.lastNukeDay = sim.totalDays;
-
-  // Un misil nuclear declara la guerra automáticamente (sin requerir puerto)
-  if (!hasTreaty(sim, attackerId, targetId, TREATY_WAR)) {
-    setTreatyFlag(sim, attackerId, targetId, TREATY_ALLIANCE, false);
-    setTreatyFlag(sim, attackerId, targetId, TREATY_WAR, true);
-    setRelation(sim, attackerId, targetId, 1);
-    att.capitalLostPenaltyDone = false;
-    target.capitalLostPenaltyDone = false;
-    sim.wars.push({ a: attackerId, b: targetId, startTotalDays: sim.totalDays });
-
-    for (const allyId of getAllies(sim, targetId)) {
-      if (allyId === attackerId) continue;
-      if (
-        !hasTreaty(sim, allyId, attackerId, TREATY_WAR) &&
-        !hasTreaty(sim, allyId, attackerId, TREATY_ALLIANCE)
-      ) {
-        setTreatyFlag(sim, allyId, attackerId, TREATY_WAR, true);
-        setRelation(sim, allyId, attackerId, 5);
-        sim.wars.push({ a: allyId, b: attackerId, startTotalDays: sim.totalDays });
-        pushChronicle(
-          sim,
-          'alliance',
-          `${getCountryDisplayName(sim.countries[allyId])} entra en guerra en defensa de ${targetName} tras el ataque nuclear.`,
-          allyId
-        );
-      }
-    }
-  } else {
-    setRelation(sim, attackerId, targetId, 1);
-  }
-
-  // Evaluar píxeles afectados dentro del radio nuclear (NUKE_RADIUS)
+  // Scan blast circle of NUKE_RADIUS (19 px, slightly smaller than DEFENSE_RADIUS = 24 px)
   const r2 = NUKE_RADIUS * NUKE_RADIUS;
-  const hitPixelsByCountry = new Map<number, number>();
-  const minY = Math.max(0, y - NUKE_RADIUS);
-  const maxY = Math.min(MAP_H - 1, y + NUKE_RADIUS);
   const minX = Math.max(0, x - NUKE_RADIUS);
   const maxX = Math.min(MAP_W - 1, x + NUKE_RADIUS);
+  const minY = Math.max(0, y - NUKE_RADIUS);
+  const maxY = Math.min(MAP_H - 1, y + NUKE_RADIUS);
 
+  const hitCounts = new Map<number, number>();
   for (let py = minY; py <= maxY; py++) {
     const dy = py - y;
     const row = py * MAP_W;
     for (let px = minX; px <= maxX; px++) {
       const dx = px - x;
       if (dx * dx + dy * dy > r2) continue;
-      const cid = sim.ownerGrid[row + px];
-      if (cid < 0 || cid === attackerId) continue;
-      if (hasTreaty(sim, attackerId, cid, TREATY_ALLIANCE)) continue;
-      hitPixelsByCountry.set(cid, (hitPixelsByCountry.get(cid) ?? 0) + 1);
+      const oid = sim.ownerGrid[row + px];
+      if (oid < 0 || oid === attackerId) continue;
+      if (hasTreaty(sim, attackerId, oid, TREATY_ALLIANCE)) continue;
+      const target = sim.countries[oid];
+      if (!target || !target.alive) continue;
+      hitCounts.set(oid, (hitCounts.get(oid) ?? 0) + 1);
     }
   }
 
-  // Mitigación del 25% si el punto impactado estaba cubierto por defensas activas antes de destruirlas
-  const targetProtected = isPixelProtectedByDefense(target, x, y);
-  const primaryMitigation = targetProtected ? 0.75 : 1.0;
-
-  let totalDefensesDestroyed = 0;
-  let primaryArmyDestroyed = 0;
-  let hitPlayer = attackerId === sim.playerId;
-
-  for (const [cid, hitCount] of hitPixelsByCountry.entries()) {
-    const victim = sim.countries[cid];
-    if (!victim || !victim.alive) continue;
-    if (cid === sim.playerId) hitPlayer = true;
-
-    const isPrimary = cid === targetId;
-    const isAtWarWithAtt = hasTreaty(sim, attackerId, cid, TREATY_WAR);
-    if (!isPrimary && !isAtWarWithAtt && hitCount < 4) continue;
-
-    // Destruir defensas y puertos dentro del radio nuclear
-    const prevDefCount = victim.defenses.length;
-    victim.defenses = victim.defenses.filter((d) => {
-      const dx = d.x - x;
-      const dy = d.y - y;
-      return dx * dx + dy * dy > r2;
-    });
-    totalDefensesDestroyed += prevDefCount - victim.defenses.length;
-
-    victim.ports = victim.ports.filter((p) => {
-      const dx = p.x - x;
-      const dy = p.y - y;
-      return dx * dx + dy * dy > r2;
-    });
-
-    const hitFraction = Math.min(1, hitCount / Math.max(12, victim.pixels));
-    if (isPrimary) {
-      const pct = (0.24 + hitFraction * 0.2) * primaryMitigation;
-      const armyLoss = Math.min(
-        Math.max(0, Math.round(victim.army - 8)),
-        Math.max(18, Math.round(victim.army * pct))
-      );
-      victim.army = Math.max(8, Math.round(victim.army - armyLoss));
-      primaryArmyDestroyed = armyLoss;
-
-      const moneyLoss = Math.min(1200, Math.round(victim.money * 0.18 * primaryMitigation));
-      victim.money = Math.max(0, Math.round(victim.money - moneyLoss));
-
-      if (victim.cities > 1) victim.cities -= 1;
-      if (victim.goldMines > 1) victim.goldMines -= 1;
-
-      const capDx = victim.capitalX - x;
-      const capDy = victim.capitalY - y;
-      if (capDx * capDx + capDy * capDy <= r2 && !victim.capitalLostPenaltyDone) {
-        applyCapitalCapturedPenalty(sim, att, victim, victim.capitalX, victim.capitalY);
-      }
-    } else {
-      const pct = 0.1 + hitFraction * 0.15;
-      const secLoss = Math.min(
-        Math.max(0, Math.round(victim.army - 10)),
-        Math.max(10, Math.round(victim.army * pct))
-      );
-      victim.army = Math.max(10, Math.round(victim.army - secLoss));
-      addRelation(sim, attackerId, cid, -35);
-    }
+  if (hitCounts.size === 0) {
+    return {
+      ok: false,
+      message: 'Debes apuntar a territorio extranjero enemigo o neutral (no al océano).',
+    };
   }
 
-  // Efecto visual de detonación nuclear + partículas ardientes dentro del radio
-  if (!Array.isArray(sim.nukeBlasts)) sim.nukeBlasts = [];
-  sim.nukeBlasts.push({
+  att.money = Math.max(0, att.money - NUKE_COST);
+  att.nukeCooldownDays = NUKE_COOLDOWN_DAYS;
+  att.lastNukeStrike = {
     id: sim.nextIdCounter++,
     x,
     y,
     radius: NUKE_RADIUS,
-    startMs: Date.now(),
-    durationMs: 2800,
-  });
-  if (sim.nukeBlasts.length > 12) {
-    sim.nukeBlasts.splice(0, sim.nukeBlasts.length - 12);
+    totalDays: sim.totalDays,
+  };
+  att.aggressiveExpansion = Math.min(100, att.aggressiveExpansion + 18);
+  sim.globalTension = Math.min(100, sim.globalTension + 12);
+  sim.globalStability = Math.max(10, sim.globalStability - 6);
+
+  let totalArmyDestroyed = 0;
+  let totalDefensesDestroyed = 0;
+  let totalInfraDestroyed = 0;
+  const struckNames: string[] = [];
+  const struckCapitals: string[] = [];
+
+  for (const [tid, hitPixels] of hitCounts.entries()) {
+    const target = sim.countries[tid];
+    const hitRatio = Math.min(1, hitPixels / Math.max(1, target.pixels));
+    const capDx = target.capitalX - x;
+    const capDy = target.capitalY - y;
+    const capitalHit = capDx * capDx + capDy * capDy <= r2;
+
+    // Destroy defenses and ports inside blast radius
+    const prevDefCount = target.defenses.length;
+    target.defenses = target.defenses.filter(
+      (d) => (d.x - x) ** 2 + (d.y - y) ** 2 > r2
+    );
+    totalDefensesDestroyed += prevDefCount - target.defenses.length;
+
+    target.ports = target.ports.filter(
+      (p) => (p.x - x) ** 2 + (p.y - y) ** 2 > r2
+    );
+
+    // Severe army devastation scaled by coverage + capital strike
+    const pctLoss = Math.min(0.62, 0.24 + hitRatio * 0.34 + (capitalHit ? 0.16 : 0));
+    const rawLoss = Math.max(
+      Math.round(80 + hitRatio * 140),
+      Math.round(target.army * pctLoss)
+    );
+    const actualArmyLoss = Math.max(0, Math.min(Math.round(target.army - 10), rawLoss));
+    target.army = Math.max(10, Math.round(target.army - actualArmyLoss));
+    totalArmyDestroyed += actualArmyLoss;
+
+    // Infrastructure & treasury damage
+    const citiesLost = Math.min(
+      target.cities,
+      Math.max(hitRatio >= 0.14 || capitalHit ? 1 : 0, Math.min(3, Math.round(hitRatio * 3.5)))
+    );
+    const minesLost = Math.min(
+      target.goldMines,
+      Math.max(hitRatio >= 0.14 || capitalHit ? 1 : 0, Math.min(3, Math.round(hitRatio * 3.5)))
+    );
+    target.cities = Math.max(0, target.cities - citiesLost);
+    target.goldMines = Math.max(0, target.goldMines - minesLost);
+    totalInfraDestroyed += citiesLost + minesLost;
+
+    const moneyBurnPct = Math.min(0.32, 0.1 + hitRatio * 0.15 + (capitalHit ? 0.08 : 0));
+    target.money = Math.max(0, Math.round(target.money * (1 - moneyBurnPct)));
+
+    if (capitalHit) {
+      struckCapitals.push(target.seed.capital);
+    }
+    struckNames.push(getCountryName(target));
+
+    // Automatically enters war with struck nations (missile strike is an act of war)
+    addRelation(sim, attackerId, tid, -35);
+    if (!hasTreaty(sim, attackerId, tid, TREATY_WAR)) {
+      sim.truceMonths[idxPair(attackerId, tid)] = 0;
+      sim.truceMonths[idxPair(tid, attackerId)] = 0;
+      setTreatyFlag(sim, attackerId, tid, TREATY_WAR, true);
+      sim.wars.push({ a: attackerId, b: tid, startTotalDays: sim.totalDays });
+      if (!sim.mapData.landNeighbors[attackerId].has(tid) && att.ports.length > 0) {
+        launchNavalLandingFromPort(sim, attackerId, tid);
+      }
+    }
   }
 
-  for (let i = 0; i < 30; i++) {
-    const angle = (Math.PI * 2 * i) / 30 + (Math.random() - 0.5) * 0.25;
-    const dist = Math.sqrt(Math.random()) * NUKE_RADIUS;
+  // Slight global diplomatic fallout for using nuclear weapons
+  for (const other of sim.countries) {
+    if (!other.alive || other.id === attackerId || hitCounts.has(other.id)) continue;
+    addRelation(sim, attackerId, other.id, -4);
+  }
+
+  // Dramatic blast particles inside NUKE_RADIUS
+  const particleCount = 42;
+  for (let i = 0; i < particleCount; i++) {
+    const angle = (Math.PI * 2 * i) / particleCount + Math.random() * 0.2;
+    const dist = Math.random() * NUKE_RADIUS;
     const px = Math.max(0, Math.min(MAP_W - 1, Math.round(x + Math.cos(angle) * dist)));
     const py = Math.max(0, Math.min(MAP_H - 1, Math.round(y + Math.sin(angle) * dist)));
-    const hot = i % 3 === 0;
+    const isCore = dist < NUKE_RADIUS * 0.45;
     sim.particles.push({
       x: px,
       y: py,
-      r: 255,
-      g: hot ? 238 : 115,
-      b: hot ? 140 : 28,
-      life: 16 + Math.floor(Math.random() * 14),
-      maxLife: 30,
+      r: isCore ? 255 : 249,
+      g: isCore ? 245 : 115,
+      b: isCore ? 175 : 22,
+      life: 14,
+      maxLife: 14,
     });
   }
 
-  // Repercusiones geopolíticas globales
-  att.aggressiveExpansion += 28;
-  sim.globalTension = Math.min(100, sim.globalTension + 12);
-  sim.globalStability = Math.max(10, sim.globalStability - 8);
-  for (const other of sim.countries) {
-    if (!other.alive || other.id === attackerId || other.id === targetId) continue;
-    if (hasTreaty(sim, attackerId, other.id, TREATY_ALLIANCE)) continue;
-    const isClose =
-      sim.mapData.landNeighbors[targetId].has(other.id) ||
-      other.seed.continent === target.seed.continent;
-    addRelation(sim, attackerId, other.id, isClose ? -12 : -5);
-  }
+  updateAllEconomies(sim, false);
 
-  const defNote =
-    totalDefensesDestroyed > 0
-      ? `, ${totalDefensesDestroyed} defensa${totalDefensesDestroyed > 1 ? 's' : ''} destruida${totalDefensesDestroyed > 1 ? 's' : ''}`
-      : '';
+  const primaryNames = struckNames.slice(0, 3).join(', ');
+  const capSuffix =
+    struckCapitals.length > 0 ? ` (impacto directo en ${struckCapitals[0]})` : '';
   pushChronicle(
     sim,
     'war',
-    `¡${attName} lanza una Bomba Nuclear sobre ${targetName}! (-${primaryArmyDestroyed.toLocaleString('es-ES')} soldados${defNote})`,
-    targetId
+    `¡ATAQUE NUCLEAR! ${getCountryName(att)} detonó una bomba nuclear sobre ${primaryNames}${capSuffix}: -${totalArmyDestroyed.toLocaleString('es-ES')} soldados y ${totalDefensesDestroyed} defensas destruidas.`,
+    attackerId
   );
 
-  updateAllEconomies(sim, false);
-
-  if (hitPlayer || !sim.isMultiplayer) {
-    soundEngine.playNuclearExplosion();
-  }
+  soundEngine.playNuclearExplosion();
 
   return {
     ok: true,
-    targetName,
-    armyDestroyed: primaryArmyDestroyed,
-    defensesDestroyed: totalDefensesDestroyed,
+    message: `¡Impacto nuclear sobre ${primaryNames}! -${totalArmyDestroyed.toLocaleString('es-ES')} soldados enemigos${totalDefensesDestroyed > 0 ? `, ${totalDefensesDestroyed} defensas` : ''}${totalInfraDestroyed > 0 ? ` y ${totalInfraDestroyed} estructuras` : ''} destruidas.`,
   };
 }
 
@@ -1908,240 +2010,6 @@ function launchNavalLandingFromPort(sim: SimulationState, attackerId: number, de
   });
 }
 
-export interface TreeRequirementCheck {
-  label: string;
-  met: boolean;
-  targetCountryId?: number;
-}
-
-export interface TreeNodeEvaluation {
-  completed: boolean;
-  parentMet: boolean;
-  requirements: TreeRequirementCheck[];
-  canUnlock: boolean;
-  reason?: string;
-}
-
-export function doesCountryControlTarget(
-  sim: SimulationState,
-  actorId: number,
-  targetId: number
-): boolean {
-  if (actorId === targetId) return sim.countries[actorId]?.alive ?? false;
-  const target = sim.countries[targetId];
-  if (!target) return false;
-  if (!target.alive && target.annexedById === actorId) return true;
-  const capX = sim.mapData.capitalX[targetId];
-  const capY = sim.mapData.capitalY[targetId];
-  if (capX >= 0 && capX < MAP_W && capY >= 0 && capY < MAP_H) {
-    if (sim.ownerGrid[capY * MAP_W + capX] === actorId) return true;
-  }
-  return false;
-}
-
-export function evaluateTreeNode(
-  sim: SimulationState,
-  countryId: number,
-  node: CountryTreeNode
-): TreeNodeEvaluation {
-  const c = sim.countries[countryId];
-  if (!c) {
-    return { completed: false, parentMet: false, requirements: [], canUnlock: false, reason: 'País inválido.' };
-  }
-
-  const completedList = c.completedTreeNodes ?? [];
-  const completed = completedList.includes(node.id);
-
-  let parentMet = true;
-  if (node.parentId) {
-    parentMet = completedList.includes(node.parentId);
-  } else if (node.requiresAnyParent && node.requiresAnyParent.length > 0) {
-    parentMet = node.requiresAnyParent.some((pid) => completedList.includes(pid));
-  }
-
-  const req = node.requirements;
-  const checks: TreeRequirementCheck[] = [];
-
-  if (req.minCities !== undefined) {
-    checks.push({
-      label: `Ciudades: ${c.cities}/${req.minCities}`,
-      met: c.cities >= req.minCities,
-    });
-  }
-  if (req.minGoldMines !== undefined) {
-    checks.push({
-      label: `Minas de Oro: ${c.goldMines}/${req.minGoldMines}`,
-      met: c.goldMines >= req.minGoldMines,
-    });
-  }
-  if (req.minPorts !== undefined && hasCoast(sim, countryId)) {
-    checks.push({
-      label: `Puertos: ${c.ports.length}/${req.minPorts}`,
-      met: c.ports.length >= req.minPorts,
-    });
-  }
-  if (req.minDefenses !== undefined) {
-    checks.push({
-      label: `Defensas: ${c.defenses.length}/${req.minDefenses}`,
-      met: c.defenses.length >= req.minDefenses,
-    });
-  }
-  if (req.minArmy !== undefined) {
-    checks.push({
-      label: `Ejército: ${Math.round(c.army).toLocaleString('es-ES')}/${req.minArmy.toLocaleString('es-ES')}`,
-      met: c.army >= req.minArmy,
-    });
-  }
-  if (req.minMoney !== undefined) {
-    checks.push({
-      label: `Tesoro: $${Math.round(c.money).toLocaleString('es-ES')}/$${req.minMoney.toLocaleString('es-ES')}`,
-      met: c.money >= req.minMoney,
-    });
-  }
-  if (req.minAllies !== undefined) {
-    const alliesCount = getAllies(sim, countryId).length;
-    checks.push({
-      label: `Alianzas activas: ${alliesCount}/${req.minAllies}`,
-      met: alliesCount >= req.minAllies,
-    });
-  }
-  if (req.minAnnexations !== undefined) {
-    const annexed = c.annexedCount ?? 0;
-    checks.push({
-      label: `Países conquistados: ${annexed}/${req.minAnnexations}`,
-      met: annexed >= req.minAnnexations,
-    });
-  }
-  if (req.minTerritoryPctIncrease !== undefined) {
-    const pct = Math.max(0, Math.round(((c.pixels - c.initialPixels) / Math.max(1, c.initialPixels)) * 100));
-    checks.push({
-      label: `Expansión territorial: +${pct}%/+${req.minTerritoryPctIncrease}%`,
-      met: pct >= req.minTerritoryPctIncrease,
-    });
-  }
-  if (req.controlCountriesIso2 && req.controlCountriesIso2.length > 0) {
-    for (const iso of req.controlCountriesIso2) {
-      const targetId = ISO2_TO_COUNTRY_ID[iso];
-      if (targetId === undefined || targetId === countryId) continue;
-      const target = sim.countries[targetId];
-      if (!target) continue;
-      const met = doesCountryControlTarget(sim, countryId, targetId);
-      checks.push({
-        label: `Controlar ${getCountryDisplayName(target)}`,
-        met,
-        targetCountryId: targetId,
-      });
-    }
-  }
-
-  if (node.costMoney > 0) {
-    checks.push({
-      label: `Costo: $${node.costMoney.toLocaleString('es-ES')}`,
-      met: c.money >= node.costMoney,
-    });
-  }
-
-  const allReqsMet = checks.every((ch) => ch.met);
-
-  let reason: string | undefined;
-  if (completed) {
-    reason = 'Hito histórico completado.';
-  } else if (!c.alive) {
-    reason = 'Tu país debe estar independiente.';
-  } else if (!parentMet) {
-    reason = 'Completa primero un hito anterior en la rama.';
-  } else if (!allReqsMet) {
-    const firstMissing = checks.find((ch) => !ch.met);
-    reason = firstMissing ? `Falta: ${firstMissing.label}.` : 'Faltan requisitos.';
-  }
-
-  return {
-    completed,
-    parentMet,
-    requirements: checks,
-    canUnlock: !completed && c.alive && parentMet && allReqsMet,
-    reason,
-  };
-}
-
-export function unlockCountryTreeNode(
-  sim: SimulationState,
-  countryId: number,
-  nodeId: string
-): { ok: boolean; error?: string; renamedTo?: string; title?: string } {
-  const c = sim.countries[countryId];
-  if (!c || !c.alive) return { ok: false, error: 'País inactivo.' };
-
-  const tree = getCountryGenealogyTree(c.seed.iso2);
-  const node = tree.nodes.find((n) => n.id === nodeId);
-  if (!node) return { ok: false, error: 'Hito histórico no encontrado.' };
-
-  const evalRes = evaluateTreeNode(sim, countryId, node);
-  if (evalRes.completed) {
-    return { ok: false, error: 'Este hito histórico ya fue completado.' };
-  }
-  if (!evalRes.canUnlock) {
-    return { ok: false, error: evalRes.reason ?? 'No cumples los requisitos para este hito.' };
-  }
-
-  if (node.costMoney > 0) {
-    c.money = Math.max(0, Math.round(c.money - node.costMoney));
-  }
-
-  if (!c.completedTreeNodes) c.completedTreeNodes = [];
-  c.completedTreeNodes.push(node.id);
-
-  const reward = node.reward;
-  if (reward.permanentIncomeBonus) {
-    c.treeIncomeBonus = Math.min(
-      MAX_TREE_INCOME_BONUS,
-      (c.treeIncomeBonus ?? 0) + reward.permanentIncomeBonus
-    );
-  }
-  if (reward.permanentArmyCapBonus) {
-    c.treeArmyCapBonus = Math.min(
-      MAX_TREE_ARMY_CAP_BONUS,
-      (c.treeArmyCapBonus ?? 0) + reward.permanentArmyCapBonus
-    );
-  }
-
-  const armyCap = getArmyCap(c);
-  const moneyCap = getMoneyCap(c);
-
-  if (reward.moneyDelta) {
-    c.money = Math.min(moneyCap, Math.round(c.money + reward.moneyDelta));
-  }
-  if (reward.armyDelta) {
-    c.army = Math.min(armyCap, Math.round(c.army + reward.armyDelta));
-  }
-
-  const prevName = getCountryDisplayName(c);
-  let renamedTo: string | undefined;
-  if (reward.renameTo) {
-    c.customName = reward.renameTo;
-    renamedTo = reward.renameTo;
-  }
-
-  const chronicleMsg =
-    reward.proclamationText ??
-    (renamedTo
-      ? `¡${prevName} restaura su legado histórico y se proclama ${renamedTo}!`
-      : `${getCountryDisplayName(c)} completa el hito histórico «${node.title}».`);
-
-  pushChronicle(sim, 'event', chronicleMsg, countryId);
-  updateAllEconomies(sim, false);
-
-  if (countryId === sim.playerId) {
-    if (renamedTo) {
-      soundEngine.playAllianceFormed();
-    } else {
-      soundEngine.playBuildStructure('city');
-    }
-  }
-
-  return { ok: true, renamedTo, title: node.title };
-}
-
 export function stabilizeSimulationStats(sim: SimulationState) {
   for (const c of sim.countries) {
     c.goldMines = Math.max(0, Math.min(MAX_GOLD_MINES_TOTAL, Math.round(c.goldMines)));
@@ -2149,24 +2017,6 @@ export function stabilizeSimulationStats(sim: SimulationState) {
     c.monthlyIncomeBonus = Math.max(
       0,
       Math.min(MAX_MONTHLY_INCOME_BONUS, Math.round(c.monthlyIncomeBonus))
-    );
-    c.treeIncomeBonus = Math.max(
-      0,
-      Math.min(MAX_TREE_INCOME_BONUS, Math.round(c.treeIncomeBonus ?? 0))
-    );
-    c.treeArmyCapBonus = Math.max(
-      0,
-      Math.min(MAX_TREE_ARMY_CAP_BONUS, Math.round(c.treeArmyCapBonus ?? 0))
-    );
-    c.annexedCount = Math.max(0, Math.round(c.annexedCount ?? 0));
-    if (!Array.isArray(c.completedTreeNodes)) c.completedTreeNodes = [];
-    if (c.customName === undefined) c.customName = null;
-    if (typeof c.lastNukeDay !== 'number' || Number.isNaN(c.lastNukeDay)) {
-      c.lastNukeDay = -999;
-    }
-    c.recruitsThisMonth = Math.max(
-      0,
-      Math.min(getMaxRecruitsPerMonth(c), Math.round(c.recruitsThisMonth ?? 0))
     );
     if (!c.alive) {
       c.netIncome = 0;
@@ -2180,6 +2030,206 @@ export function stabilizeSimulationStats(sim: SimulationState) {
   updateAllEconomies(sim, false);
 }
 
+export interface FocusRequirementCheck {
+  label: string;
+  met: boolean;
+}
+
+export interface FocusNodeStatus {
+  completed: boolean;
+  parentsMet: boolean;
+  canComplete: boolean;
+  checks: FocusRequirementCheck[];
+}
+
+export function evaluateFocusNodeStatus(
+  sim: SimulationState,
+  countryId: number,
+  node: FocusNode
+): FocusNodeStatus {
+  const c = sim.countries[countryId];
+  if (!c) {
+    return { completed: false, parentsMet: false, canComplete: false, checks: [] };
+  }
+  const doneSet = new Set(c.completedFocusIds ?? []);
+  const completed = doneSet.has(node.id);
+  const parentsMet =
+    node.parents.length === 0
+      ? true
+      : node.requireAnyParent
+        ? node.parents.some((pid) => doneSet.has(pid))
+        : node.parents.every((pid) => doneSet.has(pid));
+
+  const checks: FocusRequirementCheck[] = [];
+  const req = node.requirements;
+
+  checks.push({
+    label: `Tesoro: $${req.moneyCost.toLocaleString('es-ES')} (tienes $${Math.round(c.money).toLocaleString('es-ES')})`,
+    met: completed || c.money >= req.moneyCost,
+  });
+
+  if (req.minGoldMines) {
+    checks.push({
+      label: `Minas de Oro: ${c.goldMines}/${req.minGoldMines}`,
+      met: completed || c.goldMines >= req.minGoldMines,
+    });
+  }
+
+  if (req.minCities) {
+    checks.push({
+      label: `Ciudades: ${c.cities}/${req.minCities}`,
+      met: completed || c.cities >= req.minCities,
+    });
+  }
+
+  if (req.minArmy) {
+    checks.push({
+      label: `Ejército: ${Math.round(c.army).toLocaleString('es-ES')}/${req.minArmy.toLocaleString('es-ES')}`,
+      met: completed || c.army >= req.minArmy,
+    });
+  }
+
+  if (req.minAllies) {
+    const allyCount = getAllies(sim, countryId).length;
+    checks.push({
+      label: `Alianzas activas: ${allyCount}/${req.minAllies}`,
+      met: completed || allyCount >= req.minAllies,
+    });
+  }
+
+  if (req.historicalTargetIso2 && req.historicalTargetIso2.length > 0) {
+    const expansionPct = req.minExpansionPct ?? 25;
+    const expandedEnough =
+      c.pixels >= Math.round(c.initialPixels * (1 + expansionPct / 100)) ||
+      c.pixels - c.initialPixels >= 15;
+    const targetCountries = req.historicalTargetIso2
+      .map((iso) => sim.countries.find((other) => other.seed.iso2 === iso))
+      .filter((other): other is CountryState => Boolean(other && other.id !== countryId));
+    const hasHistoricalPartner = targetCountries.some(
+      (other) =>
+        (!other.alive && other.annexedById === countryId) ||
+        (other.alive && hasTreaty(sim, countryId, other.id, TREATY_ALLIANCE))
+    );
+    const partnerNames = targetCountries
+      .slice(0, 3)
+      .map((other) => getCountryName(other))
+      .join(', ');
+    checks.push({
+      label: partnerNames
+        ? `Anexar o aliarse con ${partnerNames} (o expandir +${expansionPct}% territorio)`
+        : `Expandir territorio +${expansionPct}%`,
+      met: completed || hasHistoricalPartner || expandedEnough,
+    });
+  } else if (req.minExpansionPct) {
+    const expandedEnough =
+      c.pixels >= Math.round(c.initialPixels * (1 + req.minExpansionPct / 100)) ||
+      c.pixels - c.initialPixels >= 15;
+    checks.push({
+      label: `Expandir territorio +${req.minExpansionPct}%`,
+      met: completed || expandedEnough,
+    });
+  }
+
+  const canComplete = c.alive && !completed && parentsMet && checks.every((ch) => ch.met);
+  return { completed, parentsMet, canComplete, checks };
+}
+
+export function completeFocusNode(
+  sim: SimulationState,
+  countryId: number,
+  nodeId: string
+): { ok: boolean; message: string } {
+  const c = sim.countries[countryId];
+  if (!c || !c.alive) {
+    return { ok: false, message: 'Tu país debe estar activo para completar hitos históricos.' };
+  }
+  const tree = getCountryGenealogyTree(c.seed);
+  const node = tree.nodes.find((n) => n.id === nodeId);
+  if (!node) {
+    return { ok: false, message: 'Hito histórico no encontrado.' };
+  }
+
+  const status = evaluateFocusNodeStatus(sim, countryId, node);
+  if (status.completed) {
+    return { ok: false, message: 'Este hito histórico ya fue completado.' };
+  }
+  if (!status.parentsMet) {
+    return { ok: false, message: 'Primero debes completar el hito anterior del árbol.' };
+  }
+  const failed = status.checks.find((ch) => !ch.met);
+  if (failed) {
+    return { ok: false, message: `Requisito pendiente: ${failed.label}.` };
+  }
+
+  const prevName = getCountryName(c);
+  c.money = Math.max(0, c.money - node.requirements.moneyCost);
+  c.completedFocusIds = [...(c.completedFocusIds ?? []), node.id];
+
+  const eff = node.effects;
+  if (eff.incomeBonus) {
+    c.focusIncomeBonus = Math.min(20, (c.focusIncomeBonus ?? 0) + eff.incomeBonus);
+  }
+  if (eff.armyCapBonus) {
+    c.focusArmyCapBonus = Math.min(1200, (c.focusArmyCapBonus ?? 0) + eff.armyCapBonus);
+  }
+  if (eff.defenseBonusPct) {
+    c.focusDefenseBonus = Math.min(30, (c.focusDefenseBonus ?? 0) + eff.defenseBonusPct);
+  }
+  if (eff.moneyBonus) {
+    c.money = Math.min(getMoneyCap(c), c.money + eff.moneyBonus);
+  }
+  if (eff.armyBonus) {
+    c.army = Math.min(getArmyCap(c), c.army + eff.armyBonus);
+  }
+  if (eff.relationsContinentDelta) {
+    for (const other of sim.countries) {
+      if (other.alive && other.id !== countryId && other.seed.continent === c.seed.continent) {
+        if (!hasTreaty(sim, countryId, other.id, TREATY_WAR)) {
+          addRelation(sim, countryId, other.id, eff.relationsContinentDelta);
+        }
+      }
+    }
+  }
+
+  let renamedTo: string | null = null;
+  if (eff.newName) {
+    c.customName = eff.newName;
+    renamedTo = eff.newName;
+  }
+
+  updateAllEconomies(sim, false);
+
+  if (renamedTo) {
+    pushChronicle(
+      sim,
+      'event',
+      `¡${prevName} completa «${node.title}» y renace oficialmente como ${renamedTo}!`,
+      countryId
+    );
+    if (countryId === sim.playerId) {
+      soundEngine.playAnnexation(true);
+    }
+    return {
+      ok: true,
+      message: `¡Histórico! ${prevName} ahora se llama ${renamedTo}.`,
+    };
+  }
+
+  pushChronicle(
+    sim,
+    'event',
+    `${getCountryName(c)} completa el hito «${node.title}» (${node.era}).`,
+    countryId
+  );
+  if (countryId === sim.playerId) {
+    soundEngine.playEvent();
+  }
+  return {
+    ok: true,
+    message: `Hito «${node.title}» completado con éxito.`,
+  };
+}
+
 function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
   for (const c of sim.countries) {
     if (!c.alive) {
@@ -2188,28 +2238,21 @@ function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
     }
 
     const armyCap = getArmyCap(c);
-    const activeWars = getEnemies(sim, c.id).length;
 
     if (applyMonthlyGrowth) {
-      // Crecimiento logístico suave del ejército hacia la capacidad militar
+      // Crecimiento logístico del ejército: frena suavemente al acercarse a la capacidad militar
       if (c.army < armyCap) {
         const headroom = Math.max(0, 1 - c.army / armyCap);
         const baseGrowth =
-          3 + Math.min(16, Math.floor(c.cities * 0.7 + Math.sqrt(Math.max(1, c.pixels)) * 0.22));
+          5 + Math.min(30, Math.floor(c.cities * 1.1 + Math.sqrt(Math.max(1, c.pixels)) * 0.4));
         const monthlyArmyGrowth = Math.max(1, Math.round(baseGrowth * headroom));
         c.army = Math.min(armyCap, c.army + monthlyArmyGrowth);
       } else if (c.army > armyCap) {
         const excess = c.army - armyCap;
-        c.army = Math.max(armyCap, Math.round(c.army - Math.max(5, excess * 0.22)));
+        c.army = Math.max(armyCap, Math.round(c.army - Math.max(5, excess * 0.15)));
       }
 
-      // Deserción moderada si el país entra en bancarrota con déficit activo
-      if (c.money <= 0 && c.netIncome < 0 && c.army > 60) {
-        const desertion = Math.max(4, Math.round(c.army * 0.03));
-        c.army = Math.max(60, c.army - desertion);
-      }
-
-      // Crecimiento económico anual muy moderado: +$1/seg cada enero (máx. +6)
+      // Crecimiento económico moderado: +$1/seg cada enero (hasta +10 máximo)
       if (sim.month === 1 && c.monthlyIncomeBonus < MAX_MONTHLY_INCOME_BONUS) {
         c.monthlyIncomeBonus = Math.min(
           MAX_MONTHLY_INCOME_BONUS,
@@ -2222,33 +2265,18 @@ function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
       }
     }
 
-    const baseTerritoryIncome = Math.max(
-      2,
-      Math.min(24, Math.round(Math.sqrt(Math.max(1, c.pixels)) * 0.3))
-    );
+    const baseTerritoryIncome = Math.max(3, Math.round(Math.sqrt(Math.max(1, c.pixels)) * 0.45));
     const minesIncome = c.goldMines * GOLD_MINE_INCOME;
     const citiesIncome = c.cities * CITY_INCOME;
     const cappedBonus = Math.min(MAX_MONTHLY_INCOME_BONUS, Math.max(0, c.monthlyIncomeBonus));
-    const treeIncome = Math.min(MAX_TREE_INCOME_BONUS, Math.max(0, c.treeIncomeBonus ?? 0));
+    const focusBonus = Math.min(20, Math.max(0, c.focusIncomeBonus ?? 0));
 
     const normalArmy = Math.min(c.army, armyCap);
     const excessArmy = Math.max(0, c.army - armyCap);
-    const warLogisticsMult = 1 + Math.min(1.5, activeWars * 0.45);
-    const armyUpkeep = Math.round(
-      normalArmy * 0.008 * warLogisticsMult + excessArmy * 0.025
-    );
-    const empireAdminCost = Math.floor(Math.max(0, c.pixels - 1200) / 350);
-    const rawNet =
-      baseTerritoryIncome +
-      minesIncome +
-      citiesIncome +
-      cappedBonus +
-      treeIncome -
-      armyUpkeep -
-      empireAdminCost;
+    const armyUpkeep = Math.round(normalArmy * 0.004 + excessArmy * 0.015);
+    const rawNet = baseTerritoryIncome + minesIncome + citiesIncome + cappedBonus + focusBonus - armyUpkeep;
 
-    c.netIncome =
-      excessArmy > 0 || activeWars > 0 ? Math.max(-20, rawNet) : Math.max(1, rawNet);
+    c.netIncome = excessArmy > 0 ? Math.max(-25, rawNet) : Math.max(2, rawNet);
   }
 }
 
@@ -2278,7 +2306,7 @@ export function stepSimulationSecond(sim: SimulationState) {
       const slot = sim.humanPlayers[cid];
       const country = sim.countries[cid];
       if (slot && country && !country.alive) {
-        slot.rebelMoney = Math.min(15000, slot.rebelMoney + REBEL_INCOME_PER_SECOND);
+        slot.rebelMoney = Math.min(25000, slot.rebelMoney + REBEL_INCOME_PER_SECOND);
       }
     }
   }
@@ -2322,7 +2350,7 @@ function applyCapitalCapturedPenalty(
 ) {
   if (loser.capitalLostPenaltyDone || !loser.alive) return;
   loser.capitalLostPenaltyDone = true;
-  const lostArmy = Math.max(1, Math.floor(loser.army * CAPITAL_CAPTURE_PENALTY_PCT));
+  const lostArmy = Math.max(1, Math.floor(loser.army * 0.5));
   loser.army = Math.max(1, loser.army - lostArmy);
 
   for (let k = 0; k < 8; k++) {
@@ -2340,7 +2368,7 @@ function applyCapitalCapturedPenalty(
   pushChronicle(
     sim,
     'capital',
-    `¡${getCountryDisplayName(winner)} alcanza la capital de ${getCountryDisplayName(loser)}! Pierde el ${Math.round(CAPITAL_CAPTURE_PENALTY_PCT * 100)}% de su ejército (-${lostArmy.toLocaleString('es-ES')} soldados).`,
+    `¡${getCountryName(winner)} alcanza la capital de ${getCountryName(loser)}! Pierde el 50% de su ejército (-${lostArmy} soldados).`,
     winner.id
   );
 
@@ -2358,8 +2386,8 @@ function processFrontlineBattles(sim: SimulationState) {
   const expiredWars = sim.wars.filter((w) => sim.totalDays - w.startTotalDays >= MAX_WAR_DAYS);
   for (const w of expiredWars) {
     if (hasTreaty(sim, w.a, w.b, TREATY_WAR)) {
-      const nA = getCountryDisplayName(sim.countries[w.a]);
-      const nB = getCountryDisplayName(sim.countries[w.b]);
+      const nA = getCountryName(sim.countries[w.a]);
+      const nB = getCountryName(sim.countries[w.b]);
       makePeace(
         sim,
         w.a,
@@ -2519,14 +2547,12 @@ function processFrontlineBattles(sim: SimulationState) {
       continue;
     }
 
-    const aFronts = Math.max(1, getEnemies(sim, aId).length);
-    const bFronts = Math.max(1, getEnemies(sim, bId).length);
-    const effA = (a.army / Math.pow(aFronts, 0.55)) * (1 + getCountryDefensePct(a) * 0.004);
-    const effB = (b.army / Math.pow(bFronts, 0.55)) * (1 + getCountryDefensePct(b) * 0.004);
-    const powA = Math.pow(Math.max(1, effA), 1.12);
-    const powB = Math.pow(Math.max(1, effB), 1.12);
+    const effA = a.army * (1 + getCountryDefensePct(a) * 0.004);
+    const effB = b.army * (1 + getCountryDefensePct(b) * 0.004);
+    const powA = Math.pow(Math.max(1, effA), 1.25);
+    const powB = Math.pow(Math.max(1, effB), 1.25);
     const probA = powA / Math.max(1, powA + powB);
-    const skirmishes = Math.max(4, Math.min(36, Math.ceil(pairs.length / 10)));
+    const skirmishes = Math.max(8, Math.min(72, Math.ceil(pairs.length / 6)));
 
     for (let s = 0; s < skirmishes; s++) {
       const pairIdx = Math.floor(Math.random() * (pairs.length / 2)) * 2;
@@ -2547,8 +2573,8 @@ function processFrontlineBattles(sim: SimulationState) {
         const loser = sim.countries[loserId];
         const winner = sim.countries[winnerId];
 
-        // Zona protegida por una defensa dentro de su radio: frena el avance enemigo
-        if (isPixelProtectedByDefense(loser, px, py)) {
+        // Zona protegida por una defensa dentro de su radio (desactivada si fue irradiada por una bomba nuclear)
+        if (!isPixelIrradiated(sim, px, py) && isPixelProtectedByDefense(loser, px, py)) {
           const blockChance = Math.min(0.82, 0.58 + getCountryDefensePct(loser) * 0.002);
           if (Math.random() < blockChance) {
             if (sim.particles.length < 180) {
@@ -2606,15 +2632,15 @@ function processFrontlineBattles(sim: SimulationState) {
 
     // Proportional combat casualties so wars genuinely consume armies and prevent runaway snowballs
     const frontForce = Math.min(a.army, b.army);
-    const intensity = Math.min(1, skirmishes / 28);
-    const baseCasualties = Math.max(2, Math.round(frontForce * (0.006 + intensity * 0.012)));
+    const intensity = Math.min(1, skirmishes / 48);
+    const baseCasualties = Math.max(4, Math.round(frontForce * (0.004 + intensity * 0.01)));
     const lossA = Math.min(
-      Math.round(a.army * 0.04),
-      Math.max(2, Math.round(baseCasualties * (1.25 - probA)))
+      Math.round(a.army * 0.035),
+      Math.max(3, Math.round(baseCasualties * (1.25 - probA)))
     );
     const lossB = Math.min(
-      Math.round(b.army * 0.04),
-      Math.max(2, Math.round(baseCasualties * (0.25 + probA)))
+      Math.round(b.army * 0.035),
+      Math.max(3, Math.round(baseCasualties * (0.25 + probA)))
     );
     a.army = Math.max(10, Math.round(a.army - lossA));
     b.army = Math.max(10, Math.round(b.army - lossB));
@@ -2652,6 +2678,7 @@ function processFrontlineBattles(sim: SimulationState) {
     l.ports = [];
     l.defenses = [];
     l.annexedById = winner;
+    l.rebelUnrest = 0;
 
     // Re-point any previously annexed nations whose occupier was `loser`
     for (const other of sim.countries) {
@@ -2667,29 +2694,17 @@ function processFrontlineBattles(sim: SimulationState) {
       slot.rebelArmy = Math.max(slot.rebelArmy, 35);
     }
 
-    const warLoot = Math.min(1200, Math.round(l.money * 0.2));
+    const warLoot = Math.min(2500, Math.round(l.money * 0.25));
     w.money = Math.min(getMoneyCap(w), w.money + warLoot);
     w.goldMines = Math.min(
       MAX_GOLD_MINES_TOTAL,
-      w.goldMines + Math.min(2, Math.floor(l.goldMines * 0.2))
+      w.goldMines + Math.min(3, Math.floor(l.goldMines * 0.25))
     );
     w.cities = Math.min(
       MAX_CITIES_TOTAL,
-      w.cities + Math.min(2, Math.floor(l.cities * 0.2))
+      w.cities + Math.min(4, Math.floor(l.cities * 0.25))
     );
-    w.annexedCount = (w.annexedCount ?? 0) + 1;
     w.aggressiveExpansion += 18;
-
-    // Reacción diplomática regional ante anexiones para evitar expansiones sin consecuencias
-    for (const other of sim.countries) {
-      if (!other.alive || other.id === winner || other.id === loser) continue;
-      if (hasTreaty(sim, winner, other.id, TREATY_ALLIANCE)) continue;
-      if (sim.mapData.landNeighbors[winner].has(other.id)) {
-        addRelation(sim, winner, other.id, -12);
-      } else if (other.seed.continent === l.seed.continent) {
-        addRelation(sim, winner, other.id, -5);
-      }
-    }
 
     for (let j = 0; j < N_COUNTRIES; j++) {
       sim.treaties[idxPair(loser, j)] = 0;
@@ -2701,7 +2716,7 @@ function processFrontlineBattles(sim: SimulationState) {
     pushChronicle(
       sim,
       'annex',
-      `${getCountryDisplayName(w)} conquista por completo a ${getCountryDisplayName(l)}.`,
+      `${getCountryName(w)} conquista por completo a ${getCountryName(l)}.`,
       winner
     );
 
@@ -2767,20 +2782,13 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
   const enemies = getEnemies(sim, c.id);
   const atWar = enemies.length > 0;
 
-  // 1. Improve army and build economy over time (respecting supply & monthly limits)
+  // 1. Improve army and build economy over time (respecting supply & monthly build limits)
   const armyCap = getArmyCap(c);
-  const maxRecruits = getMaxRecruitsPerMonth(c);
   if (atWar) {
     let recruits = 0;
-    while (
-      recruits < 3 &&
-      c.recruitsThisMonth < maxRecruits &&
-      c.army < armyCap &&
-      c.money >= ARMY_RECRUIT_COST
-    ) {
+    while (recruits < 3 && c.army < armyCap && c.money >= ARMY_RECRUIT_COST) {
       c.money -= ARMY_RECRUIT_COST;
       c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
-      c.recruitsThisMonth++;
       recruits++;
     }
   } else {
@@ -2790,7 +2798,7 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       c.cities < MAX_CITIES_TOTAL &&
       c.citiesBuiltThisMonth < MAX_CITIES_PER_MONTH &&
       c.money >= cityCost &&
-      Math.random() < 0.42
+      Math.random() < 0.32
     ) {
       c.money -= cityCost;
       c.cities++;
@@ -2800,38 +2808,29 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       c.goldMines < MAX_GOLD_MINES_TOTAL &&
       c.goldMinesBuiltThisMonth < MAX_GOLD_MINES_PER_MONTH &&
       c.money >= mineCost &&
-      Math.random() < 0.48
+      Math.random() < 0.42
     ) {
       c.money -= mineCost;
       c.goldMines++;
       c.goldMinePurchases++;
       c.goldMinesBuiltThisMonth++;
     }
-    const targetPeaceArmy = Math.round(armyCap * 0.75);
-    if (
-      c.army < targetPeaceArmy &&
-      c.recruitsThisMonth < maxRecruits &&
-      c.money >= ARMY_RECRUIT_COST &&
-      Math.random() < 0.65
-    ) {
+    const targetPeaceArmy = Math.round(armyCap * 0.78);
+    if (c.army < targetPeaceArmy && c.money >= ARMY_RECRUIT_COST && Math.random() < 0.6) {
       c.money -= ARMY_RECRUIT_COST;
       c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
-      c.recruitsThisMonth++;
     }
-    if (c.defenses.length < 4 && c.money >= DEFENSE_COST && Math.random() < 0.18) {
+    if (c.defenses.length < 3 && c.money >= DEFENSE_COST && Math.random() < 0.14) {
       buildDefenseAt(sim, c.id, c.capitalX, c.capitalY);
     }
-
-    // Progreso orgánico del árbol genealógico de países controlados por la IA
-    if (Math.random() < 0.22) {
-      const tree = getCountryGenealogyTree(c.seed.iso2);
-      for (const node of tree.nodes) {
-        if (c.completedTreeNodes.includes(node.id)) continue;
-        const evalNode = evaluateTreeNode(sim, c.id, node);
-        if (evalNode.canUnlock) {
-          unlockCountryTreeNode(sim, c.id, node.id);
-          break;
-        }
+    // AI nations gradually advance their own historical genealogical tree
+    if (Math.random() < 0.08) {
+      const aiTree = getCountryGenealogyTree(c.seed);
+      const nextAvailable = aiTree.nodes.find(
+        (n) => evaluateFocusNodeStatus(sim, c.id, n).canComplete
+      );
+      if (nextAvailable) {
+        completeFocusNode(sim, c.id, nextAvailable.id);
       }
     }
   }
@@ -2914,23 +2913,18 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
     return;
   }
 
-  // Declare at most 1 AI war per month (or coalition defense against runaway aggressors)
+  // Declare at most 1 AI war per month
   const currentMonthKey = sim.year * 12 + sim.month;
   const ratio = c.army / Math.max(1, target.army);
-  const coalitionThreat = target.aggressiveExpansion >= 36 && newRel <= 30 && ratio >= 0.75;
   const canAttack =
-    (sim.lastAiWarMonth < currentMonthKey || coalitionThreat) &&
+    sim.lastAiWarMonth < currentMonthKey &&
     sim.wars.length < 10 &&
     !atWar &&
     isLandNeighbor &&
     sim.truceMonths[idxPair(c.id, targetId)] <= 0 &&
     !hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE);
 
-  if (
-    canAttack &&
-    ((newRel <= 40 && ratio >= 1.15) || coalitionThreat) &&
-    Math.random() < (coalitionThreat ? 0.65 : 0.45)
-  ) {
+  if (canAttack && (newRel <= 42 || target.aggressiveExpansion >= 20) && ratio >= 1.12 && Math.random() < 0.5) {
     const res = declareWar(sim, c.id, targetId);
     if (res.ok) {
       sim.lastAiWarMonth = currentMonthKey;
@@ -2939,7 +2933,7 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
 }
 
 function runAiPulse(sim: SimulationState) {
-  const batchSize = 65;
+  const batchSize = 48;
   let processed = 0;
   let scanned = 0;
   while (processed < batchSize && scanned < N_COUNTRIES) {
@@ -2985,7 +2979,7 @@ export function resolveEventChoice(sim: SimulationState, choice: EventChoice) {
   }
   if (e.armyDeltaPct) {
     const rawDelta = Math.round(p.army * e.armyDeltaPct);
-    const boundedDelta = e.armyDeltaPct > 0 ? Math.min(150, rawDelta) : rawDelta;
+    const boundedDelta = e.armyDeltaPct > 0 ? Math.min(350, rawDelta) : rawDelta;
     p.army = Math.max(10, Math.min(armyCap, Math.round(p.army + boundedDelta)));
   }
   if (e.globalTensionDelta) {
@@ -3009,15 +3003,26 @@ export function stepSimulationDay(sim: SimulationState) {
   sim.totalDays++;
   sim.day++;
 
+  for (const c of sim.countries) {
+    if (c.nukeCooldownDays > 0) c.nukeCooldownDays--;
+    if (c.lastNukeStrike && sim.totalDays - c.lastNukeStrike.totalDays > NUKE_FALLOUT_DAYS) {
+      c.lastNukeStrike = null;
+    }
+  }
+
   processFrontlineBattles(sim);
 
   if (sim.totalDays % 2 === 0) {
     runAiPulse(sim);
   }
 
+  if (sim.totalDays % 10 === 0) {
+    processAbsorbedCountryRebellions(sim);
+  }
+
   if (sim.totalDays >= sim.nextEventDay) {
     triggerHistoricalEvent(sim);
-    sim.nextEventDay = sim.totalDays + 180 + Math.floor(Math.random() * 90);
+    sim.nextEventDay = sim.totalDays + 150 + Math.floor(Math.random() * 90);
   }
 
   if (sim.day > 30) {
@@ -3035,7 +3040,6 @@ export function stepSimulationDay(sim: SimulationState) {
     for (const c of sim.countries) {
       c.goldMinesBuiltThisMonth = 0;
       c.citiesBuiltThisMonth = 0;
-      c.recruitsThisMonth = 0;
     }
 
     sim.globalStability += (72 - sim.globalStability) * 0.03;

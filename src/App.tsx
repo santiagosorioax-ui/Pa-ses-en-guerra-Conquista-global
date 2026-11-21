@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { GitBranch, Handshake, Map as MapIcon, ScrollText, Swords } from 'lucide-react';
+import { Handshake, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
+import { AchievementsModal } from './components/AchievementsModal';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
 import { CountrySearchModal } from './components/CountrySearchModal';
 import { CountrySelectScreen } from './components/CountrySelectScreen';
-import { CountryTreeModal } from './components/CountryTreeView';
 import { DeviceModeScreen, type DeviceMode } from './components/DeviceModeScreen';
 import { EventModal } from './components/EventModal';
+import { GenealogyTreeModal } from './components/GenealogyTreeModal';
 import { MinimapBar } from './components/MinimapBar';
 import { OnlineLobbyScreen } from './components/OnlineLobbyScreen';
 import { OfflineIndicator, PWAInstallBanner } from './components/PWAInstallPrompt';
@@ -16,6 +17,14 @@ import { TopCommandBar } from './components/TopCommandBar';
 import { TutorialOverlay } from './components/TutorialOverlay';
 import { WorldMapCanvas, type CameraView } from './components/WorldMapCanvas';
 import { useFirebase } from './contexts/FirebaseContext';
+import {
+  evaluateAchievements,
+  loadAchievementProfile,
+  saveAchievementProfile,
+  type AchievementDef,
+  type AchievementProfile,
+  type AchievementStats,
+} from './data/achievements';
 import { restoreRoomWorldState } from './engine/campaignSerializer';
 import {
   executeGameAction,
@@ -26,7 +35,9 @@ import {
   NUKE_RADIUS,
   canReachToAttack,
   createSimulation,
-  getCountryDisplayName,
+  getCountryName,
+  getCountryRebellionStrength,
+  getEnemies,
   respondToPendingProposal,
   stepSimulationDay,
   stepSimulationSecond,
@@ -93,12 +104,20 @@ export default function App() {
   const [drawerTab, setDrawerTab] = useState<DrawerTab>('manage');
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [treeModalCountryId, setTreeModalCountryId] = useState<number | null>(null);
+  const [treeCountryId, setTreeCountryId] = useState<number | null>(null);
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
+  const [achievementProfile, setAchievementProfile] = useState<AchievementProfile>(() =>
+    loadAchievementProfile(null)
+  );
+  const achievementProfileRef = useRef<AchievementProfile>(achievementProfile);
+  const [achievementToast, setAchievementToast] = useState<{
+    ach: AchievementDef;
+    extraCount: number;
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const [placingDefense, setPlacingDefense] = useState(false);
   const [launchingNuke, setLaunchingNuke] = useState(false);
   const [defenseFeedback, setDefenseFeedback] = useState<{ text: string; ok: boolean } | null>(null);
-  const [mapToast, setMapToast] = useState<{ text: string; ok: boolean } | null>(null);
-  const mapToastTimerRef = useRef<number | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
 
   const [focusRequest, setFocusRequest] = useState<{
@@ -119,16 +138,74 @@ export default function App() {
     setRenderTick((t) => t + 1);
   }, []);
 
-  const showMapToast = useCallback((text: string, ok: boolean) => {
-    setMapToast({ text, ok });
-    if (mapToastTimerRef.current !== null) {
-      window.clearTimeout(mapToastTimerRef.current);
-    }
-    mapToastTimerRef.current = window.setTimeout(() => {
-      setMapToast(null);
-      mapToastTimerRef.current = null;
-    }, 4500);
+  // Load user-specific achievements when Firebase user changes
+  useEffect(() => {
+    const loaded = loadAchievementProfile(user?.uid);
+    achievementProfileRef.current = loaded;
+    setAchievementProfile(loaded);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
   }, []);
+
+  const triggerAchievementToast = useCallback((newlyUnlocked: AchievementDef[]) => {
+    if (newlyUnlocked.length === 0) return;
+    soundEngine.playAllianceFormed();
+    setAchievementToast({
+      ach: newlyUnlocked[0],
+      extraCount: newlyUnlocked.length - 1,
+    });
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      toastTimerRef.current = null;
+      setAchievementToast(null);
+    }, 4800);
+  }, []);
+
+  const updateAchievements = useCallback(
+    (mutator?: (stats: AchievementStats) => void, simOverride?: SimulationState | null) => {
+      const current = achievementProfileRef.current;
+      const nextStats: AchievementStats = {
+        ...current.stats,
+        restoredNames: [...current.stats.restoredNames],
+        playedContinents: [...current.stats.playedContinents],
+        playedCountries: [...current.stats.playedCountries],
+      };
+      if (mutator) {
+        mutator(nextStats);
+      }
+      const simArg = simOverride !== undefined ? simOverride : simRef.current;
+      const { updatedProfile, newlyUnlocked } = evaluateAchievements(
+        { unlocked: { ...current.unlocked }, stats: nextStats },
+        simArg
+      );
+      achievementProfileRef.current = updatedProfile;
+      saveAchievementProfile(updatedProfile, user?.uid);
+      setAchievementProfile(updatedProfile);
+      if (newlyUnlocked.length > 0) {
+        triggerAchievementToast(newlyUnlocked);
+      }
+    },
+    [user?.uid, triggerAchievementToast]
+  );
+
+  const openCountryTree = useCallback(
+    (countryId: number) => {
+      soundEngine.playClick();
+      setTreeCountryId(countryId);
+      updateAchievements((s) => {
+        s.treeOpened += 1;
+      });
+    },
+    [updateAchievements]
+  );
 
   const isOnlineMatch = Boolean(mpRoomCode && simRef.current?.isMultiplayer);
   const isOnlineHost = Boolean(
@@ -244,6 +321,67 @@ export default function App() {
         return { ok: false, message: 'No hay partida activa.' };
       }
 
+      const hadActiveWarBefore = getEnemies(sim, sim.playerId).length > 0;
+      const suppressTargetStrength =
+        action.type === 'suppress_rebellion' && sim.countries[action.targetId]
+          ? getCountryRebellionStrength(sim.countries[action.targetId])
+          : 0;
+
+      const trackActionSuccess = (resultMessage: string) => {
+        updateAchievements((s) => {
+          switch (action.type) {
+            case 'recruit_soldiers':
+              s.recruitsDone += 1;
+              break;
+            case 'declare_war':
+              s.warsDeclared += 1;
+              break;
+            case 'build_port':
+              s.portsBuilt += 1;
+              break;
+            case 'build_defense':
+              s.defensesBuilt += 1;
+              break;
+            case 'launch_nuke':
+              s.nukesLaunched += 1;
+              if (hadActiveWarBefore) s.nukeInWarLaunched += 1;
+              if (resultMessage.toLowerCase().includes('defensa')) {
+                s.nukeDefensesBroken += 1;
+              }
+              if (s.nukesLaunched >= 2) {
+                s.nukeAfterCooldown += 1;
+              }
+              break;
+            case 'send_gift':
+              s.giftsSent += 1;
+              break;
+            case 'make_peace':
+              s.peacesSigned += 1;
+              break;
+            case 'request_ally_help':
+              s.allyHelpsRequested += 1;
+              break;
+            case 'complete_focus':
+              s.focusNodesCompletedTotal += 1;
+              break;
+            case 'suppress_rebellion':
+              s.rebellionsSuppressed += 1;
+              if (suppressTargetStrength >= 60) {
+                s.strongRebellionSuppressed += 1;
+              }
+              break;
+            case 'recruit_rebel_army':
+              s.onlineRebelRecruits += 1;
+              break;
+            case 'start_rebellion':
+              s.onlineRebellionsStarted += 1;
+              break;
+            default:
+              break;
+          }
+        });
+      };
+
       if (sim.isMultiplayer && mpRoom && user && mpRoom.hostUid !== user.uid) {
         if (action.type === 'declare_war') {
           const reach = canReachToAttack(sim, sim.playerId, action.targetId);
@@ -264,6 +402,7 @@ export default function App() {
             action
           );
           soundEngine.playClick();
+          trackActionSuccess('');
           return {
             ok: true,
             message: 'Orden enviada en vivo al anfitrión...',
@@ -277,6 +416,9 @@ export default function App() {
       }
 
       const res = executeGameAction(sim, sim.playerId, action);
+      if (res.ok) {
+        trackActionSuccess(res.message);
+      }
       if (sim.isMultiplayer) {
         bumpRender();
         scheduleHostBroadcast(true);
@@ -285,7 +427,7 @@ export default function App() {
       }
       return res;
     },
-    [mpRoom, user, bumpRender, scheduleHostBroadcast, handlePlayerMutation]
+    [mpRoom, user, bumpRender, scheduleHostBroadcast, handlePlayerMutation, updateAchievements]
   );
 
   // Subscribe to Room & Members whenever in an online room
@@ -396,6 +538,9 @@ export default function App() {
           setMobileDrawerOpen(false);
           setMapMode('political');
           setShowTutorial(false);
+          updateAchievements((s) => {
+            s.onlineMatchesPlayed += 1;
+          }, nextSim);
           const c = nextSim.countries[myCountryId];
           if (c) {
             setFocusRequest({
@@ -414,7 +559,7 @@ export default function App() {
     return () => {
       unsubState();
     };
-  }, [mpRoomCode, mpRoom, user, mpMembers, bumpRender]);
+  }, [mpRoomCode, mpRoom, user, mpMembers, bumpRender, updateAchievements]);
 
   // Host: subscribe to pending player actions and execute them on authoritative sim
   useEffect(() => {
@@ -478,6 +623,7 @@ export default function App() {
       setShowTutorial(true);
     }
     bumpRender();
+    updateAchievements(undefined, sim);
     if (user?.uid) {
       void performCloudSave(user.uid);
     }
@@ -512,8 +658,9 @@ export default function App() {
         nonce: Date.now(),
       });
       bumpRender();
+      updateAchievements(undefined, loadedSim);
     },
-    [user?.uid, bumpRender]
+    [user?.uid, bumpRender, updateAchievements]
   );
 
   const handleHostStartMatch = useCallback(async () => {
@@ -560,7 +707,10 @@ export default function App() {
       nonce: Date.now(),
     });
     bumpRender();
-  }, [mpRoomCode, user?.uid, mpMembers, bumpRender]);
+    updateAchievements((s) => {
+      s.onlineMatchesPlayed += 1;
+    }, sim);
+  }, [mpRoomCode, user?.uid, mpMembers, bumpRender, updateAchievements]);
 
   const handleLeaveOnlineRoom = useCallback(async () => {
     if (mpRoomCode && user?.uid && mpRoom) {
@@ -626,19 +776,33 @@ export default function App() {
       } else if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setSearchOpen(true);
+      } else if (e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        if (simRef.current) {
+          if (treeCountryId !== null) {
+            setTreeCountryId(null);
+          } else {
+            openCountryTree(simRef.current.playerId);
+          }
+        }
+      } else if (e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setAchievementsOpen((prev) => !prev);
       } else if (e.key === '1') {
         setMapMode('political');
       } else if (e.key === '2') {
         setMapMode('diplomatic');
       } else if (e.key === 'Escape') {
-        if (showTutorial) {
+        if (achievementsOpen) {
+          setAchievementsOpen(false);
+        } else if (treeCountryId !== null) {
+          setTreeCountryId(null);
+        } else if (showTutorial) {
           dismissTutorial();
-        } else if (treeModalCountryId !== null) {
-          setTreeModalCountryId(null);
-        } else if (placingDefense) {
-          setPlacingDefense(false);
         } else if (launchingNuke) {
           setLaunchingNuke(false);
+        } else if (placingDefense) {
+          setPlacingDefense(false);
         } else if (searchOpen) {
           setSearchOpen(false);
         } else if (simRef.current) {
@@ -653,11 +817,13 @@ export default function App() {
     screen,
     isRemoteGuest,
     searchOpen,
-    placingDefense,
+    treeCountryId,
+    achievementsOpen,
     launchingNuke,
-    treeModalCountryId,
+    placingDefense,
     showTutorial,
     dismissTutorial,
+    openCountryTree,
   ]);
 
   // Simulation Day Accumulator (Singleplayer or Multiplayer Host only)
@@ -701,6 +867,61 @@ export default function App() {
 
     return () => window.clearInterval(timer);
   }, [screen, speed, isRemoteGuest, bumpRender, scheduleHostBroadcast]);
+
+  // Periodic Achievement Evaluator & Active Play-Time Tracker (every 1s while playing)
+  useEffect(() => {
+    if (screen !== 'PLAYING') return;
+
+    let tickCount = 0;
+    const timer = window.setInterval(() => {
+      const sim = simRef.current;
+      if (!sim) return;
+      tickCount += 1;
+
+      const current = achievementProfileRef.current;
+      const nextProfile: AchievementProfile = {
+        unlocked: { ...current.unlocked },
+        stats: {
+          ...current.stats,
+          totalPlaySeconds: current.stats.totalPlaySeconds + 1,
+          restoredNames: [...current.stats.restoredNames],
+          playedContinents: [...current.stats.playedContinents],
+          playedCountries: [...current.stats.playedCountries],
+        },
+      };
+
+      if (tickCount % 2 === 0) {
+        const { updatedProfile, newlyUnlocked } = evaluateAchievements(nextProfile, sim);
+        achievementProfileRef.current = updatedProfile;
+        if (newlyUnlocked.length > 0) {
+          saveAchievementProfile(updatedProfile, user?.uid);
+          setAchievementProfile(updatedProfile);
+          triggerAchievementToast(newlyUnlocked);
+        } else if (tickCount % 10 === 0) {
+          saveAchievementProfile(updatedProfile, user?.uid);
+          if (achievementsOpen) {
+            setAchievementProfile(updatedProfile);
+          }
+        }
+      } else {
+        achievementProfileRef.current = nextProfile;
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [screen, user?.uid, achievementsOpen, triggerAchievementToast]);
+
+  // Close achievements modal on Escape when in Country Select
+  useEffect(() => {
+    if (screen === 'PLAYING' || !achievementsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setAchievementsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [screen, achievementsOpen]);
 
   const handleCameraChange = useCallback((cam: CameraView, vw: number, vh: number) => {
     setCameraView((prev) => {
@@ -805,6 +1026,50 @@ export default function App() {
     );
   }
 
+  const achievementsUnlockedCount = Object.keys(achievementProfile.unlocked).length;
+
+  const renderAchievementToast = () =>
+    achievementToast ? (
+      <div
+        className={`fixed z-[70] ${
+          deviceMode === 'mobile'
+            ? 'bottom-16 left-2 right-2'
+            : 'bottom-4 right-4 w-[350px]'
+        } bg-[#111B2B]/98 border border-amber-500/80 shadow-2xl p-3 flex items-start gap-2.5`}
+      >
+        <div className="w-8 h-8 bg-amber-500/15 border border-amber-500/50 flex items-center justify-center shrink-0 mt-0.5">
+          <Trophy className="w-4 h-4 text-amber-400" />
+        </div>
+        <button
+          onClick={() => {
+            setAchievementToast(null);
+            setAchievementsOpen(true);
+          }}
+          className="flex-1 min-w-0 text-left cursor-pointer"
+        >
+          <div className="flex items-center gap-1.5 text-[10px] font-mono-num uppercase tracking-wide text-amber-400">
+            <span>Logro desbloqueado #{String(achievementToast.ach.number).padStart(2, '0')}</span>
+            {achievementToast.extraCount > 0 && (
+              <span className="text-emerald-300">+{achievementToast.extraCount} más</span>
+            )}
+          </div>
+          <div className="text-xs font-bold text-white truncate mt-0.5">
+            {achievementToast.ach.title}
+          </div>
+          <div className="text-[11px] text-slate-300 leading-snug line-clamp-2 mt-0.5">
+            {achievementToast.ach.description}
+          </div>
+        </button>
+        <button
+          onClick={() => setAchievementToast(null)}
+          aria-label="Cerrar notificación"
+          className="p-1 text-slate-400 hover:text-white cursor-pointer shrink-0"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    ) : null;
+
   if (screen === 'COUNTRY_SELECT' || !simRef.current) {
     return (
       <>
@@ -814,7 +1079,17 @@ export default function App() {
           onStartCampaign={handleStartCampaign}
           onResumeCampaign={handleResumeCampaign}
           onOpenOnline={() => setScreen('ONLINE_LOBBY')}
+          onOpenAchievements={() => setAchievementsOpen(true)}
+          achievementsUnlockedCount={achievementsUnlockedCount}
         />
+        {achievementsOpen && (
+          <AchievementsModal
+            profile={achievementProfile}
+            sim={null}
+            onClose={() => setAchievementsOpen(false)}
+          />
+        )}
+        {renderAchievementToast()}
         <PWAInstallBanner />
         <OfflineIndicator />
       </>
@@ -841,9 +1116,10 @@ export default function App() {
 
   const handleExitToMenu = async () => {
     setSpeed(0);
+    setMobileDrawerOpen(false);
+    setTreeCountryId(null);
     setPlacingDefense(false);
     setLaunchingNuke(false);
-    setMobileDrawerOpen(false);
     if (sim.isMultiplayer) {
       await handleLeaveOnlineRoom();
     } else if (user?.uid) {
@@ -870,6 +1146,13 @@ export default function App() {
           setSoundEnabled(next);
         }}
         onOpenSearch={() => setSearchOpen(true)}
+        onOpenTree={() => openCountryTree(sim.playerId)}
+        onOpenAchievements={() => {
+          soundEngine.playClick();
+          setAchievementProfile(achievementProfileRef.current);
+          setAchievementsOpen(true);
+        }}
+        achievementsUnlockedCount={achievementsUnlockedCount}
         onOpenTutorial={() => setShowTutorial(true)}
         onSelectOwnCountry={() => {
           setSelectedId(sim.playerId);
@@ -906,7 +1189,6 @@ export default function App() {
             onPlaceDefense={async (mx, my) => {
               const res = await handleExecuteAction({ type: 'build_defense', x: mx, y: my });
               setDefenseFeedback({ text: res.message, ok: res.ok });
-              showMapToast(res.message, res.ok);
               if (res.ok) {
                 setPlacingDefense(false);
               }
@@ -916,7 +1198,6 @@ export default function App() {
             onLaunchNuke={async (mx, my) => {
               const res = await handleExecuteAction({ type: 'launch_nuke', x: mx, y: my });
               setDefenseFeedback({ text: res.message, ok: res.ok });
-              showMapToast(res.message, res.ok);
               if (res.ok) {
                 setLaunchingNuke(false);
               }
@@ -944,34 +1225,14 @@ export default function App() {
             <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(94vw,540px)] bg-orange-950/95 border border-orange-500 px-3 sm:px-4 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-orange-100">
               <span>
                 {isMobile
-                  ? `Toca un país enemigo para lanzar la Bomba Nuclear (radio ${NUKE_RADIUS * 10} km)`
-                  : `Haz clic sobre un país enemigo para detonar la Bomba Nuclear (radio ${NUKE_RADIUS * 10} km · clic derecho o Esc cancela)`}
+                  ? `Toca territorio extranjero para detonar la Bomba Nuclear (radio ${NUKE_RADIUS * 10} km)`
+                  : `Haz clic en territorio extranjero para detonar la Bomba Nuclear (radio ${NUKE_RADIUS * 10} km · Esc para cancelar)`}
               </span>
               <button
                 onClick={() => setLaunchingNuke(false)}
                 className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 shrink-0 cursor-pointer"
               >
                 Cancelar
-              </button>
-            </div>
-          )}
-
-          {mapToast && (
-            <div
-              className={`absolute left-1/2 -translate-x-1/2 z-30 w-[min(94vw,520px)] px-3.5 py-2 border shadow-2xl text-xs flex items-center justify-between gap-2 ${
-                placingDefense || launchingNuke ? 'top-14 sm:top-16' : 'top-2.5 sm:top-3'
-              } ${
-                mapToast.ok
-                  ? 'bg-emerald-950/95 border-emerald-500/80 text-emerald-100'
-                  : 'bg-red-950/95 border-red-600/80 text-red-100'
-              }`}
-            >
-              <span>{mapToast.text}</span>
-              <button
-                onClick={() => setMapToast(null)}
-                className="px-2 py-0.5 bg-slate-900/80 border border-slate-700 text-slate-300 shrink-0 cursor-pointer"
-              >
-                OK
               </button>
             </div>
           )}
@@ -1038,11 +1299,16 @@ export default function App() {
               sim={sim}
               targetId={selectedId}
               onClose={() => setSelectedId(sim.playerId)}
-              onOpenTreeModal={(cid) => {
-                setTreeModalCountryId(cid);
-                soundEngine.playClick();
-              }}
               onExecuteAction={handleExecuteAction}
+              onOpenCountryTree={(id) => openCountryTree(id)}
+              onStartNukeTarget={() => {
+                soundEngine.playClick();
+                setDefenseFeedback(null);
+                setPlacingDefense(false);
+                setLaunchingNuke(true);
+                setSelectedId(sim.playerId);
+                if (isMobile) setMobileDrawerOpen(false);
+              }}
             />
           )}
 
@@ -1074,7 +1340,7 @@ export default function App() {
                     {sim.humanPlayers[activeHumanOffer.fromCountryId]
                       ? `${sim.humanPlayers[activeHumanOffer.fromCountryId].displayName} · `
                       : ''}
-                    {getCountryDisplayName(sim.countries[activeHumanOffer.fromCountryId])}
+                    {getCountryName(sim.countries[activeHumanOffer.fromCountryId])}
                   </div>
                   <div className="text-slate-200 leading-snug">
                     {activeHumanOffer.type === 'alliance'
@@ -1134,7 +1400,7 @@ export default function App() {
                 />
                 <div className="text-xs min-w-0 flex-1">
                   <div className="font-bold text-amber-300 truncate">
-                    Propuesta · {getCountryDisplayName(sim.countries[sim.pendingProposal.fromId])}
+                    Propuesta · {getCountryName(sim.countries[sim.pendingProposal.fromId])}
                   </div>
                   <div className="text-slate-200 leading-snug">
                     {sim.pendingProposal.type === 'alliance'
@@ -1196,13 +1462,13 @@ export default function App() {
           {/* Subtle PC Controls Hint in bottom-right of map viewport */}
           {!isMobile && (
             <div className="pointer-events-none absolute bottom-3 right-3 z-10 bg-[#111B2B]/85 border border-slate-800 px-2.5 py-1 text-[11px] text-slate-400 font-mono-num">
-              WASD / Arrastrar: Mover · Rueda: Zoom · Espacio: Pausa · 1-2: Mapas · F: Buscar
+              WASD / Arrastrar: Mover · Rueda: Zoom · Espacio: Pausa · F: Buscar · T: Árbol · L: Logros
             </div>
           )}
 
           {showTutorial && (
             <TutorialOverlay
-              countryName={getCountryDisplayName(sim.countries[sim.playerId])}
+              countryName={getCountryName(sim.countries[sim.playerId])}
               deviceMode={deviceMode}
               onFinish={dismissTutorial}
             />
@@ -1228,10 +1494,6 @@ export default function App() {
               soundEngine.playSelectCountry();
             }}
             onJumpToCountry={handleJumpToCountry}
-            onOpenTreeModal={(cid) => {
-              setTreeModalCountryId(cid);
-              soundEngine.playClick();
-            }}
             onExecuteAction={async (act) => {
               setDefenseFeedback(null);
               return handleExecuteAction(act);
@@ -1255,6 +1517,7 @@ export default function App() {
               }
             }}
             defenseFeedback={defenseFeedback}
+            onOpenTree={() => openCountryTree(sim.playerId)}
           />
         )}
       </div>
@@ -1293,18 +1556,6 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => openMobileTab('tree')}
-            className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold cursor-pointer ${
-              mobileDrawerOpen && drawerTab === 'tree'
-                ? 'text-amber-300 bg-[#131F33] border-t-2 border-amber-400'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <GitBranch className="w-4 h-4" />
-            <span>Árbol</span>
-          </button>
-
-          <button
             onClick={() => openMobileTab('diplomacy')}
             className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold cursor-pointer ${
               mobileDrawerOpen && drawerTab === 'diplomacy'
@@ -1314,6 +1565,18 @@ export default function App() {
           >
             <Handshake className="w-4 h-4" />
             <span>Alianzas</span>
+          </button>
+
+          <button
+            onClick={() => openMobileTab('charts')}
+            className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold cursor-pointer ${
+              mobileDrawerOpen && drawerTab === 'charts'
+                ? 'text-amber-300 bg-[#131F33] border-t-2 border-amber-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" />
+            <span>Gráficos</span>
           </button>
 
           <button
@@ -1330,24 +1593,6 @@ export default function App() {
         </nav>
       )}
 
-      {treeModalCountryId !== null && (
-        <CountryTreeModal
-          sim={sim}
-          countryId={treeModalCountryId}
-          onClose={() => setTreeModalCountryId(null)}
-          onUnlockNode={(nodeId) => {
-            void handleExecuteAction({ type: 'unlock_tree_node', nodeId });
-          }}
-          onFocusCountry={(cid) => {
-            setSelectedId(cid);
-            if (isMobile) setMobileDrawerOpen(false);
-            handleJumpToCountry(cid);
-            soundEngine.playSelectCountry();
-          }}
-          onSwitchToPlayerTree={() => setTreeModalCountryId(sim.playerId)}
-        />
-      )}
-
       <CountrySearchModal
         sim={sim}
         open={searchOpen}
@@ -1360,10 +1605,34 @@ export default function App() {
         }}
       />
 
+      {treeCountryId !== null && (
+        <GenealogyTreeModal
+          sim={sim}
+          countryId={treeCountryId}
+          deviceMode={deviceMode}
+          onClose={() => setTreeCountryId(null)}
+          onExecuteAction={handleExecuteAction}
+          onSwitchCountry={(id) => setTreeCountryId(id)}
+        />
+      )}
+
+      {achievementsOpen && (
+        <AchievementsModal
+          profile={achievementProfile}
+          sim={sim}
+          onClose={() => setAchievementsOpen(false)}
+        />
+      )}
+
       <EventModal
         sim={sim}
         eventModal={sim.activeEvent}
-        onResolved={handlePlayerMutation}
+        onResolved={() => {
+          updateAchievements((s) => {
+            s.eventsResolved += 1;
+          });
+          handlePlayerMutation();
+        }}
         onContinueSandbox={() => {
           sim.outcome = 'none';
           sim.sandboxAfterVictory = true;
@@ -1372,6 +1641,8 @@ export default function App() {
         }}
         onRestartMenu={() => void handleExitToMenu()}
       />
+
+      {renderAchievementToast()}
 
       <PWAInstallBanner liftAboveBottomNav={isMobile} />
       <OfflineIndicator liftAboveBottomNav={isMobile} />

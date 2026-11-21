@@ -1,6 +1,7 @@
 import {
   Anchor,
   Coins,
+  GitFork,
   HelpCircle,
   Monitor,
   Pause,
@@ -9,12 +10,15 @@ import {
   Search,
   Smartphone,
   Swords,
+  Trophy,
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { getCountryGenealogyTree } from '../data/countryTrees';
 import {
+  evaluateFocusNodeStatus,
   formatFullDate,
-  getCountryDisplayName,
+  getCountryName,
   type SimulationState,
 } from '../engine/gameSimulation';
 import type { DeviceMode } from './DeviceModeScreen';
@@ -30,6 +34,9 @@ interface TopCommandBarProps {
   soundEnabled: boolean;
   onToggleSound: () => void;
   onOpenSearch: () => void;
+  onOpenTree: () => void;
+  onOpenAchievements: () => void;
+  achievementsUnlockedCount: number;
   onOpenTutorial: () => void;
   onSelectOwnCountry: () => void;
   onReturnToMenu: () => void;
@@ -46,6 +53,9 @@ export function TopCommandBar({
   soundEnabled,
   onToggleSound,
   onOpenSearch,
+  onOpenTree,
+  onOpenAchievements,
+  achievementsUnlockedCount,
   onOpenTutorial,
   onSelectOwnCountry,
   onReturnToMenu,
@@ -53,6 +63,11 @@ export function TopCommandBar({
   isRemoteGuest = false,
 }: TopCommandBarProps) {
   const player = sim.countries[sim.playerId];
+  const playerName = getCountryName(player);
+  const playerTree = getCountryGenealogyTree(player.seed);
+  const hasReadyFocus =
+    player.alive &&
+    playerTree.nodes.some((n) => evaluateFocusNodeStatus(sim, player.id, n).canComplete);
   const speeds = [0, 1, 2];
 
   // COMPACT MOBILE TOP BAR (fits 360px-430px screens cleanly)
@@ -68,8 +83,8 @@ export function TopCommandBar({
           >
             <PixelFlag country={player.seed} size="sm" />
             <div className="min-w-0">
-              <div className="text-xs font-bold text-amber-300 truncate max-w-[96px]">
-                {getCountryDisplayName(player)}
+              <div className="text-xs font-bold text-amber-300 truncate max-w-[84px]">
+                {playerName}
               </div>
               <div className="text-[10px] text-slate-400 font-mono-num leading-none">
                 {formatFullDate(sim.day, sim.month, sim.year)}
@@ -107,6 +122,21 @@ export function TopCommandBar({
 
           {/* Right Compact Icons */}
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={onOpenTree}
+              title="Árbol Genealógico"
+              className={`relative w-8 h-8 flex items-center justify-center border cursor-pointer ${
+                hasReadyFocus
+                  ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                  : 'bg-slate-900 border-slate-700 text-amber-300'
+              }`}
+            >
+              <GitFork className="w-3.5 h-3.5" />
+              {hasReadyFocus && (
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-amber-400" />
+              )}
+            </button>
+
             <button
               onClick={onOpenSearch}
               title="Buscar país"
@@ -167,6 +197,14 @@ export function TopCommandBar({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={onOpenAchievements}
+              title={`Logros (${achievementsUnlockedCount}/100)`}
+              className="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/40 text-amber-300 text-[10px] font-mono-num flex items-center gap-1 cursor-pointer"
+            >
+              <Trophy className="w-3 h-3 shrink-0" />
+              <span>{achievementsUnlockedCount}/100</span>
+            </button>
             <PWAInstallButton compact />
             <button
               onClick={onToggleSound}
@@ -199,8 +237,8 @@ export function TopCommandBar({
       >
         <PixelFlag country={player.seed} size="md" />
         <div className="min-w-0">
-          <div className="text-xs font-bold text-amber-300 truncate max-w-[180px]">
-            {getCountryDisplayName(player)}
+          <div className="text-xs font-bold text-amber-300 truncate max-w-[160px]">
+            {playerName}
           </div>
           <div className="text-[11px] text-slate-400 font-mono-num whitespace-nowrap">
             Capital: {player.seed.capital} · {(player.pixels * 100).toLocaleString('es-ES')} km²
@@ -295,6 +333,31 @@ export function TopCommandBar({
         )}
 
         <PWAInstallButton compact />
+
+        <button
+          onClick={onOpenTree}
+          title="Abrir Árbol Genealógico (Tecla T)"
+          className={`relative px-2.5 py-1.5 border text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+            hasReadyFocus
+              ? 'bg-amber-500/15 border-amber-400 text-amber-200 hover:bg-amber-500/25 font-semibold'
+              : 'bg-slate-900 border-slate-700 text-amber-300 hover:text-amber-200 hover:border-amber-500/60'
+          }`}
+        >
+          <GitFork className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden lg:inline">Árbol</span>
+          {hasReadyFocus && (
+            <span className="w-1.5 h-1.5 bg-amber-400 shrink-0" />
+          )}
+        </button>
+
+        <button
+          onClick={onOpenAchievements}
+          title="Ver Logros (Tecla L)"
+          className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-amber-300 hover:text-amber-200 hover:border-amber-500/60 text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+        >
+          <Trophy className="w-3.5 h-3.5 shrink-0" />
+          <span className="font-mono-num">{achievementsUnlockedCount}/100</span>
+        </button>
 
         <button
           onClick={onOpenSearch}

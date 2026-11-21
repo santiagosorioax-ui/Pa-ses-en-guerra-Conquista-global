@@ -3,7 +3,7 @@ import { Search, X } from 'lucide-react';
 import {
   TREATY_ALLIANCE,
   TREATY_WAR,
-  getCountryDisplayName,
+  getCountryName,
   hasTreaty,
   type SimulationState,
 } from '../engine/gameSimulation';
@@ -39,7 +39,7 @@ export function CountrySearchModal({
       .filter((c) => {
         if (!q) return true;
         return (
-          getCountryDisplayName(c).toLowerCase().includes(q) ||
+          getCountryName(c).toLowerCase().includes(q) ||
           c.seed.name.toLowerCase().includes(q) ||
           c.seed.capital.toLowerCase().includes(q) ||
           c.seed.continent.toLowerCase().includes(q)
@@ -102,9 +102,9 @@ export function CountrySearchModal({
                   <PixelFlag country={c.seed} size="sm" />
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-slate-100 truncate">
-                      {getCountryDisplayName(c)}
+                      {getCountryName(c)}
                       {c.customName && c.customName !== c.seed.name && (
-                        <span className="ml-1.5 text-[10px] text-amber-300/80 font-normal">
+                        <span className="ml-1 text-[10px] text-amber-300/80 font-normal">
                           ({c.seed.name})
                         </span>
                       )}

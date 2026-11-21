@@ -1,2492 +1,3251 @@
-import { COUNTRIES_195, type CountrySeed } from './countries195';
+import { COUNTRIES_195, type Continent, type CountrySeed } from './countries195';
 
-export interface TreeNodeRequirements {
+export type FocusCategory = 'origin' | 'economy' | 'military' | 'diplomacy' | 'restoration';
+
+export interface FocusRequirement {
+  moneyCost: number;
   minCities?: number;
   minGoldMines?: number;
-  minPorts?: number;
-  minDefenses?: number;
   minArmy?: number;
-  minMoney?: number;
   minAllies?: number;
-  minAnnexations?: number;
-  minTerritoryPctIncrease?: number; // e.g. 25 means +25% over initialPixels
-  controlCountriesIso2?: string[]; // must control capital/homeland or have annexed these ISO2 nations
+  minExpansionPct?: number;
+  historicalTargetIso2?: string[];
 }
 
-export interface TreeNodeReward {
-  moneyDelta?: number;
-  armyDelta?: number;
-  permanentIncomeBonus?: number; // capped in simulation for balance
-  permanentArmyCapBonus?: number; // capped in simulation for balance
-  renameTo?: string; // changes official country name across map & HUD
-  proclamationText?: string;
+export interface FocusEffects {
+  moneyBonus?: number;
+  incomeBonus?: number;
+  armyBonus?: number;
+  armyCapBonus?: number;
+  defenseBonusPct?: number;
+  relationsContinentDelta?: number;
+  newName?: string;
 }
 
-export interface CountryTreeNode {
-  id: string;
-  tier: 1 | 2 | 3;
-  branch: 'root' | 'economy' | 'military' | 'restoration' | 'legacy';
+export interface FocusNode {
+  id: 'root' | 'eco1' | 'mil1' | 'eco2' | 'mil2' | 'restore';
+  tier: 0 | 1 | 2 | 3;
+  lane: 'center' | 'left' | 'right';
+  parents: Array<'root' | 'eco1' | 'mil1' | 'eco2' | 'mil2'>;
+  requireAnyParent?: boolean;
+  category: FocusCategory;
   era: string;
   title: string;
-  subtitle: string;
-  history: string;
-  parentId: string | null;
-  requiresAnyParent?: string[];
-  costMoney: number;
-  requirements: TreeNodeRequirements;
-  reward: TreeNodeReward;
+  historicalFact: string;
+  requirements: FocusRequirement;
+  effects: FocusEffects;
 }
 
 export interface CountryGenealogyTree {
   iso2: string;
-  heritageTitle: string;
-  heritageSummary: string;
-  nodes: CountryTreeNode[];
+  subtitle: string;
+  ancestors: string[];
+  restoredName: string;
+  nodes: FocusNode[];
 }
 
-interface CuratedTreeSpec {
-  heritageTitle: string;
-  heritageSummary: string;
-  root: {
+interface BespokeTreeSpec {
+  subtitle: string;
+  ancestors: string[];
+  root: { era: string; title: string; fact: string };
+  eco1: { era: string; title: string; fact: string };
+  mil1: { era: string; title: string; fact: string };
+  eco2: { era: string; title: string; fact: string };
+  mil2: { era: string; title: string; fact: string };
+  restore: {
     era: string;
     title: string;
-    subtitle: string;
-    history: string;
-  };
-  economy: {
-    era: string;
-    title: string;
-    subtitle: string;
-    history: string;
-    minPorts?: number;
-  };
-  military: {
-    era: string;
-    title: string;
-    subtitle: string;
-    history: string;
-    minAllies?: number;
-    minAnnexations?: number;
-  };
-  restoration: {
-    era: string;
-    title: string;
-    subtitle: string;
-    history: string;
+    fact: string;
     newName: string;
-    controlIso2: string[];
-    proclamationText?: string;
-  };
-  secondaryRestoration?: {
-    era: string;
-    title: string;
-    subtitle: string;
-    history: string;
-    newName: string;
-    controlIso2: string[];
-    proclamationText?: string;
+    targets?: string[];
   };
 }
 
-const CURATED_SPECS: Record<string, CuratedTreeSpec> = {
-  // === AMÉRICA ===
+const BESPOKE_TREES: Record<string, BespokeTreeSpec> = {
+  // ======================== AMÉRICA ========================
   CO: {
-    heritageTitle: 'Linaje Neogranadino y Bolivariano',
-    heritageSummary:
-      'Desde la independencia de la Nueva Granada hasta el sueño integrador de la Gran Colombia y los Andes.',
+    subtitle: 'De Nueva Granada a la Gran Colombia',
+    ancestors: ['Muiscas y Taironas', 'Virreinato de Nueva Granada', 'República de Colombia'],
     root: {
-      era: '1810 – 1819',
-      title: 'Campaña Libertadora de Nueva Granada',
-      subtitle: 'Batalla de Boyacá y fundación republicana',
-      history:
-        'Consolida el legado fundacional de Bogotá tras la independencia de 1819 y organiza el aparato estatal moderno.',
+      era: '1810',
+      title: 'Grito de Independencia',
+      fact: 'El 20 de julio de 1810 Santa Fe de Bogotá proclamó su autonomía y encendió la emancipación neogranadina.',
     },
-    economy: {
-      era: 'Siglos XIX – XX',
-      title: 'Puente Bioceánico y Café Andino',
-      subtitle: 'Comercio entre el Caribe y el Pacífico',
-      history:
-        'Impulsa la infraestructura cafetera, minera y portuaria conectando las costas del Caribe y el Pacífico.',
-      minPorts: 1,
+    eco1: {
+      era: '1880–1930',
+      title: 'Bonanza Cafetera y Puertos',
+      fact: 'La expansión cafetera del Eje y las rutas de Cartagena y Buenaventura impulsaron la economía nacional.',
     },
-    military: {
-      era: '1819 – 1824',
-      title: 'Ejército Libertador del Norte',
-      subtitle: 'Proyección estratégica sobre los Andes',
-      history:
-        'Reorganiza el alto mando heredero de las campañas de Carabobo y Pichincha para proyectar fuerza regional.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1819',
+      title: 'Batalla de Boyacá',
+      fact: 'Tras el heroico paso por el Páramo de Pisba, el ejército libertador selló la independencia en el Puente de Boyacá.',
     },
-    restoration: {
-      era: '1819 – 1831',
+    eco2: {
+      era: '1969',
+      title: 'Integración Andina y Caribeña',
+      fact: 'Colombia impulsó el Acuerdo de Cartagena para unir el comercio y la diplomacia de las repúblicas andinas.',
+    },
+    mil2: {
+      era: '1821',
+      title: 'Constitución de Cúcuta',
+      fact: 'El Congreso de Cúcuta unificó las fuerzas y leyes bolivarianas para proyectar poder sobre el norte sudamericano.',
+    },
+    restore: {
+      era: '1819–1831',
       title: 'Restaurar la Gran Colombia',
-      subtitle: 'Reunificación bolivariana del norte sudamericano',
-      history:
-        'Restaura la histórica República de Colombia (Gran Colombia) uniendo los territorios de Colombia, Venezuela, Ecuador y Panamá bajo un mismo estandarte.',
+      fact: 'Reúne el sueño histórico de Simón Bolívar uniendo a los pueblos bolivarianos bajo una sola gran república.',
       newName: 'Gran Colombia',
-      controlIso2: ['VE', 'EC', 'PA'],
-      proclamationText: '¡Bogotá proclama la restauración histórica de la Gran Colombia!',
-    },
-    secondaryRestoration: {
-      era: 'Proyecto Andino',
-      title: 'Confederación de los Andes',
-      subtitle: 'Unión desde el Caribe hasta el Altiplano',
-      history:
-        'Expande el proyecto bolivariano hacia el sur integrando a Perú y Bolivia en una gran potencia andina.',
-      newName: 'Confederación Andina',
-      controlIso2: ['EC', 'PE', 'BO'],
-      proclamationText: '¡Se proclama la Confederación Andina a lo largo de toda la cordillera!',
+      targets: ['VE', 'EC', 'PA'],
     },
   },
   VE: {
-    heritageTitle: 'Linaje de la Capitanía y Bolívar',
-    heritageSummary: 'Cuna de la emancipación sudamericana y potencia energética del Caribe.',
+    subtitle: 'Cuna de la Campaña Admirable y el Ideal Bolivariano',
+    ancestors: ['Capitanía General de Venezuela', 'Primera República (1811)', 'Venezuela'],
     root: {
-      era: '1811 – 1821',
-      title: 'Espíritu de Carabobo',
-      subtitle: 'Independencia venezolana',
-      history: 'Reafirma la herencia libertadora de Caracas y fortalece el tesoro nacional.',
+      era: '1811',
+      title: 'Acta de Independencia',
+      fact: 'El 5 de julio de 1811 Venezuela se convirtió en la primera nación hispanoamericana en declarar independencia total.',
     },
-    economy: {
-      era: 'Siglo XX',
+    eco1: {
+      era: '1922',
       title: 'Faja Petrolera del Orinoco',
-      subtitle: 'Riqueza energética y puertos caribeños',
-      history: 'Capitaliza los recursos energéticos y el comercio marítimo del Caribe.',
-      minPorts: 1,
+      fact: 'El estallido del pozo Barroso II transformó a Venezuela en una potencia energética mundial del siglo XX.',
     },
-    military: {
-      era: '1813 – 1821',
-      title: 'Llaneros del Orinoco',
-      subtitle: 'Doctrina ofensiva de caballería moderna',
-      history: 'Entrena divisiones rápidas inspiradas en las campañas del Llano.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1821',
+      title: 'Victoria de Carabobo',
+      fact: 'Los llaneros de Páez y las tropas de Bolívar aseguraron la libertad venezolana en la llanura de Carabobo.',
     },
-    restoration: {
-      era: '1819 – 1830',
+    eco2: {
+      era: '1960',
+      title: 'Fundación de la OPEP',
+      fact: 'Venezuela lideró la creación de la OPEP para coordinar la renta energética y la influencia diplomática.',
+    },
+    mil2: {
+      era: '1813',
+      title: 'Legado de la Campaña Admirable',
+      fact: 'Reorganiza las divisiones terrestres y navales del Caribe con espíritu expedicionario bolivariano.',
+    },
+    restore: {
+      era: '1819–1831',
       title: 'Restaurar la Gran Colombia',
-      subtitle: 'Unión bolivariana desde Caracas',
-      history: 'Reunifica Venezuela, Colombia, Ecuador y Panamá en la histórica Gran Colombia.',
+      fact: 'Retoma la unión original de Venezuela, Nueva Granada, Quito y el Istmo bajo la bandera tricolor.',
       newName: 'Gran Colombia',
-      controlIso2: ['CO', 'EC', 'PA'],
-      proclamationText: '¡Caracas proclama la restauración de la Gran Colombia!',
+      targets: ['CO', 'EC', 'PA'],
     },
   },
   EC: {
-    heritageTitle: 'Linaje Quiteño y Andino',
-    heritageSummary: 'De la Real Audiencia de Quito y Pichincha a la integración bolivariana.',
+    subtitle: 'De la Real Audiencia de Quito a la Unión Bolivariana',
+    ancestors: ['Reino de Quito', 'Real Audiencia de Quito', 'Ecuador'],
     root: {
-      era: '1809 – 1822',
-      title: 'Luz de América y Pichincha',
-      subtitle: 'Primer grito libertario en Quito',
-      history: 'Honra la gesta de Quito y moderniza la administración territorial.',
+      era: '1809',
+      title: 'Luz de América',
+      fact: 'El 10 de agosto de 1809 Quito instaló la primera junta soberana de Sudamérica, ganando el título de Luz de América.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Ruta del Pacífico y Guayaquil',
-      subtitle: 'Astillero y comercio marítimo',
-      history: 'Convierte la costa ecuatoriana en un centro comercial del Pacífico sur.',
-      minPorts: 1,
+    eco1: {
+      era: '1895–1908',
+      title: 'Ferrocarril Trasandino',
+      fact: 'La obra unió la costa de Guayaquil con la sierra de Quito, integrando el comercio cacaotero y portuario.',
     },
-    military: {
+    mil1: {
       era: '1822',
-      title: 'Guardia de los Volcanes',
-      subtitle: 'Defensa de alta montaña',
-      history: 'Fortalece las tropas andinas con entrenamiento especializado.',
+      title: 'Batalla del Pichincha',
+      fact: 'Antonio José de Sucre derrotó a las fuerzas realistas en las faldas del volcán Pichincha y liberó Quito.',
     },
-    restoration: {
-      era: '1822 – 1830',
+    eco2: {
+      era: '1978',
+      title: 'Corredor del Pacífico y Galápagos',
+      fact: 'Consolida el control marítimo ecuatorial y el comercio estratégico entre los Andes y el Pacífico.',
+    },
+    mil2: {
+      era: '1829',
+      title: 'Defensa de Tarqui',
+      fact: 'Fortalece las brigadas de montaña y las fortificaciones fronterizas de los Andes ecuatoriales.',
+    },
+    restore: {
+      era: '1822–1830',
       title: 'Restaurar la Gran Colombia',
-      subtitle: 'Distrito del Sur unido al norte',
-      history: 'Reconstruye la Gran Colombia reuniendo Ecuador, Colombia, Venezuela y Panamá.',
+      fact: 'Desde Quito, el antiguo Distrito del Sur reunifica la gran república bolivariana de los Andes.',
       newName: 'Gran Colombia',
-      controlIso2: ['CO', 'VE', 'PA'],
+      targets: ['CO', 'VE', 'PA'],
     },
   },
   PA: {
-    heritageTitle: 'Linaje del Istmo Interoceánico',
-    heritageSummary: 'Encrucijada comercial del mundo entre dos océanos.',
+    subtitle: 'Puente del Mundo y Corazón del Istmo',
+    ancestors: ['Castilla del Oro', 'Departamento del Istmo', 'Panamá'],
     root: {
-      era: '1821 – 1903',
-      title: 'Soberanía del Istmo',
-      subtitle: 'Puente estratégico de las Américas',
-      history: 'Consolida el control soberano del paso interoceánico y sus ingresos.',
+      era: '1821',
+      title: 'Independencia del Istmo',
+      fact: 'Panamá proclamó su independencia de España en 1821 y se unió voluntariamente al proyecto de la Gran Colombia.',
     },
-    economy: {
-      era: '1914 – Presente',
-      title: 'Expansión del Canal de Panamá',
-      subtitle: 'Peajes globales y marina mercante',
-      history: 'Multiplica la recaudación comercial del canal y los puertos.',
-      minPorts: 1,
+    eco1: {
+      era: '1914',
+      title: 'Inauguración del Canal de Panamá',
+      fact: 'La apertura del canal interoceánico convirtió al istmo en la arteria marítima más valiosa del planeta.',
     },
-    military: {
-      era: 'Siglo XXI',
-      title: 'Escudo del Darién y el Canal',
-      subtitle: 'Defensa estratégica del paso marítimo',
-      history: 'Refuerza la guarnición nacional y las fortificaciones clave.',
+    mil1: {
+      era: '1977',
+      title: 'Tratados Torrijos-Carter',
+      fact: 'Panamá negoció la recuperación total de la soberanía sobre la Zona del Canal y sus defensas estratégicas.',
     },
-    restoration: {
-      era: '1821 – 1831',
+    eco2: {
+      era: '1999',
+      title: 'Centro Financiero y Logístico Global',
+      fact: 'Bajo administración panameña, la ampliación del canal multiplicó el tráfico entre el Atlántico y el Pacífico.',
+    },
+    mil2: {
+      era: '1826',
+      title: 'Congreso Anfictiónico de Panamá',
+      fact: 'Retoma el congreso convocado por Bolívar en Ciudad de Panamá para articular una defensa hemisférica común.',
+    },
+    restore: {
+      era: '1821–1831',
       title: 'Restaurar la Gran Colombia',
-      subtitle: 'Reintegración histórica bolivariana',
-      history: 'Une el Istmo con Colombia, Venezuela y Ecuador bajo la Gran Colombia.',
+      fact: 'Reúne el Istmo con las tierras bolivarianas formando una potencia bioceánica bajo el nombre de Gran Colombia.',
       newName: 'Gran Colombia',
-      controlIso2: ['CO', 'VE', 'EC'],
-    },
-  },
-  PE: {
-    heritageTitle: 'Linaje Incaico y Virreinal',
-    heritageSummary: 'Heredero del Tahuantinsuyo, del Virreinato del Perú y de la Confederación Andina.',
-    root: {
-      era: '1438 – 1821',
-      title: 'Herencia del Cusco y Lima',
-      subtitle: 'Raíces imperiales y república',
-      history: 'Integra la memoria del Cusco y la independencia de 1821 para impulsar el país.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Riqueza Minera de los Andes',
-      subtitle: 'Cobre, oro y rutas del Pacífico',
-      history: 'Explota los grandes yacimientos andinos financiando el crecimiento urbano.',
-    },
-    military: {
-      era: '1824 – 1879',
-      title: 'Legión de los Andes y del Callao',
-      subtitle: 'Tradición militar y naval',
-      history: 'Forja un ejército disciplinado y defensas costeras sólidas.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1438 – 1533',
-      title: 'Restaurar el Imperio Inca',
-      subtitle: 'Renacimiento del Tahuantinsuyo',
-      history: 'Reunifica los cuatro suyos históricos sobre Perú, Bolivia, Ecuador y Chile.',
-      newName: 'Imperio Inca',
-      controlIso2: ['BO', 'EC', 'CL'],
-      proclamationText: '¡El sol de los Incas vuelve a brillar: renace el Tahuantinsuyo!',
-    },
-    secondaryRestoration: {
-      era: '1836 – 1839',
-      title: 'Confederación Perú-Boliviana',
-      subtitle: 'Unión del Alto y Bajo Perú',
-      history: 'Restablece la confederación histórica entre Lima y La Paz.',
-      newName: 'Confederación Perú-Boliviana',
-      controlIso2: ['BO'],
-    },
-  },
-  BO: {
-    heritageTitle: 'Linaje del Altiplano y Charcas',
-    heritageSummary: 'Corazón mineral de Sudamérica, heredero de Tiahuanaco y la Confederación.',
-    root: {
-      era: '1825',
-      title: 'Acta de Independencia de Charcas',
-      subtitle: 'Fundación de la República de Bolívar',
-      history: 'Consolida el Estado plurinacional del Altiplano y sus recursos.',
-    },
-    economy: {
-      era: 'Siglos XVI – XXI',
-      title: 'Cerro Rico y Salar de Uyuni',
-      subtitle: 'Plata, estaño y litio estratégico',
-      history: 'Transforma los recursos minerales del Altiplano en motores económicos sostenibles.',
-    },
-    military: {
-      era: '1836 – 1879',
-      title: 'Colorados de Bolivia',
-      subtitle: 'Infantería de élite de altura',
-      history: 'Adiestra tropas resistentes para campañas en los Andes y el Chaco.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1836 – 1839',
-      title: 'Confederación Perú-Boliviana',
-      subtitle: 'Legado del Mariscal Santa Cruz',
-      history: 'Reunifica Bolivia y Perú en una potencia andina con salida plena al Pacífico.',
-      newName: 'Confederación Perú-Boliviana',
-      controlIso2: ['PE'],
-      proclamationText: '¡La Paz proclama el retorno de la Confederación Perú-Boliviana!',
-    },
-    secondaryRestoration: {
-      era: 'Herencia Imperial',
-      title: 'Gran Tahuantinsuyo',
-      subtitle: 'Hegemonía andina total',
-      history: 'Reúne el antiguo territorio incaico desde Bolivia hasta Ecuador y Chile.',
-      newName: 'Imperio Inca',
-      controlIso2: ['PE', 'EC', 'CL'],
-    },
-  },
-  AR: {
-    heritageTitle: 'Linaje Rioplatense y Sanmartiniano',
-    heritageSummary: 'De la Revolución de Mayo y el Cruce de los Andes a la unión del Cono Sur.',
-    root: {
-      era: '1810 – 1816',
-      title: 'Revolución de Mayo y Tucumán',
-      subtitle: 'Nacimiento de la Nación Argentina',
-      history: 'Reaviva el impulso fundacional de 1816 fortaleciendo la cohesión nacional.',
-    },
-    economy: {
-      era: 'Siglos XIX – XX',
-      title: 'Granero del Mundo',
-      subtitle: 'Pampa húmeda y puertos del Atlántico',
-      history: 'Potencia la producción agroindustrial y la red portuaria del Río de la Plata.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1817',
-      title: 'Ejército de los Andes',
-      subtitle: 'Doctrina libertadora sanmartiniana',
-      history: 'Moderniza las fuerzas armadas con espíritu expedicionario continental.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1810 – 1831',
-      title: 'Provincias Unidas del Río de la Plata',
-      subtitle: 'Reunificación histórica del Virreinato',
-      history: 'Une Argentina, Uruguay, Paraguay y Bolivia en las históricas Provincias Unidas.',
-      newName: 'Provincias Unidas del Sur',
-      controlIso2: ['UY', 'PY', 'BO'],
-      proclamationText: '¡Buenos Aires proclama las Provincias Unidas del Río de la Plata!',
-    },
-  },
-  UY: {
-    heritageTitle: 'Linaje Artiguista y Oriental',
-    heritageSummary: 'Cuna del federalismo rioplatense y bastión diplomático del Atlántico Sur.',
-    root: {
-      era: '1811 – 1830',
-      title: 'Éxodo del Pueblo Oriental',
-      subtitle: 'Legado de José Gervasio Artigas',
-      history: 'Afianza la identidad institucional y estabilidad económica de Montevideo.',
-    },
-    economy: {
-      era: 'Siglo XX',
-      title: 'Puerto de Montevideo y Banca Austral',
-      subtitle: 'Centro logístico del Atlántico Sur',
-      history: 'Convierte la costa oriental en plataforma comercial y financiera.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1825',
-      title: 'Treinta y Tres Orientales',
-      subtitle: 'Cuerpo táctico de defensa rápida',
-      history: 'Organiza divisiones ágiles y defensas fronterizas eficientes.',
-    },
-    restoration: {
-      era: '1815 – 1820',
-      title: 'Restaurar la Liga Federal',
-      subtitle: 'Proyecto federal artiguista',
-      history: 'Reúne la cuenca del Plata bajo la Liga Federal liderada desde Montevideo.',
-      newName: 'Liga Federal Rioplatense',
-      controlIso2: ['AR', 'PY'],
-    },
-  },
-  PY: {
-    heritageTitle: 'Linaje Guaraní y del Chaco',
-    heritageSummary: 'Resiliencia histórica en el corazón fluvial de Sudamérica.',
-    root: {
-      era: '1811',
-      title: 'Independencia de Asunción',
-      subtitle: 'Soberanía fluvial del Paraguay',
-      history: 'Consolida la autonomía productiva y la identidad guaraní.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Potencia Hidroeléctrica y Fundiciones',
-      subtitle: 'Energía e industria nacional',
-      history: 'Aprovecha las grandes represas y la industria pesada para acelerar ingresos.',
-    },
-    military: {
-      era: '1865 – 1935',
-      title: 'Guardia del Chaco',
-      subtitle: 'Resistencia militar legendaria',
-      history: 'Entrena regimientos de hierro capaces de resistir grandes coaliciones.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: 'Proyecto Platense',
-      title: 'Proclamar el Gran Paraguay',
-      subtitle: 'Salida al mar y dominio del Chaco',
-      history: 'Expande el dominio paraguayo sobre la cuenca interior integrando Bolivia y Uruguay.',
-      newName: 'Gran Paraguay',
-      controlIso2: ['BO', 'UY'],
-    },
-  },
-  CL: {
-    heritageTitle: 'Linaje del Pacífico Austral',
-    heritageSummary: 'De la independencia en Maipú al dominio marítimo del Pacífico Sur.',
-    root: {
-      era: '1818',
-      title: 'Victoria de Maipú',
-      subtitle: 'Consolidación de la República de Chile',
-      history: 'Organiza el Estado chileno con disciplina administrativa y estabilidad fiscal.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Cobre, Litio y Valparaíso',
-      subtitle: 'Exportación minera y dominio portuario',
-      history: 'Desarrolla la gran minería y los puertos del Pacífico sur.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1879 – 1884',
-      title: 'Escuadra del Pacífico',
-      subtitle: 'Doctrina naval y de infantería',
-      history: 'Moderniza la armada y el ejército para proyectar poder en la costa occidental.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: 'Hegemonía Austral',
-      title: 'República del Pacífico Sur',
-      subtitle: 'Dominio integral del litoral andino',
-      history: 'Unifica Chile, Perú y Bolivia en una gran potencia del Pacífico Sur.',
-      newName: 'República del Pacífico Sur',
-      controlIso2: ['PE', 'BO'],
-    },
-  },
-  BR: {
-    heritageTitle: 'Linaje Imperial Lusobrasileño',
-    heritageSummary: 'Del Imperio del Brasil a la supremacía continental de Sudamérica.',
-    root: {
-      era: '1822',
-      title: 'Grito de Ipiranga',
-      subtitle: 'Independencia del Brasil',
-      history: 'Consolida la inmensa integridad territorial brasileña desde la Amazonía al sur.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Gigante Industrial y Agrícola',
-      subtitle: 'Polo económico del Atlántico Sur',
-      history: 'Desarrolla polos industriales, mineros y portuarios a escala continental.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1865 – 1945',
-      title: 'Fuerza Expedicionaria Brasileña',
-      subtitle: 'Proyección militar transatlántica',
-      history: 'Organiza el mayor aparato militar sudamericano con doctrina moderna.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1822 – 1889',
-      title: 'Restaurar el Imperio del Brasil',
-      subtitle: 'Corona de Pedro II y la Cisplatina',
-      history: 'Restaura el histórico Imperio del Brasil incorporando la Banda Oriental y el Paraguay.',
-      newName: 'Imperio del Brasil',
-      controlIso2: ['UY', 'PY'],
-      proclamationText: '¡Brasilia proclama el retorno del Imperio del Brasil!',
-    },
-    secondaryRestoration: {
-      era: 'Unión Continental',
-      title: 'Unión Sudamericana',
-      subtitle: 'Integración de las potencias del sur',
-      history: 'Consolida la hegemonía continental uniendo Argentina, Colombia y Perú.',
-      newName: 'Unión Sudamericana',
-      controlIso2: ['AR', 'CO', 'PE'],
+      targets: ['CO', 'VE', 'EC'],
     },
   },
   MX: {
-    heritageTitle: 'Linaje Mexica y Novohipano',
-    heritageSummary: 'Desde Tenochtitlán y la independencia de 1821 hasta el Primer Imperio Mexicano.',
+    subtitle: 'De Tenochtitlán y la Nueva España al Imperio Mexicano',
+    ancestors: ['Imperio Mexica y Mayas', 'Virreinato de Nueva España', 'México'],
     root: {
-      era: '1810 – 1821',
-      title: 'Consumación de la Independencia',
-      subtitle: 'Herencia de Tenochtitlán y la República',
-      history: 'Reafirma la fuerza cultural y administrativa del corazón de Mesoamérica.',
+      era: '1810–1821',
+      title: 'Grito de Dolores y Plan de Iguala',
+      fact: 'El levantamiento de Hidalgo y el pacto de 1821 consumaron la independencia de la nación mexicana.',
     },
-    economy: {
-      era: 'Siglos XVI – XXI',
-      title: 'Rutas de Plata e Industria del Golfo',
-      subtitle: 'Puente entre el Pacífico y el Atlántico',
-      history: 'Impulsa la minería histórica y las grandes metrópolis industriales.',
-      minPorts: 1,
+    eco1: {
+      era: '1938',
+      title: 'Soberanía Energética e Industria',
+      fact: 'La nacionalización petrolera y la red ferroviaria sentaron las bases de la industrialización de México.',
     },
-    military: {
+    mil1: {
       era: '1862',
-      title: 'Ejército de Oriente',
-      subtitle: 'Espíritu de la Batalla de Puebla',
-      history: 'Refuerza la defensa nacional y la capacidad expedicionaria hacia el sur.',
-      minAnnexations: 1,
+      title: 'Batalla de Puebla',
+      fact: 'El 5 de mayo de 1862 el Ejército de Oriente venció a una potencia europea y se volvió símbolo nacional.',
     },
-    restoration: {
-      era: '1821 – 1823',
+    eco2: {
+      era: '1950–1970',
+      title: 'Milagro Económico Mexicano',
+      fact: 'Décadas de expansión urbana, puertos en ambos océanos y manufactura consolidaron a México como potencia regional.',
+    },
+    mil2: {
+      era: '1821',
+      title: 'Ejército Trigarante',
+      fact: 'Reorganiza el mando militar combinando despliegue rápido en el norte y control estratégico del Golfo.',
+    },
+    restore: {
+      era: '1821–1823',
       title: 'Restaurar el Imperio Mexicano',
-      subtitle: 'De México a Centroamérica',
-      history: 'Restaura las fronteras del Primer Imperio Mexicano integrando Guatemala, Honduras y El Salvador.',
+      fact: 'Reconstruye el histórico dominio mexicano desde el norte hasta Centroamérica bajo una sola corona o república imperial.',
       newName: 'Imperio Mexicano',
-      controlIso2: ['GT', 'HN', 'SV'],
-      proclamationText: '¡Ciudad de México proclama la restauración del Imperio Mexicano!',
+      targets: ['GT', 'BZ', 'SV', 'HN'],
+    },
+  },
+  AR: {
+    subtitle: 'De la Revolución de Mayo a las Provincias Unidas',
+    ancestors: ['Virreinato del Río de la Plata', 'Provincias Unidas (1816)', 'Argentina'],
+    root: {
+      era: '1810–1816',
+      title: 'Revolución de Mayo y Tucumán',
+      fact: 'Buenos Aires abrió el camino en 1810 y el Congreso de Tucumán declaró la independencia de las Provincias Unidas.',
+    },
+    eco1: {
+      era: '1880–1920',
+      title: 'Granero del Mundo',
+      fact: 'La pampa fértil, los ferrocarriles y el puerto del Río de la Plata convirtieron a Argentina en una gran potencia exportadora.',
+    },
+    mil1: {
+      era: '1817',
+      title: 'Cruce de los Andes',
+      fact: 'José de San Martín condujo al Ejército de los Andes por las cumbres más altas para liberar Chile y Perú.',
+    },
+    eco2: {
+      era: '1991',
+      title: 'Eje Comercial del Cono Sur',
+      fact: 'Impulsa la integración fluvial de la cuenca del Plata y la industria energética patagónica.',
+    },
+    mil2: {
+      era: '1814',
+      title: 'Armada del Atlántico Sur',
+      fact: 'Siguiendo el legado del almirante Brown, refuerza las defensas australes y la proyección naval.',
+    },
+    restore: {
+      era: '1816',
+      title: 'Restaurar las Provincias Unidas del Río de la Plata',
+      fact: 'Reunifica la histórica cuenca rioplatense bajo el nombre fundacional de 1816.',
+      newName: 'Provincias Unidas del Río de la Plata',
+      targets: ['UY', 'PY', 'BO'],
+    },
+  },
+  BR: {
+    subtitle: 'Del Grito de Ipiranga al Imperio del Brasil',
+    ancestors: ['Reino Unido de Portugal y Brasil', 'Imperio del Brasil (1822)', 'Brasil'],
+    root: {
+      era: '1822',
+      title: 'Grito de Ipiranga',
+      fact: 'El 7 de septiembre de 1822 Brasil proclamó su independencia preservando intacta su gigantesca unidad territorial.',
+    },
+    eco1: {
+      era: '1850–1910',
+      title: 'Ciclo del Café y del Caucho',
+      fact: 'El auge exportador de São Paulo y la Amazonía financió puertos modernos, bancos e infraestructura nacional.',
+    },
+    mil1: {
+      era: '1865–1870',
+      title: 'Doctrina del Duque de Caxias',
+      fact: 'La profesionalización del ejército imperial consolidó la supremacía terrestre y fluvial brasileña en Sudamérica.',
+    },
+    eco2: {
+      era: '1960',
+      title: 'Fundación de Brasilia e Industria',
+      fact: 'La nueva capital en el interior integró todo el continente brasileño con energía hidroeléctrica y siderurgia.',
+    },
+    mil2: {
+      era: '1944',
+      title: 'Fuerza Expedicionaria Brasileña',
+      fact: 'Brasil fue la única nación sudamericana en enviar divisiones de combate a Europa, forjando una doctrina moderna.',
+    },
+    restore: {
+      era: '1822–1889',
+      title: 'Restaurar el Imperio del Brasil',
+      fact: 'Recobra la grandeza histórica del Imperio de Pedro II como potencia hegemónica del Atlántico Sur.',
+      newName: 'Imperio del Brasil',
+      targets: ['UY', 'PY', 'BO', 'GY'],
+    },
+  },
+  PE: {
+    subtitle: 'Herederos del Tahuantinsuyo y del Virreinato del Perú',
+    ancestors: ['Imperio Inca (Tahuantinsuyo)', 'Virreinato del Perú', 'República del Perú'],
+    root: {
+      era: '1821',
+      title: 'Proclamación en Lima',
+      fact: 'El 28 de julio de 1821 se proclamó la independencia del Perú, heredero de la civilización andina más extensa.',
+    },
+    eco1: {
+      era: '1845–1870',
+      title: 'Era del Guano y Minería Andina',
+      fact: 'Las exportaciones costeras y los minerales de los Andes financiaron ferrocarriles y puertos estratégicos.',
+    },
+    mil1: {
+      era: '1824',
+      title: 'Batallas de Junín y Ayacucho',
+      fact: 'En la Pampa de la Quinua se libró la batalla decisiva que selló la libertad de toda Sudamérica.',
+    },
+    eco2: {
+      era: '1438–1533',
+      title: 'Red del Qhapaq Ñan',
+      fact: 'Moderniza las rutas logísticas andinas inspiradas en el gran sistema vial que unía el Imperio Inca.',
+    },
+    mil2: {
+      era: '1879',
+      title: 'Legado del Almirante Grau',
+      fact: 'La hazaña naval del Huáscar inspira una doctrina de defensa marítima y resistencia patriótica.',
+    },
+    restore: {
+      era: '1438–1533',
+      title: 'Restaurar el Imperio Inca',
+      fact: 'Reconstruye el legendario Tahuantinsuyo de los Cuatro Suyos a lo largo de la cordillera de los Andes.',
+      newName: 'Imperio Inca',
+      targets: ['BO', 'EC', 'CL'],
+    },
+  },
+  BO: {
+    subtitle: 'De Tiahuanaco y el Alto Perú a la Confederación Andina',
+    ancestors: ['Cultura Tiahuanaco', 'Charcas / Alto Perú', 'Bolivia'],
+    root: {
+      era: '1825',
+      title: 'Fundación de la República de Bolívar',
+      fact: 'El 6 de agosto de 1825 nació Bolivia en Chuquisaca, corazón mineral y geográfico de Sudamérica.',
+    },
+    eco1: {
+      era: '1545–1900',
+      title: 'Riqueza de Potosí y el Altiplano',
+      fact: 'La histórica plata de Potosí, el estaño y el litio del Salar de Uyuni sostienen la economía altiplánica.',
+    },
+    mil1: {
+      era: '1836',
+      title: 'Ejército de Santa Cruz',
+      fact: 'El mariscal Andrés de Santa Cruz construyó uno de los ejércitos más disciplinados del continente en el siglo XIX.',
+    },
+    eco2: {
+      era: '1952',
+      title: 'Integración del Altiplano y los Llanos',
+      fact: 'Conecta las regiones mineras andinas con el polo agroindustrial de Santa Cruz.',
+    },
+    mil2: {
+      era: '1837',
+      title: 'Fortalezas de los Andes Centrales',
+      fact: 'Aprovecha la altitud de la cordillera para crear un bastión defensivo casi inexpugnable.',
+    },
+    restore: {
+      era: '1836–1839',
+      title: 'Restaurar la Confederación Perú-Boliviana',
+      fact: 'Revive la gran confederación ideada por Andrés de Santa Cruz uniendo los destinos del Perú y Bolivia.',
+      newName: 'Confederación Perú-Boliviana',
+      targets: ['PE', 'CL', 'PY'],
+    },
+  },
+  CL: {
+    subtitle: 'República Austral y Guardián del Pacífico Sur',
+    ancestors: ['Capitanía General de Chile', 'Patria Vieja (1810)', 'Chile'],
+    root: {
+      era: '1818',
+      title: 'Batalla de Maipú e Independencia',
+      fact: 'Bernardo O’Higgins y San Martín consolidaron la independencia chilena en Maipú y abrieron el Pacífico.',
+    },
+    eco1: {
+      era: '1880–1971',
+      title: 'Riqueza del Salitre y del Cobre',
+      fact: 'Los yacimientos del norte convirtieron a Chile en el mayor productor mundial de cobre y pilar minero global.',
+    },
+    mil1: {
+      era: '1879–1884',
+      title: 'Campaña del Pacífico',
+      fact: 'La combinación de escuadra naval y tropas disciplinadas otorgó a Chile el dominio del Pacífico sudamericano.',
+    },
+    eco2: {
+      era: '1914–2000',
+      title: 'Puertos de Valparaíso y Magallanes',
+      fact: 'Controla el paso austral del Estrecho de Magallanes y potencia el comercio transpacífico.',
+    },
+    mil2: {
+      era: '1820',
+      title: 'Escuadra Libertadora del Pacífico',
+      fact: 'Retoma la tradición oceánica chilena para proyectar poder desde Atacama hasta la Antártida.',
+    },
+    restore: {
+      era: '1883',
+      title: 'Proclamar la República Austral del Pacífico',
+      fact: 'Consolida la hegemonía austral y andina bajo una potencia marítima del Cono Sur.',
+      newName: 'República Austral del Pacífico',
+      targets: ['PE', 'BO', 'AR'],
     },
   },
   US: {
-    heritageTitle: 'Linaje de las Trece Colonias',
-    heritageSummary: 'De la Declaración de 1776 al liderazgo industrial y continental de Norteamérica.',
+    subtitle: 'De las Trece Colonias a la Unión Hemisférica',
+    ancestors: ['Trece Colonias (1776)', 'Unión Constitucional (1787)', 'Estados Unidos'],
     root: {
-      era: '1776 – 1787',
-      title: 'Constitución de Filadelfia',
-      subtitle: 'Fundación federal estadounidense',
-      history: 'Afianza el federalismo y la capacidad financiera de la república.',
+      era: '1776',
+      title: 'Declaración de Independencia',
+      fact: 'Las Trece Colonias fundaron la primera república constitucional moderna en Filadelfia el 4 de julio de 1776.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Arsenal Industrial y Tecnológico',
-      subtitle: 'Ferrocarriles, industria y comercio global',
-      history: 'Acelera la productividad urbana y la proyección naval en ambos océanos.',
-      minPorts: 1,
+    eco1: {
+      era: '1869–1920',
+      title: 'Ferrocarril Transcontinental e Industria',
+      fact: 'La unión ferroviaria de costa a costa y la manufactura masiva hicieron de EE. UU. la mayor economía industrial.',
     },
-    military: {
-      era: '1941 – Presente',
-      title: 'Comando Conjunto Global',
-      subtitle: 'Proyección estratégica y alianzas',
-      history: 'Moderniza la doctrina militar conjunta y la logística de combate.',
-      minAllies: 2,
+    mil1: {
+      era: '1941–1945',
+      title: 'Arsenal de la Democracia',
+      fact: 'La movilización industrial y las flotas de dos océanos proyectaron el poder estadounidense en todo el globo.',
     },
-    restoration: {
-      era: 'Proyecto Continental',
-      title: 'Unión Norteamericana',
-      subtitle: 'Integración total de Norteamérica',
-      history: 'Unifica Estados Unidos, Canadá y México en una superpotencia continental.',
-      newName: 'Unión Norteamericana',
-      controlIso2: ['CA', 'MX'],
-      proclamationText: '¡Washington proclama la Unión Norteamericana de océano a océano!',
+    eco2: {
+      era: '1969',
+      title: 'Carrera Espacial y Revolución Digital',
+      fact: 'La llegada a la Luna y la innovación tecnológica crearon una ventaja económica y logística sin precedentes.',
+    },
+    mil2: {
+      era: '1823',
+      title: 'Doctrina Hemisférica y Dos Océanos',
+      fact: 'Asegura el dominio naval del Atlántico y el Pacífico con bases estratégicas en todo el continente.',
+    },
+    restore: {
+      era: '1823–2026',
+      title: 'Proclamar la Unión Panamericana',
+      fact: 'Integra Norteamérica y sus aliados en una superpotencia continental bajo un solo mando federal.',
+      newName: 'Unión Panamericana',
+      targets: ['CA', 'MX', 'CU'],
     },
   },
   CA: {
-    heritageTitle: 'Linaje de la Confederación Canadiense',
-    heritageSummary: 'Del Dominio de 1867 a la unión del continente norteamericano.',
+    subtitle: 'De la Confederación de 1867 al Dominio Boreal',
+    ancestors: ['Nueva Francia y Norteamérica Británica', 'Confederación Canadiense (1867)', 'Canadá'],
     root: {
       era: '1867',
       title: 'Acta de la Confederación',
-      subtitle: 'Unión del Atlántico al Pacífico',
-      history: 'Consolida las provincias canadienses y su infraestructura ferroviaria.',
+      fact: 'Las provincias fundadoras se unieron en 1867 para crear el Dominio de Canadá de mar a mar.',
     },
-    economy: {
-      era: 'Siglos XX – XXI',
-      title: 'Recursos del Escudo Canadiense',
-      subtitle: 'Energía, minerales y rutas árticas',
-      history: 'Multiplica los ingresos extractivos y marítimos del norte.',
-      minPorts: 1,
+    eco1: {
+      era: '1885',
+      title: 'Ferrocarril Canadian Pacific',
+      fact: 'La línea transcontinental unió el Atlántico con el Pacífico y abrió las praderas y recursos minerales del norte.',
     },
-    military: {
-      era: '1917 – 1945',
-      title: 'Cuerpo Expedicionario de Vimy',
-      subtitle: 'Disciplina y defensa del norte',
-      history: 'Entrena cuerpos de élite con experiencia internacional.',
-      minAllies: 1,
+    mil1: {
+      era: '1917',
+      title: 'Batalla de Vimy Ridge',
+      fact: 'El Cuerpo Canadiense conquistó la cresta de Vimy en una operación brillante que forjó la identidad militar del país.',
     },
-    restoration: {
-      era: 'Hegemonía Boreal',
-      title: 'Dominio de Norteamérica',
-      subtitle: 'Liderazgo continental desde Ottawa',
-      history: 'Integra los territorios norteamericanos bajo la corona y federación de Ottawa.',
-      newName: 'Dominio de Norteamérica',
-      controlIso2: ['US'],
+    eco2: {
+      era: '1959',
+      title: 'Vía Marítima de San Lorenzo y Ártico',
+      fact: 'Conecta los Grandes Lagos con el Atlántico y desarrolla la riqueza energética del Ártico canadiense.',
+    },
+    mil2: {
+      era: '1944',
+      title: 'Legado de Playa Juno',
+      fact: 'Refuerza la defensa ártica y las fuerzas expedicionarias aliadas en el Atlántico Norte.',
+    },
+    restore: {
+      era: '1867',
+      title: 'Proclamar el Dominio Boreal de Norteamérica',
+      fact: 'Expande el modelo confederal canadiense como gran potencia del norte atlántico y ártico.',
+      newName: 'Dominio Boreal',
+      targets: ['US', 'GB', 'DK'],
     },
   },
-  GT: {
-    heritageTitle: 'Linaje Maya y Centroamericano',
-    heritageSummary: 'Sede de la antigua Capitanía General de Guatemala y cuna centroamericana.',
+  UY: {
+    subtitle: 'Legado Artiguista y Banda Oriental',
+    ancestors: ['Banda Oriental', 'Liga Federal (1815)', 'Uruguay'],
     root: {
-      era: '1821',
-      title: 'Acta de Independencia de Centroamérica',
-      subtitle: 'Liderazgo histórico en la región',
-      history: 'Consolida la administración central y la riqueza cultural maya.',
+      era: '1825',
+      title: 'Cruzada de los Treinta y Tres Orientales',
+      fact: 'La declaratoria de la Florida en 1825 selló la independencia oriental y el nacimiento de la república.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Corredor del Café y Comercio Istmeño',
-      subtitle: 'Rutas del Caribe y el Pacífico',
-      history: 'Expande el comercio agrícola e infraestructura urbana.',
+    eco1: {
+      era: '1903–1915',
+      title: 'Reformas de Batlle y Puerto de Montevideo',
+      fact: 'Uruguay construyó uno de los estados más estables, educados y prósperos de toda América Latina.',
     },
-    military: {
-      era: '1823 – 1840',
-      title: 'Ejército Unionista',
-      subtitle: 'Fuerza de integración istmeña',
-      history: 'Prepara las fuerzas para reunificar el istmo centroamericano.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1811',
+      title: 'Batalla de Las Piedras',
+      fact: 'José Gervasio Artigas obtuvo la gran victoria oriental y lideró el histórico Éxodo del Pueblo Oriental.',
     },
-    restoration: {
-      era: '1823 – 1839',
-      title: 'República Federal de Centroamérica',
-      subtitle: 'Reunificación de las cinco naciones',
-      history: 'Restaura la histórica Federación Centroamericana uniendo Guatemala, Honduras, El Salvador, Nicaragua y Costa Rica.',
-      newName: 'Federación Centroamericana',
-      controlIso2: ['HN', 'SV', 'NI', 'CR'],
-      proclamationText: '¡Renace la República Federal de Centroamérica!',
+    eco2: {
+      era: '1991',
+      title: 'Sede del Mercosur y Puerta del Plata',
+      fact: 'Montevideo se consolida como núcleo diplomático, financiero y portuario del Atlántico Sur.',
+    },
+    mil2: {
+      era: '1815',
+      title: 'Banderas de la Liga de los Pueblos Libres',
+      fact: 'Retoma el federalismo artiguista para defender la soberanía de la cuenca del Río de la Plata.',
+    },
+    restore: {
+      era: '1815–1820',
+      title: 'Restaurar la Liga Federal Artiguista',
+      fact: 'Revive la federación de los Pueblos Libres soñada por Artigas en el Río de la Plata.',
+      newName: 'Liga Federal Artiguista',
+      targets: ['AR', 'PY', 'BR'],
+    },
+  },
+  PY: {
+    subtitle: 'Corazón Guaraní y Bastión del Río Paraguay',
+    ancestors: ['Misiones Guaraníes', 'Intendencia del Paraguay', 'Paraguay'],
+    root: {
+      era: '1811',
+      title: 'Independencia de Mayo en Asunción',
+      fact: 'El 14 y 15 de mayo de 1811 Paraguay se emancipó de forma pacífica y protegió celosamente su autonomía.',
+    },
+    eco1: {
+      era: '1844–1862',
+      title: 'Fundición de Ybycuí y Primer Ferrocarril',
+      fact: 'Paraguay construyó uno de los primeros ferrocarriles, telégrafos y astilleros industriales de Sudamérica.',
+    },
+    mil1: {
+      era: '1866',
+      title: 'Defensa de Curupayty',
+      fact: 'La tenacidad defensiva paraguaya en las fortalezas fluviales demostró una resistencia legendaria.',
+    },
+    eco2: {
+      era: '1984',
+      title: 'Potencia Hidroeléctrica de Itaipú',
+      fact: 'Las gigantescas represas del Paraná convierten a Paraguay en exportador clave de energía limpia.',
+    },
+    mil2: {
+      era: '1932–1935',
+      title: 'Veteranos del Chaco',
+      fact: 'Aplica la doctrina de maniobra y defensa profunda que aseguró el territorio chaqueño.',
+    },
+    restore: {
+      era: '1811',
+      title: 'Proclamar la República Guaraní del Plata',
+      fact: 'Eleva a Paraguay como potencia central de las cuencas del Paraná y el Paraguay.',
+      newName: 'República Guaraní del Plata',
+      targets: ['BO', 'AR', 'UY'],
     },
   },
   CU: {
-    heritageTitle: 'Linaje Antillano',
-    heritageSummary: 'La Perla de las Antillas y eje estratégico del mar Caribe.',
+    subtitle: 'La Perla de las Antillas y Encrucijada del Caribe',
+    ancestors: ['Taínos de Cuba', 'Capitanía General de Cuba', 'Cuba'],
     root: {
-      era: '1868 – 1898',
-      title: 'Gesta de Yara y Martí',
-      subtitle: 'Identidad soberana de las Antillas',
-      history: 'Reafirma la independencia insular y la cohesión social.',
+      era: '1868–1898',
+      title: 'Grito de Yara y Lucha Mambisa',
+      fact: 'Desde Céspedes hasta José Martí y Antonio Maceo, Cuba forjó una larga gesta por su independencia.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Puertos de La Habana y Comercio Antillano',
-      subtitle: 'Llave del Golfo de México',
-      history: 'Convierte la isla en potencia marítima y comercial del Caribe.',
-      minPorts: 1,
+    eco1: {
+      era: '1900–1950',
+      title: 'Puertos de La Habana y Comercio Azucarero',
+      fact: 'La Habana se consolidó como principal puerto estratégico y cultural de todo el Caribe.',
     },
-    military: {
-      era: 'Siglo XX',
-      title: 'Bastión Naval del Caribe',
-      subtitle: 'Defensa insular y proyección anfibia',
-      history: 'Refuerza la capacidad de desembarco y defensa costera.',
+    mil1: {
+      era: '1895',
+      title: 'Invasión de Oriente a Occidente',
+      fact: 'Las columnas móviles mambisas recorrieron toda la isla demostrando una notable táctica de maniobra.',
     },
-    restoration: {
-      era: 'Proyecto Antillano',
-      title: 'Confederación Antillana',
-      subtitle: 'Sueño integrador del Caribe',
-      history: 'Une Cuba, República Dominicana y Haití en una sola nación antillana.',
+    eco2: {
+      era: '1960–2020',
+      title: 'Diplomacia Médica y Biotecnología',
+      fact: 'La proyección científica y diplomática fortalece las alianzas cubanas en América Latina y el Caribe.',
+    },
+    mil2: {
+      era: '1961',
+      title: 'Doctrina de Bastión Insular',
+      fact: 'Fortifica las costas y estrechos del Caribe haciendo de la isla una fortaleza naval.',
+    },
+    restore: {
+      era: '1895',
+      title: 'Proclamar la Confederación Antillana',
+      fact: 'Cumple el sueño de Martí, Hostos y Betances de unir a las grandes islas del Caribe en una confederación.',
       newName: 'Confederación Antillana',
-      controlIso2: ['DO', 'HT'],
+      targets: ['DO', 'HT', 'JM'],
+    },
+  },
+  DO: {
+    subtitle: 'Primada de América y Corazón de La Española',
+    ancestors: ['Taínos de Quisqueya', 'Capitanía de Santo Domingo', 'República Dominicana'],
+    root: {
+      era: '1844',
+      title: 'Independencia de La Trinitaria',
+      fact: 'Juan Pablo Duarte y los trinitarios proclamaron la República Dominicana el 27 de febrero de 1844.',
+    },
+    eco1: {
+      era: '1509–1950',
+      title: 'Puertos de Santo Domingo y Comercio Caribeño',
+      fact: 'La primera ciudad europea de América impulsó el comercio marítimo y agrícola del Caribe central.',
+    },
+    mil1: {
+      era: '1863–1865',
+      title: 'Guerra de la Restauración',
+      fact: 'El pueblo dominicano restauró la soberanía nacional mediante una tenaz campaña territorial.',
+    },
+    eco2: {
+      era: '1990–2025',
+      title: 'Motor Económico del Caribe',
+      fact: 'El turismo, las zonas francas y los puertos modernos convierten al país en líder económico antillano.',
+    },
+    mil2: {
+      era: '1844',
+      title: 'Legado del 19 y 30 de Marzo',
+      fact: 'Refuerza la guardia fronteriza y naval inspirada en las victorias fundacionales de Azua y Santiago.',
+    },
+    restore: {
+      era: '1844',
+      title: 'Proclamar la Unión de La Española',
+      fact: 'Unifica el legado histórico de Quisqueya y lidera una gran república antillana.',
+      newName: 'República de La Española',
+      targets: ['HT', 'CU', 'JM'],
+    },
+  },
+  HT: {
+    subtitle: 'Primera República Negra Independiente del Mundo',
+    ancestors: ['Taínos de Ayiti', 'Saint-Domingue', 'Haití'],
+    root: {
+      era: '1804',
+      title: 'Revolución Haitiana e Independencia',
+      fact: 'En 1804 Haití abolió la esclavitud y se convirtió en la primera república independiente de América Latina y el Caribe.',
+    },
+    eco1: {
+      era: '1806–1820',
+      title: 'Reconstrucción de Cabo Haitiano',
+      fact: 'Organiza la agricultura, los puertos del norte y el comercio atlántico para revitalizar el tesoro.',
+    },
+    mil1: {
+      era: '1803',
+      title: 'Batalla de Vertières',
+      fact: 'Las tropas de Dessalines y Toussaint derrotaron a uno de los ejércitos más poderosos de Europa.',
+    },
+    eco2: {
+      era: '1816',
+      title: 'Solidaridad de Alexandre Pétion',
+      fact: 'Haití apoyó decisivamente a Bolívar en 1816; retoma esa diplomacia solidaria para ganar aliados en América.',
+    },
+    mil2: {
+      era: '1805–1820',
+      title: 'Ciudadela Laferrière',
+      fact: 'Inspirada en la mayor fortaleza del Caribe, multiplica la capacidad defensiva del territorio nacional.',
+    },
+    restore: {
+      era: '1804–1806',
+      title: 'Restaurar el Imperio de Haití',
+      fact: 'Retoma el prestigio revolucionario de 1804 proyectando liderazgo en toda La Española y las Antillas.',
+      newName: 'Imperio de Haití',
+      targets: ['DO', 'CU', 'JM'],
+    },
+  },
+  GT: {
+    subtitle: 'Corazón del Mundo Maya y de Centroamérica',
+    ancestors: ['Civilización Maya', 'Capitanía General de Guatemala', 'Guatemala'],
+    root: {
+      era: '1821',
+      title: 'Acta de Independencia de Centroamérica',
+      fact: 'El 15 de septiembre de 1821 se firmó en Ciudad de Guatemala la independencia de todo el istmo centroamericano.',
+    },
+    eco1: {
+      era: '1871–1920',
+      title: 'Reforma Liberal y Rutas del Café',
+      fact: 'La conexión ferroviaria entre ambos océanos y las exportaciones agrícolas modernizaron el país.',
+    },
+    mil1: {
+      era: '1823',
+      title: 'Ejército de la Federación del Istmo',
+      fact: 'Reorganiza las fuerzas terrestres siguiendo el espíritu unionista centroamericano del siglo XIX.',
+    },
+    eco2: {
+      era: '1960',
+      title: 'Mercado Común Centroamericano',
+      fact: 'Impulsa el comercio integrado y la diplomacia regional entre las repúblicas del istmo.',
+    },
+    mil2: {
+      era: '1856',
+      title: 'Pacto Defensivo Centroamericano',
+      fact: 'Aumenta la preparación militar y las fortificaciones de montaña en toda la sierra.',
+    },
+    restore: {
+      era: '1823–1839',
+      title: 'Restaurar la República Federal de Centroamérica',
+      fact: 'Reunifica a las provincias históricas de la antigua Capitanía General bajo una sola federación.',
+      newName: 'República Federal de Centroamérica',
+      targets: ['SV', 'HN', 'NI', 'CR', 'BZ'],
     },
   },
 
-  // === EUROPA ===
+  // ======================== EUROPA ========================
   ES: {
-    heritageTitle: 'Linaje Hispánico e Ibérico',
-    heritageSummary: 'De los Reyes Católicos y el Siglo de Oro a la Unión Ibérica y el renacer hispánico.',
+    subtitle: 'De la Corona Hispánica al Imperio Español',
+    ancestors: ['Reinos de Castilla y Aragón', 'Monarquía Hispánica (1492)', 'España'],
     root: {
-      era: '1492 – 1516',
-      title: 'Unión de Coronas y Siglo de Oro',
-      subtitle: 'Nacimiento de la monarquía hispánica',
-      history: 'Consolida la unidad peninsular y el impulso cultural y administrativo de Madrid.',
+      era: '1492',
+      title: 'Unión de las Coronas y Era Oceánica',
+      fact: 'La unión dinástica y la llegada a América en 1492 inauguraron la primera red global del planeta.',
     },
-    economy: {
-      era: 'Siglos XVI – XXI',
-      title: 'Flota de Indias y Puertos Atlánticos',
-      subtitle: 'Comercio entre Europa y América',
-      history: 'Desarrolla puertos atlánticos y mediterráneos para dominar las rutas comerciales.',
-      minPorts: 1,
+    eco1: {
+      era: '1550–1650',
+      title: 'Siglo de Oro y Carrera de Indias',
+      fact: 'Sevilla, Cádiz y el esplendor cultural del Siglo de Oro hicieron de España el eje comercial de dos continentes.',
     },
-    military: {
-      era: '1534 – 1704',
-      title: 'Tercios Modernos',
-      subtitle: 'Infantería disciplinada de élite',
-      history: 'Adapta la disciplina histórica de los Tercios al combate moderno.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1534–1643',
+      title: 'Legado de los Tercios Españoles',
+      fact: 'Durante más de un siglo, los Tercios fueron la infantería más temida y disciplinada de Europa.',
     },
-    restoration: {
-      era: '1580 – 1640',
-      title: 'Restaurar la Unión Ibérica',
-      subtitle: 'Unificación de la Península Ibérica',
-      history: 'Une España y Portugal en una sola potencia ibérica y atlántica.',
-      newName: 'Unión Ibérica',
-      controlIso2: ['PT'],
-      proclamationText: '¡Madrid proclama la histórica Unión Ibérica!',
+    eco2: {
+      era: '1986',
+      title: 'Modernización Europea y Puertos Atlánticos',
+      fact: 'La red de alta velocidad, energías renovables y puentes comerciales con Iberoamérica fortalecen la tesorería.',
     },
-    secondaryRestoration: {
-      era: '1492 – 1824',
-      title: 'Imperio Hispánico',
-      subtitle: 'Puente soberano entre Europa y el Norte de África',
-      history: 'Extiende el dominio ibérico sobre Portugal, Marruecos e Italia del sur.',
+    mil2: {
+      era: '1571',
+      title: 'Armada de Lepanto y Defensa Naval',
+      fact: 'Recuerda la victoria naval de Lepanto para proyectar poder en el Mediterráneo y el Atlántico.',
+    },
+    restore: {
+      era: '1580–1700',
+      title: 'Restaurar el Imperio Español',
+      fact: 'Reconstruye el prestigio imperial hispánico uniendo la península y proyectándose sobre mares y continentes.',
       newName: 'Imperio Español',
-      controlIso2: ['PT', 'MA'],
+      targets: ['PT', 'FR', 'MA', 'IT'],
     },
   },
   PT: {
-    heritageTitle: 'Linaje de los Navegantes Lusos',
-    heritageSummary: 'De Enrique el Navegante y los Descubrimientos a la Unión Ibérica.',
+    subtitle: 'Pioneros de la Era de los Descubrimientos',
+    ancestors: ['Condado Portucalense (1143)', 'Imperio Portugués (1415)', 'Portugal'],
     root: {
-      era: '1143 – 1415',
-      title: 'Era de los Descubrimientos',
-      subtitle: 'Escuela de Sagres y expansión atlántica',
-      history: 'Reaviva la tradición marítima y comercial portuguesa.',
+      era: '1143',
+      title: 'Tratado de Zamora',
+      fact: 'Afonso Henriques fundó el Reino de Portugal, uno de los estados con fronteras más antiguas de Europa.',
     },
-    economy: {
-      era: 'Siglos XV – XVI',
-      title: 'Ruta de las Especias y Lisboa',
-      subtitle: 'Puertos oceánicos y comercio global',
-      history: 'Convierte Lisboa en gran centro financiero y portuario.',
-      minPorts: 1,
+    eco1: {
+      era: '1498',
+      title: 'Ruta Marítima a la India',
+      fact: 'Vasco da Gama abrió la ruta del Cabo de Buena Esperanza y creó una red comercial de especias en tres océanos.',
     },
-    military: {
+    mil1: {
       era: '1385',
-      title: 'Guardia de Aljubarrota',
-      subtitle: 'Defensa peninsular y marina oceánica',
-      history: 'Fortalece el ejército portugués y su proyección anfibia.',
+      title: 'Batalla de Aljubarrota',
+      fact: 'La victoria táctica en Aljubarrota garantizó la independencia portuguesa y forjó su doctrina defensiva.',
     },
-    restoration: {
-      era: '1580 – 1640',
-      title: 'Unión Ibérica Lusitana',
-      subtitle: 'Península unida desde Lisboa',
-      history: 'Reúne Portugal y España bajo liderazgo portugués.',
-      newName: 'Unión Ibérica',
-      controlIso2: ['ES'],
+    eco2: {
+      era: '1419–1500',
+      title: 'Escuela Náutica de Sagres',
+      fact: 'La cartografía, las carabelas y los puertos atlánticos multiplican los ingresos y alianzas oceánicas.',
+    },
+    mil2: {
+      era: '1510',
+      title: 'Armadas del Índico y el Atlántico',
+      fact: 'Fortalece las bases costeras y la capacidad expedicionaria naval portuguesa.',
+    },
+    restore: {
+      era: '1415–1822',
+      title: 'Restaurar el Imperio Portugués',
+      fact: 'Revive la gran talasocracia lusitana que conectó Europa, África, Asia y América.',
+      newName: 'Imperio Portugués',
+      targets: ['ES', 'BR', 'AO', 'MZ'],
     },
   },
   FR: {
-    heritageTitle: 'Linaje Galo y Napoleónico',
-    heritageSummary: 'De la Revolución Francesa y el Código Civil al Primer Imperio Francés.',
+    subtitle: 'De la Revolución Francesa al Primer Imperio',
+    ancestors: ['Reino de los Francos', 'Revolución Francesa (1789)', 'Francia'],
     root: {
-      era: '1789 – 1804',
-      title: 'Revolución y Código Napoleónico',
-      subtitle: 'Modernización estatal francesa',
-      history: 'Reforma las instituciones nacionales y dinamiza la recaudación en París.',
+      era: '1789',
+      title: 'Revolución Francesa y Derechos del Hombre',
+      fact: 'La toma de la Bastilla transformó la política mundial e inauguró la era contemporánea en Europa.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Belle Époque e Industria Europea',
-      subtitle: 'Ciencia, ferrocarriles y comercio marítimo',
-      history: 'Expande las grandes ciudades y la industria aeroespacial y naval.',
-      minPorts: 1,
+    eco1: {
+      era: '1804',
+      title: 'Código Civil y Modernización Estatal',
+      fact: 'El Código Napoleónico y el Banco de Francia sentaron un modelo administrativo adoptado en todo el mundo.',
     },
-    military: {
-      era: '1805 – 1815',
-      title: 'La Grande Armée',
-      subtitle: 'Artillería móvil y maniobra estratégica',
-      history: 'Reorganiza los cuerpos de ejército con doctrina ofensiva de maniobra.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1805',
+      title: 'La Grande Armée en Austerlitz',
+      fact: 'La organización por cuerpos de ejército y la artillería móvil revolucionaron el arte de la guerra.',
     },
-    restoration: {
-      era: '1804 – 1815',
-      title: 'Primer Imperio Francés',
-      subtitle: 'Águilas imperiales sobre Europa Occidental',
-      history: 'Restaura la hegemonía continental francesa sobre Bélgica, Países Bajos y Suiza.',
+    eco2: {
+      era: '1957',
+      title: 'Arquitectos de la Unión Europea',
+      fact: 'Francia impulsó la integración europea, la energía nuclear civil y la industria aeroespacial.',
+    },
+    mil2: {
+      era: '1916',
+      title: 'Espíritu de Verdún y Disuasión',
+      fact: 'Combina fortificaciones modernas con una fuerza de proyección rápida de alcance mundial.',
+    },
+    restore: {
+      era: '1804–1815',
+      title: 'Restaurar el Imperio Francés',
+      fact: 'Devuelve a París el liderazgo continental bajo el estandarte histórico del Imperio Francés.',
       newName: 'Imperio Francés',
-      controlIso2: ['BE', 'NL', 'CH'],
-      proclamationText: '¡París proclama el renacimiento del Imperio Francés!',
-    },
-  },
-  DE: {
-    heritageTitle: 'Linaje Germánico y Prusiano',
-    heritageSummary: 'De la Unificación de 1871 y el Milagro Económico al Sacro Imperio.',
-    root: {
-      era: '1871',
-      title: 'Unificación de Bismarck',
-      subtitle: 'Consolidación industrial de Berlín',
-      history: 'Unifica las capacidades productivas alemanas con disciplina administrativa.',
-    },
-    economy: {
-      era: '1950 – Presente',
-      title: 'Wirtschaftswunder (Milagro Económico)',
-      subtitle: 'Potencia manufacturera del Ruhr',
-      history: 'Eleva la eficiencia de ciudades e industria pesada alemana.',
-    },
-    military: {
-      era: 'Siglos XIX – XX',
-      title: 'Estado Mayor General',
-      subtitle: 'Logística y coordinación blindada',
-      history: 'Profesionaliza la cadena de mando y la capacidad de movilización.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1871 – 1918',
-      title: 'Restaurar el Imperio Alemán',
-      subtitle: 'Gran federación de Europa Central',
-      history: 'Integra Alemania, Austria y Chequia en una gran potencia centroeuropea.',
-      newName: 'Imperio Alemán',
-      controlIso2: ['AT', 'CZ'],
-      proclamationText: '¡Berlín proclama la restauración del Imperio Alemán!',
-    },
-    secondaryRestoration: {
-      era: '962 – 1806',
-      title: 'Sacro Imperio Romano Germánico',
-      subtitle: 'Corona imperial de Europa Central',
-      history: 'Reúne Alemania, Austria, Suiza, Chequia y Países Bajos bajo el Sacro Imperio.',
-      newName: 'Sacro Imperio Germánico',
-      controlIso2: ['AT', 'CH', 'CZ', 'NL'],
-    },
-  },
-  IT: {
-    heritageTitle: 'Linaje Romano y del Risorgimento',
-    heritageSummary: 'De la antigua Roma y el Renacimiento al dominio del Mare Nostrum.',
-    root: {
-      era: '1861',
-      title: 'Risorgimento Italiano',
-      subtitle: 'Unificación de la península',
-      history: 'Consolida el legado cultural y estatal desde Roma hasta los Alpes.',
-    },
-    economy: {
-      era: 'Siglos XV – XXI',
-      title: 'Renacimiento y Repúblicas Marítimas',
-      subtitle: 'Venecia, Génova y comercio mediterráneo',
-      history: 'Impulsa el comercio naval y el desarrollo de ciudades prósperas.',
-      minPorts: 1,
-    },
-    military: {
-      era: 'Antigüedad – Modernidad',
-      title: 'Legiones del Mediterráneo',
-      subtitle: 'Proyección naval y terrestre',
-      history: 'Refuerza las fuerzas armadas para proyectar influencia en el Mediterráneo.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '27 a. C. – 476 d. C.',
-      title: 'Restaurar el Imperio Romano',
-      subtitle: 'SPQR · Dominio del Mare Nostrum',
-      history: 'Restaura la gloria del Imperio Romano controlando Francia, España y Grecia.',
-      newName: 'Imperio Romano',
-      controlIso2: ['FR', 'ES', 'GR'],
-      proclamationText: '¡SPQR! ¡Roma proclama la restauración del Imperio Romano!',
+      targets: ['BE', 'ES', 'IT', 'DE'],
     },
   },
   GB: {
-    heritageTitle: 'Linaje Británico y Marítimo',
-    heritageSummary: 'De la Revolución Industrial y la Royal Navy a la Mancomunidad Imperial.',
+    subtitle: 'Cuna de la Revolución Industrial y Señora de los Mares',
+    ancestors: ['Reinos de Inglaterra y Escocia', 'Acta de Unión (1707)', 'Reino Unido'],
     root: {
-      era: '1707 – 1801',
-      title: 'Acta de Unión y Revolución Industrial',
-      subtitle: 'Motor industrial de Londres',
-      history: 'Aprovecha la herencia financiera e industrial británica.',
+      era: '1707',
+      title: 'Acta de Unión de Gran Bretaña',
+      fact: 'La unión de Inglaterra y Escocia dio origen a la mayor potencia naval y parlamentaria de la Edad Moderna.',
     },
-    economy: {
-      era: 'Siglos XVIII – XXI',
-      title: 'Centro Financiero de la City',
-      subtitle: 'Banca global y comercio oceánico',
-      history: 'Impulsa la recaudación comercial y la red de puertos británicos.',
-      minPorts: 1,
+    eco1: {
+      era: '1760–1840',
+      title: 'Revolución Industrial',
+      fact: 'La máquina de vapor, el ferrocarril y la banca londinense transformaron la economía de toda la humanidad.',
     },
-    military: {
-      era: '1805 – 1945',
-      title: 'Rule Britannia · Royal Navy',
-      subtitle: 'Supremacía naval mundial',
-      history: 'Consolida la capacidad de invasión anfibia y defensa insular.',
-      minAllies: 2,
+    mil1: {
+      era: '1805',
+      title: 'Victoria de Trafalgar',
+      fact: 'La Royal Navy aseguró un siglo de supremacía oceánica bajo el liderazgo del almirante Nelson.',
     },
-    restoration: {
-      era: '1583 – 1947',
+    eco2: {
+      era: '1931',
+      title: 'Mancomunidad de Naciones',
+      fact: 'Teje una red comercial y diplomática global inspirada en la Commonwealth.',
+    },
+    mil2: {
+      era: '1940',
+      title: 'Batalla de Inglaterra',
+      fact: 'El radar y la defensa insular resistieron la tormenta y prepararon la ofensiva aliada.',
+    },
+    restore: {
+      era: '1815–1922',
       title: 'Restaurar el Imperio Británico',
-      subtitle: 'Corona de los Mares y Mancomunidad',
-      history: 'Unifica las Islas Británicas y proyecta la corona sobre Irlanda y Canadá.',
+      fact: 'Reclama el legado marítimo global bajo la corona del histórico Imperio Británico.',
       newName: 'Imperio Británico',
-      controlIso2: ['IE', 'CA'],
-      proclamationText: '¡Londres proclama la restauración del Imperio Británico!',
+      targets: ['IE', 'FR', 'CA', 'AU'],
+    },
+  },
+  DE: {
+    subtitle: 'De la Unificación Alemana al Imperio Alemán',
+    ancestors: ['Sacro Imperio Romano Germánico', 'Reino de Prusia', 'Alemania'],
+    root: {
+      era: '1871',
+      title: 'Unificación de Bismarck',
+      fact: 'En 1871 los estados alemanes se unificaron en una potencia industrial y científica en el centro de Europa.',
+    },
+    eco1: {
+      era: '1834',
+      title: 'Zollverein e Ingeniería Industrial',
+      fact: 'La unión aduanera, la química y la siderurgia convirtieron a Alemania en el motor industrial europeo.',
+    },
+    mil1: {
+      era: '1866–1871',
+      title: 'Estado Mayor General',
+      fact: 'La planificación ferroviaria y logística del Estado Mayor estableció nuevos estándares de mando militar.',
+    },
+    eco2: {
+      era: '1950–1990',
+      title: 'Milagro Económico y Reunificación',
+      fact: 'El Wirtschaftswunder y la caída del Muro de Berlín en 1989 consolidaron el liderazgo económico europeo.',
+    },
+    mil2: {
+      era: '1871',
+      title: 'Doctrina de Mando por Misión',
+      fact: 'Aumenta la disciplina táctica, la capacidad de movilización y las defensas centroeuropeas.',
+    },
+    restore: {
+      era: '1871–1918',
+      title: 'Restaurar el Imperio Alemán',
+      fact: 'Restablece la hegemonía centroeuropea proclamando nuevamente el Imperio Alemán.',
+      newName: 'Imperio Alemán',
+      targets: ['AT', 'PL', 'CZ', 'DK'],
+    },
+  },
+  IT: {
+    subtitle: 'De la Roma Clásica y el Renacimiento al Nuevo Imperio',
+    ancestors: ['República e Imperio Romano', 'Ciudades-Estado del Renacimiento', 'Italia'],
+    root: {
+      era: '1861',
+      title: 'El Risorgimento',
+      fact: 'Garibaldi, Cavour y Mazzini unificaron la península italiana tras siglos de división política.',
+    },
+    eco1: {
+      era: '1400–1600',
+      title: 'Banca y Comercio del Renacimiento',
+      fact: 'Florencia, Venecia y Génova inventaron la banca moderna y el comercio mediterráneo.',
+    },
+    mil1: {
+      era: '27 a. C.',
+      title: 'Legado de las Legiones Romanas',
+      fact: 'La ingeniería militar, las calzadas y la disciplina legionaria forjaron la civilización mediterránea.',
+    },
+    eco2: {
+      era: '1957',
+      title: 'Tratados de Roma',
+      fact: 'Roma fue sede de los tratados fundacionales de la integración europea y del milagro industrial italiano.',
+    },
+    mil2: {
+      era: '1571',
+      title: 'Mare Nostrum y Flota Veneciana',
+      fact: 'Consolida el control naval del Mediterráneo central y la defensa alpina del norte.',
+    },
+    restore: {
+      era: '27 a. C.–476 d. C.',
+      title: 'Restaurar el Imperio Romano',
+      fact: 'Desde la Ciudad Eterna, proclama la resurrección del Imperio Romano sobre el Mediterráneo.',
+      newName: 'Imperio Romano',
+      targets: ['GR', 'ES', 'FR', 'TN', 'HR'],
     },
   },
   RU: {
-    heritageTitle: 'Linaje Imperial Ruso y Euroasiático',
-    heritageSummary: 'De Pedro el Grande a la vasta integración del espacio euroasiático.',
+    subtitle: 'De la Rus y los Zares al Imperio Euroasiático',
+    ancestors: ['Gran Principado de Moscú', 'Imperio Ruso (1721)', 'Rusia'],
     root: {
       era: '1721',
       title: 'Reformas de Pedro el Grande',
-      subtitle: 'Modernización de Moscú y San Petersburgo',
-      history: 'Impulsa la modernización administrativa y el aprovechamiento del vasto territorio.',
+      fact: 'La fundación de San Petersburgo y la apertura al Báltico convirtieron a Rusia en gran potencia europea.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Ferrocarril Transiberiano y Recursos',
-      subtitle: 'Energía y minería continental',
-      history: 'Conecta y explota las reservas minerales desde Europa hasta el Pacífico.',
+    eco1: {
+      era: '1891–1916',
+      title: 'Ferrocarril Transiberiano',
+      fact: 'La vía férrea más larga del mundo unió Moscú con el Pacífico y abrió las riquezas de Siberia.',
     },
-    military: {
-      era: '1812 – 1945',
-      title: 'Doctrina de Profundidad Estratégica',
-      subtitle: 'Ejército continental masivo',
-      history: 'Fortalece la capacidad militar y las defensas en profundidad.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1812',
+      title: 'Defensa Patria de 1812 y 1943',
+      fact: 'La profundidad estratégica y la resistencia en Stalingrado y Borodino definieron su doctrina militar.',
     },
-    restoration: {
-      era: '1721 – 1917',
+    eco2: {
+      era: '1957–1961',
+      title: 'Pioneros del Espacio (Sputnik y Gagarin)',
+      fact: 'El primer satélite y el primer cosmonauta demostraron la capacidad científica e industrial del país.',
+    },
+    mil2: {
+      era: '1783',
+      title: 'Guardia Imperial y Bastión Euroasiático',
+      fact: 'Expande las reservas estratégicas de tropas y las defensas en la gran llanura oriental.',
+    },
+    restore: {
+      era: '1721–1917',
       title: 'Restaurar el Imperio Ruso',
-      subtitle: 'Unión de las estepas y Europa Oriental',
-      history: 'Reunifica Rusia, Bielorrusia, Ucrania y Kazajistán en el Imperio Ruso.',
+      fact: 'Unifica el espacio euroasiático bajo la histórica bandera del Imperio Ruso.',
       newName: 'Imperio Ruso',
-      controlIso2: ['BY', 'UA', 'KZ'],
-      proclamationText: '¡Moscú proclama la restauración del Imperio Ruso!',
-    },
-  },
-  PL: {
-    heritageTitle: 'Linaje de la Mancomunidad Polaca',
-    heritageSummary: 'De los Húsares Alados a la unión histórica con Lituania.',
-    root: {
-      era: '1569',
-      title: 'Unión de Lublin',
-      subtitle: 'Herencia parlamentaria y soberana',
-      history: 'Reafirma el papel central de Varsovia en Europa del Este.',
-    },
-    economy: {
-      era: 'Siglo XXI',
-      title: 'Corredor del Báltico y Vístula',
-      subtitle: 'Crecimiento industrial europeo',
-      history: 'Desarrolla las ciudades polacas y su salida marítima al Báltico.',
-    },
-    military: {
-      era: '1683',
-      title: 'Húsares Alados Modernos',
-      subtitle: 'Fuerza acorazada y defensiva',
-      history: 'Forja un ejército ágil capaz de defender las llanuras europeas.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1569 – 1795',
-      title: 'Mancomunidad Polaco-Lituana',
-      subtitle: 'República de las Dos Naciones',
-      history: 'Restaura la Mancomunidad integrando Polonia, Lituania y Bielorrusia.',
-      newName: 'Mancomunidad Polaco-Lituana',
-      controlIso2: ['LT', 'BY'],
-      proclamationText: '¡Varsovia restaura la histórica Mancomunidad Polaco-Lituana!',
-    },
-  },
-  AT: {
-    heritageTitle: 'Linaje de los Habsburgo',
-    heritageSummary: 'De la corte imperial de Viena a la monarquía dual del Danubio.',
-    root: {
-      era: '1804',
-      title: 'Herencia Imperial de Viena',
-      subtitle: 'Diplomacia y cultura centroeuropea',
-      history: 'Consolida el prestigio diplomático y urbano de Austria.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Comercio del Danubio y los Alpes',
-      subtitle: 'Banca e industria de precisión',
-      history: 'Convierte Viena en núcleo financiero del centro de Europa.',
-    },
-    military: {
-      era: '1867 – 1918',
-      title: 'Ejército Imperial y Real',
-      subtitle: 'Fortificaciones alpinas y movilización',
-      history: 'Refuerza las divisiones centroeuropeas y sus fortificaciones.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1867 – 1918',
-      title: 'Imperio Austrohúngaro',
-      subtitle: 'Monarquía Dual del Danubio',
-      history: 'Reunifica Austria, Hungría, Chequia y Eslovaquia bajo la corona imperial.',
-      newName: 'Imperio Austrohúngaro',
-      controlIso2: ['HU', 'CZ', 'SK'],
-      proclamationText: '¡Viena proclama la restauración del Imperio Austrohúngaro!',
-    },
-  },
-  HU: {
-    heritageTitle: 'Linaje de la Corona de San Esteban',
-    heritageSummary: 'De los magiares y Budapest a la restauración de la Monarquía del Danubio.',
-    root: {
-      era: '1000',
-      title: 'Corona de San Esteban',
-      subtitle: 'Mil años de historia en el Danubio',
-      history: 'Afianza la identidad histórica de Budapest y su administración.',
-    },
-    economy: {
-      era: 'Siglo XIX',
-      title: 'Granero de la Cuenca Carpática',
-      subtitle: 'Puentes y comercio fluvial',
-      history: 'Impulsa la economía urbana y agrícola de Hungría.',
-    },
-    military: {
-      era: '1458 – 1848',
-      title: 'Ejército Negro y Húsares',
-      subtitle: 'Tradición militar húngara',
-      history: 'Moderniza las tropas rápidas de defensa y ataque.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1867 – 1918',
-      title: 'Imperio Austrohúngaro',
-      subtitle: 'Unión del Danubio liderada por Budapest',
-      history: 'Une Hungría, Austria, Eslovaquia y Croacia en la Monarquía Dual.',
-      newName: 'Imperio Austrohúngaro',
-      controlIso2: ['AT', 'SK', 'HR'],
-    },
-  },
-  GR: {
-    heritageTitle: 'Linaje Helénico y Bizantino',
-    heritageSummary: 'De la Grecia Clásica y Alejandro Magno al Imperio Bizantino.',
-    root: {
-      era: 'Antigüedad – 1821',
-      title: 'Herencia de Atenas e Independencia',
-      subtitle: 'Cuna de la civilización mediterránea',
-      history: 'Consolida el legado helénico y la estabilidad estatal.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Flota Mercante del Egeo',
-      subtitle: 'Supremacía marítima comercial',
-      history: 'Potencia los puertos griegos y el comercio del Mediterráneo oriental.',
-      minPorts: 1,
-    },
-    military: {
-      era: '334 a. C. – 1453',
-      title: 'Falange y Guardia Varega',
-      subtitle: 'Estrategia defensiva y ofensiva',
-      history: 'Entrena fuerzas combinadas terrestres y navales.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '330 – 1453',
-      title: 'Restaurar el Imperio Bizantino',
-      subtitle: 'Retorno de Constantinopla y el Egeo',
-      history: 'Restaura el Imperio Romano de Oriente integrando Turquía y Bulgaria.',
-      newName: 'Imperio Bizantino',
-      controlIso2: ['TR', 'BG'],
-      proclamationText: '¡Atenas proclama el renacimiento del Imperio Bizantino!',
-    },
-  },
-  SE: {
-    heritageTitle: 'Linaje Nórdico y de Kalmar',
-    heritageSummary: 'Del Imperio Sueco y el Báltico a la gran unión escandinava.',
-    root: {
-      era: '1523',
-      title: 'Legado de Gustavo Vasa',
-      subtitle: 'Estado moderno sueco',
-      history: 'Fortalece las instituciones y recursos minerales del norte.',
-    },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Hierro de Kiruna e Innovación Nórdica',
-      subtitle: 'Industria avanzada del Báltico',
-      history: 'Impulsa minería, tecnología y puertos escandinavos.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1611 – 1721',
-      title: 'Caroleans Modernos',
-      subtitle: 'Ejército profesional nórdico',
-      history: 'Entrena tropas disciplinadas para operar en clima frío.',
-    },
-    restoration: {
-      era: '1397 – 1523',
-      title: 'Restaurar la Unión de Kalmar',
-      subtitle: 'Unificación de Escandinavia',
-      history: 'Reúne Suecia, Noruega y Dinamarca en la gran Unión de Kalmar.',
-      newName: 'Unión de Kalmar',
-      controlIso2: ['NO', 'DK'],
-      proclamationText: '¡Estocolmo proclama la restauración de la Unión de Kalmar!',
-    },
-  },
-  NO: {
-    heritageTitle: 'Linaje Vikingo y del Mar del Norte',
-    heritageSummary: 'De los navegantes nórdicos a la prosperidad energética y la Unión de Kalmar.',
-    root: {
-      era: '1814 – 1905',
-      title: 'Constitución de Eidsvoll',
-      subtitle: 'Soberanía e identidad noruega',
-      history: 'Afianza el Estado noruego y la administración de sus fiordos.',
-    },
-    economy: {
-      era: '1969 – Presente',
-      title: 'Fondo Soberano del Mar del Norte',
-      subtitle: 'Energía marítima y finanzas',
-      history: 'Maximiza el ingreso sostenible de recursos marinos y mineros.',
-      minPorts: 1,
-    },
-    military: {
-      era: 'Siglos IX – XXI',
-      title: 'Guardia de los Fiordos',
-      subtitle: 'Defensa costera y comandos árticos',
-      history: 'Fortalece la capacidad defensiva y expedicionaria naval.',
-    },
-    restoration: {
-      era: '1397 – 1523',
-      title: 'Unión de Kalmar',
-      subtitle: 'Escandinavia unida desde Oslo',
-      history: 'Une Noruega, Suecia y Dinamarca en la Unión de Kalmar.',
-      newName: 'Unión de Kalmar',
-      controlIso2: ['SE', 'DK'],
-    },
-  },
-  DK: {
-    heritageTitle: 'Linaje Danés y del Estrecho',
-    heritageSummary: 'Fundador histórico de la Unión de Kalmar y guardián del Báltico.',
-    root: {
-      era: '965 – 1397',
-      title: 'Corona de Margarita I',
-      subtitle: 'Raíces de la diplomacia escandinava',
-      history: 'Reivindica la tradición fundacional danesa en el norte de Europa.',
-    },
-    economy: {
-      era: 'Siglos XVII – XXI',
-      title: 'Peajes del Sund y Navieras Globales',
-      subtitle: 'Comercio marítimo del Báltico',
-      history: 'Convierte Copenhague en eje marítimo del norte.',
-      minPorts: 1,
-    },
-    military: {
-      era: 'Siglo XXI',
-      title: 'Flota del Báltico y Groenlandia',
-      subtitle: 'Proyección ártica y naval',
-      history: 'Amplía la preparación militar y defensa costera.',
-    },
-    restoration: {
-      era: '1397 – 1523',
-      title: 'Restaurar la Unión de Kalmar',
-      subtitle: 'Reunificación nórdica desde Copenhague',
-      history: 'Reconstruye la Unión de Kalmar junto a Suecia y Noruega.',
-      newName: 'Unión de Kalmar',
-      controlIso2: ['SE', 'NO'],
-    },
-  },
-  NL: {
-    heritageTitle: 'Linaje de las Provincias Unidas',
-    heritageSummary: 'De la Edad de Oro Neerlandesa a la unión histórica del Benelux.',
-    root: {
-      era: '1581 – 1648',
-      title: 'República de las Provincias Unidas',
-      subtitle: 'Independencia y república comercial',
-      history: 'Consolida la ingeniería hidráulica y la eficiencia estatal.',
-    },
-    economy: {
-      era: 'Siglo XVII',
-      title: 'Edad de Oro y Puerto de Róterdam',
-      subtitle: 'Compañías marítimas y finanzas',
-      history: 'Dispara el comercio marítimo y los ingresos portuarios.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1667',
-      title: 'Armada de De Ruyter',
-      subtitle: 'Defensa de diques y poder naval',
-      history: 'Moderniza la defensa territorial y la proyección marítima.',
-    },
-    restoration: {
-      era: '1815 – 1830',
-      title: 'Reino Unido de los Países Bajos',
-      subtitle: 'Unificación histórica del Benelux',
-      history: 'Reúne Países Bajos, Bélgica y Luxemburgo en un solo Estado.',
-      newName: 'Unión del Benelux',
-      controlIso2: ['BE', 'LU'],
-    },
-  },
-  RS: {
-    heritageTitle: 'Linaje Balcánico y Eslavo del Sur',
-    heritageSummary: 'Del Imperio Serbio medieval a la reunificación de los Balcanes.',
-    root: {
-      era: '1346 – 1878',
-      title: 'Herencia de Belgrado y el Danubio',
-      subtitle: 'Soberanía en la encrucijada balcánica',
-      history: 'Consolida el corazón industrial y militar serbio.',
-    },
-    economy: {
-      era: 'Siglo XX',
-      title: 'Corredor Balcánico',
-      subtitle: 'Industria y rutas del Danubio',
-      history: 'Expande las ciudades y rutas comerciales regionales.',
-    },
-    military: {
-      era: '1914 – 1945',
-      title: 'Resistencia de los Balcanes',
-      subtitle: 'Defensa territorial y movilización',
-      history: 'Prepara divisiones curtidas para campañas regionales.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1918 – 1992',
-      title: 'Restaurar Yugoslavia',
-      subtitle: 'Unión de los Eslavos del Sur',
-      history: 'Reúne Serbia, Croacia, Bosnia y Herzegovina y Montenegro.',
-      newName: 'Yugoslavia',
-      controlIso2: ['HR', 'BA', 'ME'],
-      proclamationText: '¡Belgrado proclama la restauración de Yugoslavia!',
+      targets: ['BY', 'UA', 'KZ', 'FI'],
     },
   },
   UA: {
-    heritageTitle: 'Linaje de la Rus de Kiev',
-    heritageSummary: 'De los príncipes de Kiev y los cosacos a la integración de Europa Oriental.',
+    subtitle: 'Herederos de la Rus de Kiev y los Cosacos de Zaporiyia',
+    ancestors: ['Rus de Kiev (882)', 'Hetmanato Cosaco', 'Ucrania'],
     root: {
-      era: '882 – 1991',
+      era: '882–1240',
       title: 'Legado de la Rus de Kiev',
-      subtitle: 'Raíces históricas a orillas del Dniéper',
-      history: 'Afianza la soberanía y la capacidad productiva de Kiev.',
+      fact: 'Kiev fue el gran centro comercial, cultural y político que conectaba el Báltico con Constantinopla.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Tierras Negras y Puertos del Mar Negro',
-      subtitle: 'Granero de Europa e industria pesada',
-      history: 'Potencia los ingresos agrícolas, mineros y portuarios.',
+    eco1: {
+      era: '1880–2025',
+      title: 'Granero de Europa',
+      fact: 'Las tierras negras (chernozem) y los puertos del Mar Negro sostienen el comercio agrícola mundial.',
     },
-    military: {
-      era: '1648 – Presente',
-      title: 'Espíritu Cosaco de Zaporiyia',
-      subtitle: 'Defensa tenaz y guerra moderna',
-      history: 'Refuerza el ejército con alta disciplina defensiva.',
+    mil1: {
+      era: '1648',
+      title: 'Sich de Zaporiyia',
+      fact: 'Los cosacos ucranianos crearon una fuerza móvil famosa por su independencia y espíritu combativo.',
     },
-    restoration: {
-      era: '882 – 1240',
+    eco2: {
+      era: '1991',
+      title: 'Corredor del Mar Negro e Industria',
+      fact: 'Conecta la metalurgia, la aeronáutica y los puertos de Odesa con socios europeos.',
+    },
+    mil2: {
+      era: '2022',
+      title: 'Doctrina de Defensa Resiliente',
+      fact: 'Perfecciona la defensa territorial moderna y la movilización rápida ante amenazas externas.',
+    },
+    restore: {
+      era: '882–1240',
       title: 'Restaurar la Rus de Kiev',
-      subtitle: 'Reunificación histórica eslava oriental',
-      history: 'Reconstruye el antiguo dominio de Kiev uniendo Ucrania y Bielorrusia.',
+      fact: 'Recobra el esplendor histórico de la gran federación medieval centrada en Kiev.',
       newName: 'Rus de Kiev',
-      controlIso2: ['BY'],
+      targets: ['BY', 'RU', 'PL', 'MD'],
     },
   },
-  RO: {
-    heritageTitle: 'Linaje Dacio y del Danubio',
-    heritageSummary: 'De la unión de Valaquia y Moldavia a la Gran Rumania.',
+  PL: {
+    subtitle: 'De los Húsares Alados a la Mancomunidad',
+    ancestors: ['Reino de Polonia (1025)', 'Mancomunidad Polaco-Lituana (1569)', 'Polonia'],
     root: {
-      era: '1859 – 1918',
-      title: 'Gran Unión de Alba Iulia',
-      subtitle: 'Consolidación nacional rumana',
-      history: 'Fortalece el Estado y las infraestructuras de los Cárpatos.',
+      era: '1569',
+      title: 'Unión de Lublin',
+      fact: 'Polonia y Lituania fundaron una de las repúblicas nobiliarias más grandes y tolerantes de Europa.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Refinerías de Ploiești y Constanza',
-      subtitle: 'Energía y comercio del Mar Negro',
-      history: 'Aumenta los ingresos energéticos y marítimos.',
+    eco1: {
+      era: '1791',
+      title: 'Constitución del 3 de Mayo',
+      fact: 'Polonia promulgó la primera constitución moderna de Europa, impulsando reformas civiles y económicas.',
     },
-    military: {
-      era: '1877 – 1918',
-      title: 'Guardia de los Cárpatos',
-      subtitle: 'Fortificación montañosa y ofensiva',
-      history: 'Mejora la capacidad de combate y defensa territorial.',
+    mil1: {
+      era: '1683',
+      title: 'Carga de los Húsares en Viena',
+      fact: 'El rey Juan III Sobieski lideró la mayor carga de caballería de la historia para salvar Viena.',
     },
-    restoration: {
-      era: '1918 – 1940',
-      title: 'Restaurar la Gran Rumania',
-      subtitle: 'Reunificación con Moldavia',
-      history: 'Reúne Rumania y Moldavia bajo una misma bandera.',
-      newName: 'Gran Rumania',
-      controlIso2: ['MD'],
+    eco2: {
+      era: '1980–2004',
+      title: 'Solidaridad y Despegue Europeo',
+      fact: 'El movimiento Solidarność cambió Europa del Este y lanzó un crecimiento industrial sostenido.',
+    },
+    mil2: {
+      era: '1920',
+      title: 'Milagro del Vístula',
+      fact: 'Una brillante contraofensiva aseguró la independencia polaca y estableció una doctrina móvil.',
+    },
+    restore: {
+      era: '1569–1795',
+      title: 'Restaurar la Mancomunidad Polaco-Lituana',
+      fact: 'Une nuevamente las tierras entre el Báltico y el Mar Negro bajo la Mancomunidad.',
+      newName: 'Mancomunidad Polaco-Lituana',
+      targets: ['LT', 'BY', 'UA'],
     },
   },
-  CZ: {
-    heritageTitle: 'Linaje de Bohemia y Moravia',
-    heritageSummary: 'De la Corona de Bohemia y Praga a la unión checoslovaca.',
+  GR: {
+    subtitle: 'Cuna de la Democracia y Heredera de Bizancio',
+    ancestors: ['Grecia Clásica', 'Imperio Bizantino (330–1453)', 'Grecia'],
     root: {
-      era: '1348 – 1918',
-      title: 'Legado de Carlos IV y Praga',
-      subtitle: 'Corazón cultural e industrial de Europa',
-      history: 'Impulsa el desarrollo urbano y técnico de Bohemia.',
+      era: '1821',
+      title: 'Guerra de Independencia Griega',
+      fact: 'En 1821 los helenos se alzaron para restaurar un Estado griego libre en el Egeo.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Taller Industrial de Europa Central',
-      subtitle: 'Ingeniería, acero y manufactura',
-      history: 'Eleva la recaudación de las ciudades checas.',
+    eco1: {
+      era: '500 a. C.–2025',
+      title: 'Flota Mercante del Egeo',
+      fact: 'Desde la Atenas clásica hasta hoy, la marina mercante griega domina las rutas marítimas globales.',
     },
-    military: {
-      era: '1420 – 1938',
-      title: 'Fortalezas de los Sudetes',
-      subtitle: 'Defensa blindada e ingenieril',
-      history: 'Consolida un ejército bien equipado y defensivo.',
+    mil1: {
+      era: '480 a. C.',
+      title: 'Espíritu de Salamina y las Termópilas',
+      fact: 'La defensa de los pasos estrechos y la táctica naval en el Egeo son orgullo de la historia griega.',
     },
-    restoration: {
-      era: '1918 – 1992',
-      title: 'Restaurar Checoslovaquia',
-      subtitle: 'Reunión histórica de checos y eslovacos',
-      history: 'Reunifica Chequia y Eslovaquia en la República de Checoslovaquia.',
-      newName: 'Checoslovaquia',
-      controlIso2: ['SK'],
+    eco2: {
+      era: '532',
+      title: 'Legado Cultural de Constantinopla',
+      fact: 'El derecho, la arquitectura y la diplomacia bizantina fortalecen el prestigio internacional heleno.',
+    },
+    mil2: {
+      era: '1912',
+      title: 'Cruceros del Egeo y Defensas Insulares',
+      fact: 'Fortifica las islas y prepara a las fuerzas armadas para controlar el Mediterráneo oriental.',
+    },
+    restore: {
+      era: '330–1453',
+      title: 'Restaurar el Imperio Bizantino',
+      fact: 'Renace el Imperio Romano de Oriente con el águila bicéfala sobre el Egeo y los Balcanes.',
+      newName: 'Imperio Bizantino',
+      targets: ['TR', 'BG', 'CY', 'MK'],
+    },
+  },
+  AT: {
+    subtitle: 'Casa de Habsburgo y Centro del Danubio',
+    ancestors: ['Archiducado de Austria', 'Imperio Austrohúngaro (1867)', 'Austria'],
+    root: {
+      era: '1804',
+      title: 'Proclamación del Imperio de Austria',
+      fact: 'Viena se erigió como capital diplomática y cultural de Europa central durante el siglo XIX.',
+    },
+    eco1: {
+      era: '1815',
+      title: 'Congreso de Viena y Comercio Danubiano',
+      fact: 'La diplomacia vienesa trazó un siglo de equilibrio europeo e impulsó el comercio a lo largo del Danubio.',
+    },
+    mil1: {
+      era: '1683',
+      title: 'Bastión de Viena',
+      fact: 'La defensa victoriosa de Viena y las campañas del príncipe Eugenio consolidaron el poder imperial.',
+    },
+    eco2: {
+      era: '1955',
+      title: 'Puente Alpino de Europa Central',
+      fact: 'Industria de precisión, banca y neutralidad activa consolidan una economía sumamente estable.',
+    },
+    mil2: {
+      era: '1867',
+      title: 'Compromiso Dual del Danubio',
+      fact: 'Coordina las fuerzas alpinas y centroeuropeas para defender toda la cuenca del Danubio.',
+    },
+    restore: {
+      era: '1867–1918',
+      title: 'Restaurar el Imperio Austrohúngaro',
+      fact: 'Reúne la histórica monarquía dual del Danubio bajo el liderazgo de Viena.',
+      newName: 'Imperio Austrohúngaro',
+      targets: ['HU', 'CZ', 'SK', 'SI', 'HR'],
+    },
+  },
+  HU: {
+    subtitle: 'Reino de San Esteban y Corona del Danubio',
+    ancestors: ['Principado Magiar (895)', 'Reino de Hungría (1000)', 'Hungría'],
+    root: {
+      era: '1000',
+      title: 'Corona de San Esteban',
+      fact: 'El rey Esteban I fundó el Reino de Hungría en el año 1000, anclando la cuenca de los Cárpatos en Europa.',
+    },
+    eco1: {
+      era: '1458–1490',
+      title: 'Renacimiento de Matías Corvino',
+      fact: 'Buda se convirtió en una de las cortes más cultas, ricas y prósperas de la Europa renacentista.',
+    },
+    mil1: {
+      era: '1456',
+      title: 'Ejército Negro y Defensa del Danubio',
+      fact: 'Hungría mantuvo uno de los primeros ejércitos profesionales permanentes de Europa.',
+    },
+    eco2: {
+      era: '1873',
+      title: 'Unión de Budapest',
+      fact: 'La fusión de Buda y Pest creó una gran metrópoli ferroviaria e industrial en el corazón europeo.',
+    },
+    mil2: {
+      era: '1848',
+      title: 'Guardia Nacional de 1848',
+      fact: 'Inspira la movilización patriótica y las fortificaciones de la llanura panónica.',
+    },
+    restore: {
+      era: '1867–1918',
+      title: 'Restaurar el Imperio Austrohúngaro',
+      fact: 'Desde Budapest, restaura la gran unión imperial de la cuenca de los Cárpatos y el Danubio.',
+      newName: 'Imperio Austrohúngaro',
+      targets: ['AT', 'SK', 'RO', 'HR'],
+    },
+  },
+  SE: {
+    subtitle: 'De Gustavo Adolfo al Imperio del Báltico',
+    ancestors: ['Reinos Nórdicos', 'Imperio Sueco (1611–1721)', 'Suecia'],
+    root: {
+      era: '1523',
+      title: 'Independencia de Gustavo Vasa',
+      fact: 'Suecia consolidó un Estado soberano y moderno que pronto lideraría el norte de Europa.',
+    },
+    eco1: {
+      era: '1895',
+      title: 'Innovación, Acero y Premios Nobel',
+      fact: 'La metalurgia, la industria tecnológica y el legado de Alfred Nobel distinguieron a Suecia en el mundo.',
+    },
+    mil1: {
+      era: '1631',
+      title: 'Reformas de Gustavo Adolfo',
+      fact: 'La artillería ligera y las armas combinadas suecas revolucionaron la táctica militar europea.',
+    },
+    eco2: {
+      era: '1952',
+      title: 'Consejo Nórdico de Cooperación',
+      fact: 'Integra el comercio, la ciencia y la diplomacia entre las naciones escandinavas.',
+    },
+    mil2: {
+      era: '1700',
+      title: 'Disciplina de los Carolinos',
+      fact: 'Prepara fuerzas árticas y navales altamente entrenadas para dominar el Mar Báltico.',
+    },
+    restore: {
+      era: '1611–1721',
+      title: 'Restaurar el Imperio Sueco',
+      fact: 'Recupera la supremacía nórdica proclamando el histórico Imperio Sueco (Stormaktstiden).',
+      newName: 'Imperio Sueco',
+      targets: ['NO', 'FI', 'DK', 'EE'],
+    },
+  },
+  DK: {
+    subtitle: 'Guardianes de los Estrechos y la Unión de Kalmar',
+    ancestors: ['Era Vikinga', 'Unión de Kalmar (1397)', 'Dinamarca'],
+    root: {
+      era: '965',
+      title: 'Piedras de Jelling',
+      fact: 'Harald Blåtand unificó Dinamarca hace más de mil años, creando una de las monarquías más antiguas del mundo.',
+    },
+    eco1: {
+      era: '1429–1857',
+      title: 'Peaje del Sund y Navieras Globales',
+      fact: 'El control de los estrechos del Báltico y las rutas marítimas convirtieron a Copenhague en eje comercial.',
+    },
+    mil1: {
+      era: '1397',
+      title: 'Corona de la Reina Margarita I',
+      fact: 'Dinamarca articuló la unión política de toda Escandinavia bajo una sola corona en Kalmar.',
+    },
+    eco2: {
+      era: '1970–2025',
+      title: 'Energía Eólica y Diseño Nórdico',
+      fact: 'Líder en transición energética, logística marítima y cooperación ártica a través de Groenlandia.',
+    },
+    mil2: {
+      era: '1801',
+      title: 'Flota de los Estrechos Bálticos',
+      fact: 'Asegura el paso entre el Mar del Norte y el Báltico con defensas navales modernas.',
+    },
+    restore: {
+      era: '1397–1523',
+      title: 'Restaurar la Unión de Kalmar',
+      fact: 'Reunifica a Dinamarca, Noruega y Suecia bajo la bandera histórica de la Unión de Kalmar.',
+      newName: 'Unión de Kalmar',
+      targets: ['SE', 'NO', 'IS'],
+    },
+  },
+  NO: {
+    subtitle: 'De los Fiordos Vikingos a la Unión Nórdica',
+    ancestors: ['Reino de Noruega (872)', 'Reino del Mar del Norte', 'Noruega'],
+    root: {
+      era: '872',
+      title: 'Unificación de Hafrsfjord',
+      fact: 'Harald Cabellera Hermosa unió los reinos noruegos e inició una gran tradición marítima.',
+    },
+    eco1: {
+      era: '1969',
+      title: 'Energía del Mar del Norte y Fondo Soberano',
+      fact: 'El petróleo, la hidroelectricidad y el mayor fondo soberano del planeta crearon prosperidad duradera.',
+    },
+    mil1: {
+      era: '1016',
+      title: 'Navegantes del Atlántico Norte',
+      fact: 'Los marinos noruegos surcaron desde el Mar del Norte hasta Islandia, Groenlandia y Vinlandia.',
+    },
+    eco2: {
+      era: '1905',
+      title: 'Soberanía y Flota Mercante',
+      fact: 'Tras recuperar su independencia plena en 1905, Noruega desplegó una de las mayores flotas mercantes.',
+    },
+    mil2: {
+      era: '1940',
+      title: 'Defensa de los Fiordos y el Ártico',
+      fact: 'Fortifica la costa montañosa y coordina la vigilancia del Atlántico Norte.',
+    },
+    restore: {
+      era: '1016–1035',
+      title: 'Restaurar la Unión de Kalmar',
+      fact: 'Desde Oslo, lidera la gran unión escandinava del Mar del Norte y el Báltico.',
+      newName: 'Unión de Kalmar',
+      targets: ['SE', 'DK', 'IS'],
+    },
+  },
+  NL: {
+    subtitle: 'República Mercantil y Siglo de Oro Neerlandés',
+    ancestors: ['Provincias Unidas (1581)', 'Reino Unido de los Países Bajos (1815)', 'Países Bajos'],
+    root: {
+      era: '1581',
+      title: 'Acta de Abjuración',
+      fact: 'Las Siete Provincias Unidas proclamaron su independencia y crearon una república pionera en comercio y ciencia.',
+    },
+    eco1: {
+      era: '1602',
+      title: 'Compañía de las Indias y Bolsa de Ámsterdam',
+      fact: 'Ámsterdam inventó la primera bolsa de valores moderna y dominó el comercio marítimo mundial.',
+    },
+    mil1: {
+      era: '1667',
+      title: 'Escuadra del Almirante De Ruyter',
+      fact: 'La armada neerlandesa demostró excelencia naval defendiendo sus rutas comerciales globales.',
+    },
+    eco2: {
+      era: '1953–1997',
+      title: 'Obras del Plan Delta y Puerto de Róterdam',
+      fact: 'La ingeniería hidráulica que ganó tierra al mar y el mayor puerto de Europa impulsan la economía.',
+    },
+    mil2: {
+      era: '1944',
+      title: 'Unión del Benelux',
+      fact: 'Integra la defensa y logística con los países vecinos del Mar del Norte.',
+    },
+    restore: {
+      era: '1815–1830',
+      title: 'Restaurar el Reino Unido de los Países Bajos',
+      fact: 'Reúne el Benelux histórico en una potencia comercial y marítima de primer orden.',
+      newName: 'Reino Unido de los Países Bajos',
+      targets: ['BE', 'LU', 'DE'],
+    },
+  },
+  RS: {
+    subtitle: 'De Stefan Dušan a la Federación de los Balcanes',
+    ancestors: ['Imperio Serbio (1346)', 'Reino de Yugoslavia (1918)', 'Serbia'],
+    root: {
+      era: '1804–1878',
+      title: 'Levantamientos Serbios e Independencia',
+      fact: 'Las insurrecciones del siglo XIX devolvieron a Belgrado su soberanía en el corazón de los Balcanes.',
+    },
+    eco1: {
+      era: '1349',
+      title: 'Código de Dušan y Comercio del Danubio',
+      fact: 'El histórico código legal y las rutas fluviales de Belgrado impulsaron la organización estatal.',
+    },
+    mil1: {
+      era: '1914',
+      title: 'Batalla de Cer y Defensa Balcánica',
+      fact: 'La resistencia en los ríos Drina y Danubio forjó una reputación de férrea determinación militar.',
+    },
+    eco2: {
+      era: '1961',
+      title: 'Cumbre de Belgrado y Diplomacia',
+      fact: 'Belgrado albergó la primera cumbre del Movimiento de Países No Alineados, ganando peso diplomático.',
+    },
+    mil2: {
+      era: '1918',
+      title: 'Ejército de los Balcanes Centrales',
+      fact: 'Consolida la capacidad de movilización terrestre y las fortalezas de la cuenca balcánica.',
+    },
+    restore: {
+      era: '1918–1992',
+      title: 'Restaurar la Federación Yugoslava',
+      fact: 'Reunifica a los pueblos eslavos del sur bajo una gran federación balcánica.',
+      newName: 'Federación Yugoslava',
+      targets: ['HR', 'BA', 'ME', 'MK', 'SI'],
+    },
+  },
+  VA: {
+    subtitle: 'Sede Apostólica y Legado de los Estados Pontificios',
+    ancestors: ['Estados Pontificios (754–1870)', 'Pactos de Letrán (1929)', 'Ciudad del Vaticano'],
+    root: {
+      era: '1929',
+      title: 'Pactos de Letrán',
+      fact: 'El tratado de 1929 reconoció la plena soberanía territorial del Estado de la Ciudad del Vaticano.',
+    },
+    eco1: {
+      era: '1506–1626',
+      title: 'Mecenazgo del Renacimiento y Basílica de San Pedro',
+      fact: 'El impulso artístico y cultural de Roma atrajo a Miguel Ángel, Rafael y visitantes de todo el mundo.',
+    },
+    mil1: {
+      era: '1506',
+      title: 'Guardia Suiza Pontificia',
+      fact: 'Fundada por Julio II en 1506, es el cuerpo militar activo más antiguo y leal del planeta.',
+    },
+    eco2: {
+      era: '1962',
+      title: 'Diplomacia Universal de la Santa Sede',
+      fact: 'Mantiene relaciones diplomáticas con casi todo el planeta, potenciando alianzas internacionales.',
+    },
+    mil2: {
+      era: '1571',
+      title: 'Liga Santa del Mediterráneo',
+      fact: 'Retoma el histórico llamado diplomático y defensivo que unió flotas europeas en el siglo XVI.',
+    },
+    restore: {
+      era: '754–1870',
+      title: 'Restaurar los Estados Pontificios',
+      fact: 'Recupera la antigua denominación soberana del centro de la península itálica.',
+      newName: 'Estados Pontificios',
+      targets: ['IT', 'SM', 'CH'],
     },
   },
 
-  // === ASIA ===
-  TR: {
-    heritageTitle: 'Linaje de Anatolia y el Bósforo',
-    heritageSummary: 'De la Sublime Puerta y Atatürk a la encrucijada de dos continentes.',
-    root: {
-      era: '1923',
-      title: 'República de Ankara y Modernización',
-      subtitle: 'Reformas de Atatürk',
-      history: 'Consolida un Estado moderno y una economía dinámica en Anatolia.',
-    },
-    economy: {
-      era: 'Siglos XV – XXI',
-      title: 'Dominio de los Estrechos',
-      subtitle: 'Bósforo, Dardanelos y comercio',
-      history: 'Capitaliza el tránsito marítimo entre el Mar Negro y el Mediterráneo.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1453 – 1915',
-      title: 'Defensores de Galípoli',
-      subtitle: 'Fuerza terrestre y proyección regional',
-      history: 'Forja un ejército formidable capaz de operar en varios frentes.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1299 – 1922',
-      title: 'Restaurar el Imperio Otomano',
-      subtitle: 'Soberanía sobre Anatolia, Balcanes y Levante',
-      history: 'Restaura el Imperio Otomano controlando Grecia, Siria e Irak.',
-      newName: 'Imperio Otomano',
-      controlIso2: ['GR', 'SY', 'IQ'],
-      proclamationText: '¡Ankara proclama la restauración del Imperio Otomano!',
-    },
-  },
+  // ======================== ASIA ========================
   CN: {
-    heritageTitle: 'Linaje del Imperio del Centro',
-    heritageSummary: 'Cinco milenios de dinastías, la Ruta de la Seda y la supremacía asiática.',
+    subtitle: 'Cinco Milenios de Dinastías y la Ruta de la Seda',
+    ancestors: ['Dinastías Qin, Han y Tang', 'Dinastía Ming', 'China'],
     root: {
-      era: '221 a. C. – 1949',
-      title: 'Unificación de las Dinastías',
-      subtitle: 'Continuidad imperial y modernización',
-      history: 'Reafirma la unidad continental y la escala administrativa de Pekín.',
+      era: '221 a. C.',
+      title: 'Unificación de Qin y Gran Muralla',
+      fact: 'La unificación de escritura, leyes y fronteras creó el Imperio del Medio hace más de dos mil años.',
     },
-    economy: {
-      era: '130 a. C. – Presente',
-      title: 'Nueva Ruta de la Seda',
-      subtitle: 'Comercio terrestre y marítimo global',
-      history: 'Multiplica los ingresos de ciudades, minas y rutas portuarias.',
-      minPorts: 1,
+    eco1: {
+      era: '130 a. C.',
+      title: 'Ruta de la Seda y Cuatro Grandes Inventos',
+      fact: 'Papel, imprenta, brújula y pólvora junto al comercio euroasiático marcaron la historia universal.',
     },
-    military: {
-      era: 'Siglo V a. C. – Presente',
-      title: 'El Arte de la Guerra',
-      subtitle: 'Doctrina estratégica y gran movilización',
-      history: 'Aplica principios clásicos y tecnología moderna al ejército.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1405–1433',
+      title: 'Flotas del Tesoro de Zheng He',
+      fact: 'Las gigantescas expediciones navales Ming recorrieron el sudeste asiático, la India y África oriental.',
     },
-    restoration: {
-      era: '1644 – 1912',
-      title: 'Gran Imperio de China',
-      subtitle: 'Esplendor de la Dinastía Qing',
-      history: 'Consolida el dominio histórico sobre Mongolia y la península coreana.',
-      newName: 'Gran Imperio Chino',
-      controlIso2: ['MN', 'KP'],
-      proclamationText: '¡Pekín proclama el Gran Imperio de China!',
+    eco2: {
+      era: '1978–2025',
+      title: 'Fábrica del Mundo y Nueva Ruta de la Seda',
+      fact: 'Trenes de alta velocidad, megapuerto tras megapuerto e industria avanzada multiplican la renta nacional.',
     },
-  },
-  MN: {
-    heritageTitle: 'Linaje de Gengis Kan',
-    heritageSummary: 'De la estepa mongola al mayor imperio terrestre de la historia.',
-    root: {
-      era: '1206',
-      title: 'Kurultái de la Estepa',
-      subtitle: 'Unificación de las tribus mongolas',
-      history: 'Despierta la unidad estratégica de Ulán Bator.',
+    mil2: {
+      era: '500 a. C.',
+      title: 'Doctrina de El Arte de la Guerra',
+      fact: 'Aplica los principios estratégicos de Sun Tzu para coordinar defensas y grandes ejércitos.',
     },
-    economy: {
-      era: 'Siglos XIII – XXI',
-      title: 'Pax Mongolica y Minería del Gobi',
-      subtitle: 'Rutas de caravanas y minerales',
-      history: 'Desarrolla las reservas mineras del desierto de Gobi.',
-    },
-    military: {
-      era: '1206 – 1294',
-      title: 'Horda de Caballería Blindada',
-      subtitle: 'Velocidad y cerco en la estepa',
-      history: 'Entrena regimientos veloces de alto impacto.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1206 – 1368',
-      title: 'Restaurar el Imperio Mongol',
-      subtitle: 'El retorno del Gran Kan',
-      history: 'Restaura el legendario Imperio Mongol sometiendo Kazajistán y China.',
-      newName: 'Imperio Mongol',
-      controlIso2: ['KZ', 'CN'],
-      proclamationText: '¡La estepa ruge: renace el Imperio Mongol!',
+    restore: {
+      era: '1368–1912',
+      title: 'Restaurar el Imperio del Medio',
+      fact: 'Reclama la majestad histórica de la Dinastía Celestial como gran potencia de Asia Oriental.',
+      newName: 'Imperio del Medio',
+      targets: ['MN', 'KP', 'VN', 'KZ'],
     },
   },
   JP: {
-    heritageTitle: 'Linaje del Sol Naciente',
-    heritageSummary: 'De la Restauración Meiji a la supremacía tecnológica y marítima del Pacífico.',
+    subtitle: 'De la Restauración Meiji al Imperio del Sol Naciente',
+    ancestors: ['Shogunato Tokugawa', 'Restauración Meiji (1868)', 'Japón'],
     root: {
       era: '1868',
       title: 'Restauración Meiji',
-      subtitle: 'Industrialización acelerada de Tokio',
-      history: 'Transforma la economía y la organización estatal con precisión nipona.',
+      fact: 'En pocas décadas Japón pasó del feudalismo samurái a ser una potencia industrial y tecnológica moderna.',
     },
-    economy: {
-      era: '1955 – Presente',
-      title: 'Milagro Tecnológico del Pacífico',
-      subtitle: 'Astilleros, robótica y comercio naval',
-      history: 'Eleva la eficiencia económica de las metrópolis y puertos japoneses.',
-      minPorts: 1,
+    eco1: {
+      era: '1964',
+      title: 'Tren Bala Shinkansen y Milagro Japonés',
+      fact: 'El primer tren de alta velocidad del mundo y la electrónica hicieron de Tokio un referente global.',
     },
-    military: {
+    mil1: {
       era: '1905',
-      title: 'Flota Combinada del Pacífico',
-      subtitle: 'Doctrina anfibia y defensa insular',
-      history: 'Refuerza la proyección naval en el Mar de Japón.',
+      title: 'Doctrina Naval del Almirante Togo',
+      fact: 'La disciplina táctica y las escuadras del Pacífico consolidaron la potencia marítima japonesa.',
     },
-    restoration: {
-      era: '1868 – 1945',
-      title: 'Imperio del Sol Naciente',
-      subtitle: 'Hegemonía del Asia Oriental Marítima',
-      history: 'Extiende el dominio imperial sobre la península de Corea.',
+    eco2: {
+      era: '1980–2025',
+      title: 'Robótica y Comercio del Pacífico',
+      fact: 'La industria de precisión y los astilleros de Osaka y Yokohama fortalecen la economía insular.',
+    },
+    mil2: {
+      era: '1603',
+      title: 'Disciplina Bushido y Defensa Insular',
+      fact: 'Combina un sistema costero altamente fortificado con tropas profesionales de élite.',
+    },
+    restore: {
+      era: '1868–1945',
+      title: 'Proclamar el Imperio del Sol Naciente',
+      fact: 'Alza nuevamente el histórico título imperial nipón sobre el archipiélago y el Pacífico occidental.',
       newName: 'Imperio del Sol Naciente',
-      controlIso2: ['KR', 'KP'],
-      proclamationText: '¡Tokio proclama el Imperio del Sol Naciente!',
-    },
-  },
-  KR: {
-    heritageTitle: 'Linaje de Joseon y el Río Han',
-    heritageSummary: 'Del Milagro del Río Han a la reunificación de la península coreana.',
-    root: {
-      era: '1392 – 1948',
-      title: 'Herencia de Joseon y Seúl',
-      subtitle: 'Identidad cultural y soberanía',
-      history: 'Consolida las bases institucionales de la república.',
-    },
-    economy: {
-      era: '1962 – Presente',
-      title: 'Milagro del Río Han',
-      subtitle: 'Alta tecnología y astilleros',
-      history: 'Dispara el desarrollo urbano y los ingresos comerciales.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1592 – Presente',
-      title: 'Barcos Tortuga y Escudo Moderno',
-      subtitle: 'Almirante Yi Sun-sin y defensa activa',
-      history: 'Moderniza la defensa y la capacidad ofensiva peninsular.',
-    },
-    restoration: {
-      era: '1897 – 1910',
-      title: 'Gran Corea Unificada',
-      subtitle: 'Reunificación histórica de la península',
-      history: 'Une toda la península coreana bajo la bandera de Seúl.',
-      newName: 'Gran Corea Unificada',
-      controlIso2: ['KP'],
-      proclamationText: '¡La península se reúne: nace la Gran Corea Unificada!',
-    },
-  },
-  KP: {
-    heritageTitle: 'Linaje de Goguryeo y Pionyang',
-    heritageSummary: 'De los antiguos reinos del norte a la unificación peninsular.',
-    root: {
-      era: '37 a. C. – 1948',
-      title: 'Herencia de Goguryeo',
-      subtitle: 'Fortaleza histórica del norte',
-      history: 'Afianza el control estatal y la movilización territorial.',
-    },
-    economy: {
-      era: 'Siglo XX',
-      title: 'Industria Pesada del Norte',
-      subtitle: 'Minería y siderurgia estatal',
-      history: 'Aumenta la producción minera y urbana.',
-    },
-    military: {
-      era: 'Siglos XX – XXI',
-      title: 'Movilización Permanente',
-      subtitle: 'Doctrina de ejército numeroso',
-      history: 'Refuerza los regimientos fronterizos y fortificaciones.',
-    },
-    restoration: {
-      era: 'Proyecto Peninsular',
-      title: 'Gran Corea Unificada',
-      subtitle: 'Unificación desde Pionyang',
-      history: 'Unifica el norte y el sur de Corea en un solo Estado.',
-      newName: 'Gran Corea Unificada',
-      controlIso2: ['KR'],
+      targets: ['KR', 'PH', 'CN'],
     },
   },
   IN: {
-    heritageTitle: 'Linaje Maurya y del Subcontinente',
-    heritageSummary: 'Del Imperio Maurya de Ashoka a la gran unión del subcontinente indio.',
+    subtitle: 'De los Imperios Maurya y Gupta a la Potencia del Índico',
+    ancestors: ['Imperio Maurya (322 a. C.)', 'Imperio Gupta', 'India'],
     root: {
-      era: '322 a. C. – 1947',
-      title: 'Legado de Ashoka e Independencia',
-      subtitle: 'Unidad del subcontinente',
-      history: 'Reafirma la fuerza demográfica y cultural de Nueva Delhi.',
+      era: '1947',
+      title: 'Independencia de la India',
+      fact: 'El 15 de agosto de 1947 nació la democracia más poblada del planeta, heredera de civilizaciones milenarias.',
     },
-    economy: {
-      era: 'Siglos XVI – XXI',
-      title: 'Rutas del Índico y Polos Tecnológicos',
-      subtitle: 'Comercio marítimo y metrópolis',
-      history: 'Impulsa el crecimiento de grandes ciudades y puertos del Índico.',
-      minPorts: 1,
+    eco1: {
+      era: '320–550',
+      title: 'Edad de Oro Gupta y Matemáticas',
+      fact: 'La invención del sistema decimal, el cero y el comercio del Índico enriquecieron al subcontinente.',
     },
-    military: {
-      era: '1947 – Presente',
-      title: 'Guardia del Himalaya y el Índico',
-      subtitle: 'Ejército continental de gran escala',
-      history: 'Incrementa la capacidad de movilización y defensa nacional.',
-      minAnnexations: 1,
+    mil1: {
+      era: '322 a. C.',
+      title: 'Estrategia de Chandragupta y Chanakya',
+      fact: 'El tratado Arthashastra sistematizó la geopolítica, el espionaje y los ejércitos unificados de la India.',
     },
-    restoration: {
-      era: '322 – 185 a. C.',
+    eco2: {
+      era: '2023',
+      title: 'Misión Chandrayaan y Polo Tecnológico',
+      fact: 'El alunizaje en el polo sur lunar y la industria informática consolidan el auge económico indio.',
+    },
+    mil2: {
+      era: '1971',
+      title: 'Escudo del Himalaya y del Océano Índico',
+      fact: 'Refuerza el despliegue fronterizo en el norte y la armada del Océano Índico.',
+    },
+    restore: {
+      era: '322–185 a. C.',
       title: 'Restaurar el Imperio Maurya',
-      subtitle: 'Reunificación del Gran Subcontinente',
-      history: 'Integra India, Pakistán, Bangladés y Nepal bajo el histórico Imperio Maurya.',
+      fact: 'Reunifica el subcontinente bajo el legendario Imperio Maurya de Ashoka y Chandragupta.',
       newName: 'Imperio Maurya',
-      controlIso2: ['PK', 'BD', 'NP'],
-      proclamationText: '¡Nueva Delhi proclama el renacimiento del Imperio Maurya!',
+      targets: ['PK', 'BD', 'NP', 'LK'],
+    },
+  },
+  TR: {
+    subtitle: 'De la Sublime Puerta a la República de Anatolia',
+    ancestors: ['Imperio Selyúcida', 'Imperio Otomano (1299–1922)', 'Turquía'],
+    root: {
+      era: '1923',
+      title: 'República de Atatürk',
+      fact: 'Mustafa Kemal Atatürk defendió Anatolia y fundó la República de Turquía modernizando el Estado.',
+    },
+    eco1: {
+      era: '1453–1600',
+      title: 'Encrucijada del Bósforo',
+      fact: 'Estambul controla el puente comercial estratégico entre Europa, Asia y el Mar Negro.',
+    },
+    mil1: {
+      era: '1453',
+      title: 'Cuerpo de Jenízaros y Artillería',
+      fact: 'La ingeniería de asedio y la disciplina militar otomana dominaron tres continentes durante siglos.',
+    },
+    eco2: {
+      era: '1973–2025',
+      title: 'Puentes de Eurasia e Industria',
+      fact: 'Los enlaces intercontinentales sobre el Bósforo y la manufactura potencian los ingresos turcos.',
+    },
+    mil2: {
+      era: '1915',
+      title: 'Defensa de Galípoli',
+      fact: 'La defensa victoriosa de los Dardanelos inspira unas defensas costeras y terrestres formidables.',
+    },
+    restore: {
+      era: '1299–1922',
+      title: 'Restaurar el Imperio Otomano',
+      fact: 'Reclama la herencia de Solimán el Magnífico restaurando el histórico Imperio Otomano.',
+      newName: 'Imperio Otomano',
+      targets: ['GR', 'SY', 'IQ', 'BG'],
     },
   },
   IR: {
-    heritageTitle: 'Linaje Aqueménida y Persa',
-    heritageSummary: 'De Ciro el Grande y Persépolis al retorno del Imperio Persa.',
+    subtitle: 'Herederos de Ciro el Grande y el Imperio Persa',
+    ancestors: ['Imperio Aqueménida (550 a. C.)', 'Imperio Sasánida y Safávida', 'Irán'],
     root: {
       era: '550 a. C.',
-      title: 'Legado de Ciro el Grande',
-      subtitle: 'Raíces milenarias de Persia',
-      history: 'Consolida la administración imperial y la meseta iraní.',
+      title: 'Cilindro de Ciro y Camino Real',
+      fact: 'Ciro el Grande unificó Persia y creó el primer sistema postal y administrativo transcontinental.',
     },
-    economy: {
-      era: 'Siglos XVI – XXI',
-      title: 'Camino Real y Golfo Pérsico',
-      subtitle: 'Energía y rutas entre Asia y Occidente',
-      history: 'Desarrolla puertos del Golfo y polos mineros e industriales.',
-      minPorts: 1,
+    eco1: {
+      era: '1598',
+      title: 'Esplendor de Isfahán',
+      fact: 'La capital safávida floreció como joya de la Ruta de la Seda, la arquitectura y el comercio de sedas.',
     },
-    military: {
-      era: '550 a. C. – Presente',
-      title: 'Los Inmortales Modernos',
-      subtitle: 'Fuerza de élite y defensa en montaña',
-      history: 'Refuerza la capacidad ofensiva y defensiva de Teherán.',
-      minAnnexations: 1,
+    mil1: {
+      era: '520 a. C.',
+      title: 'Los Inmortales de Persia',
+      fact: 'La guardia de élite aqueménida representó la disciplina militar y logística de la meseta iraní.',
     },
-    restoration: {
-      era: '550 a. C. – 651 d. C.',
+    eco2: {
+      era: '1951',
+      title: 'Recursos del Golfo y Meseta Iraní',
+      fact: 'El control del Estrecho de Ormuz y las reservas energéticas fortalecen el tesoro estatal.',
+    },
+    mil2: {
+      era: '224–651',
+      title: 'Catafractos y Bastión de los Zagros',
+      fact: 'Aprovecha las cadenas montañosas persas para construir una defensa territorial inquebrantable.',
+    },
+    restore: {
+      era: '550 a. C.–651 d. C.',
       title: 'Restaurar el Imperio Persa',
-      subtitle: 'Soberanía de Mesopotamia al Indo',
-      history: 'Restaura el Imperio Persa integrando Irak, Afganistán y Azerbaiyán.',
+      fact: 'Recupera el nombre milenario del Imperio Persa desde el Tigris hasta Asia Central.',
       newName: 'Imperio Persa',
-      controlIso2: ['IQ', 'AF', 'AZ'],
-      proclamationText: '¡Teherán proclama el retorno del Imperio Persa!',
+      targets: ['IQ', 'AF', 'AZ', 'TM'],
+    },
+  },
+  MN: {
+    subtitle: 'Estepas de Gengis Kan y el Mayor Imperio Contiguo',
+    ancestors: ['Confederación Xiongnu', 'Imperio Mongol (1206)', 'Mongolia'],
+    root: {
+      era: '1206',
+      title: 'Kurultái de Gengis Kan',
+      fact: 'En 1206 Temüjin unificó las tribus de la estepa y fundó el Imperio Mongol, el mayor imperio contiguo de la historia.',
+    },
+    eco1: {
+      era: '1250–1350',
+      title: 'Pax Mongolica y Sistema Yam',
+      fact: 'Las postas a caballo garantizaron comercio seguro, moneda y comunicaciones de China hasta Europa.',
+    },
+    mil1: {
+      era: '1220',
+      title: 'Táctica de los Tumens',
+      fact: 'La organización decimal y la movilidad de la caballería arquera derrotaron ejércitos mucho mayores.',
+    },
+    eco2: {
+      era: '1990–2025',
+      title: 'Minería del Gobi y Rutas Euroasiáticas',
+      fact: 'El cobre, el carbón y el tránsito entre Rusia y China impulsan la economía mongola moderna.',
+    },
+    mil2: {
+      era: '1271',
+      title: 'Estandarte de las Nueve Colas',
+      fact: 'Moviliza una fuerza rápida de choque capaz de expandirse por las llanuras de Asia.',
+    },
+    restore: {
+      era: '1206–1368',
+      title: 'Restaurar el Imperio Mongol',
+      fact: 'Alza el estandarte de Karakórum y proclama nuevamente el legendario Imperio Mongol.',
+      newName: 'Imperio Mongol',
+      targets: ['CN', 'RU', 'KZ'],
     },
   },
   SA: {
-    heritageTitle: 'Linaje de la Península Arábiga',
-    heritageSummary: 'De las rutas caravaneras y la unificación saudí al Gran Califato Árabe.',
+    subtitle: 'Corazón de la Península Arábiga',
+    ancestors: ['Primer Estado Saudí (1744)', 'Reinos del Hiyaz y Néyed', 'Arabia Saudita'],
     root: {
       era: '1932',
-      title: 'Unificación de Arabia',
-      subtitle: 'Consolidación del Reino en Riad',
-      history: 'Afianza la unidad territorial del desierto y sus recursos.',
+      title: 'Unificación del Reino de Arabia Saudita',
+      fact: 'Abdulaziz bin Saúd unificó Néyed y el Hiyaz en 1932 formando el reino moderno de la península.',
     },
-    economy: {
-      era: '1938 – Presente',
-      title: 'Reserva Energética Mundial',
-      subtitle: 'Metrópolis modernas y puertos del Mar Rojo',
-      history: 'Transforma los recursos energéticos en tesorería y ciudades prósperas.',
-      minPorts: 1,
+    eco1: {
+      era: '1938',
+      title: 'Descubrimiento del Pozo Dammam N.º 7',
+      fact: 'El hallazgo petrolero en la Provincia Oriental convirtió al reino en eje de la economía energética mundial.',
     },
-    military: {
-      era: 'Siglo VII – Presente',
-      title: 'Escudo del Desierto',
-      subtitle: 'Ejército mecanizado y alianzas regionales',
-      history: 'Moderniza la fuerza militar y las defensas estratégicas.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1902',
+      title: 'Toma de la Fortaleza de Masmak',
+      fact: 'La audaz operación en Riad inició la reunificación militar y política de Arabia.',
     },
-    restoration: {
-      era: '632 – 750',
-      title: 'Gran Unión Árabe',
-      subtitle: 'Unificación de la Península Arábiga y Mesopotamia',
-      history: 'Reúne Arabia Saudita, Emiratos, Omán, Yemen e Irak bajo una sola corona.',
-      newName: 'Gran Unión Árabe',
-      controlIso2: ['AE', 'OM', 'YE', 'IQ'],
-      proclamationText: '¡Riad proclama la Gran Unión Árabe!',
+    eco2: {
+      era: '2016–2030',
+      title: 'Visión de Diversificación y Puertos del Mar Rojo',
+      fact: 'Megaciudades, comercio marítimo y finanzas soberanas consolidan un flujo constante de riqueza.',
     },
-  },
-  ID: {
-    heritageTitle: 'Linaje del Archipiélago Majapahit',
-    heritageSummary: 'Del gran imperio marítimo de Java a la unión del Sudeste Asiático.',
-    root: {
-      era: '1293 – 1945',
-      title: 'Juramento de Gajah Mada',
-      subtitle: 'Unidad del archipiélago indonesio',
-      history: 'Consolida la cohesión marítima desde Sumatra hasta Papúa.',
+    mil2: {
+      era: '1981',
+      title: 'Escudo de la Península',
+      fact: 'Coordina la defensa aérea y terrestre de los estados árabes del Golfo.',
     },
-    economy: {
-      era: 'Siglos XIV – XXI',
-      title: 'Estrecho de Malaca y Especias',
-      subtitle: 'Rutas comerciales del Sudeste Asiático',
-      history: 'Maximiza los ingresos portuarios y urbanos del archipiélago.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1293 – 1527',
-      title: 'Armada de Nusantara',
-      subtitle: 'Proyección anfibia insular',
-      history: 'Fortalece las operaciones navales en todo el sudeste asiático.',
-    },
-    restoration: {
-      era: '1293 – 1527',
-      title: 'Restaurar el Imperio Majapahit',
-      subtitle: 'Unión marítima de Nusantara',
-      history: 'Restaura el Imperio Majapahit integrando Malasia, Brunéi y Timor Oriental.',
-      newName: 'Imperio Majapahit',
-      controlIso2: ['MY', 'BN', 'TL'],
-      proclamationText: '¡Yakarta proclama la restauración del Imperio Majapahit!',
+    restore: {
+      era: '632–1932',
+      title: 'Proclamar la Federación de Arabia',
+      fact: 'Unifica las tierras históricas de la Península Arábiga bajo un solo mando soberano.',
+      newName: 'Federación de Arabia',
+      targets: ['AE', 'OM', 'YE', 'KW', 'QA'],
     },
   },
-  TH: {
-    heritageTitle: 'Linaje del Reino de Siam',
-    heritageSummary: 'La nación nunca colonizada del Sudeste Asiático y heredera de Ayutthaya.',
+  KR: {
+    subtitle: 'De Goryeo y Joseon al Milagro del Río Han',
+    ancestors: ['Tres Reinos y Goryeo', 'Dinastía Joseon (1392)', 'Corea del Sur'],
     root: {
-      era: '1351 – 1782',
-      title: 'Herencia de Ayutthaya y Bangkok',
-      subtitle: 'Soberanía ininterrumpida',
-      history: 'Consolida la diplomacia y administración del valle del Chao Phraya.',
+      era: '1443',
+      title: 'Invención del Hangul por el Rey Sejong',
+      fact: 'La creación del alfabeto coreano impulsó la alfabetización, la ciencia y la identidad cultural.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Puertos del Golfo de Siam',
-      subtitle: 'Comercio arrocero e industria',
-      history: 'Impulsa el crecimiento urbano y marítimo de Tailandia.',
+    eco1: {
+      era: '1962–1996',
+      title: 'Milagro del Río Han',
+      fact: 'Corea del Sur pasó de la posguerra a convertirse en gigante mundial de semiconductores, barcos y automóviles.',
     },
-    military: {
-      era: '1593',
-      title: 'Guardia Real de Siam',
-      subtitle: 'Ejército disciplinado del Sudeste Asiático',
-      history: 'Refuerza las fronteras y capacidad ofensiva regional.',
+    mil1: {
+      era: '1592',
+      title: 'Barcos Tortuga del Almirante Yi Sun-sin',
+      fact: 'Los acorazados Geobukseon permanecieron invictos en 23 batallas navales defendiendo Corea.',
     },
-    restoration: {
-      era: '1782 – 1939',
-      title: 'Gran Reino de Siam',
-      subtitle: 'Hegemonía histórica del Mekong',
-      history: 'Unifica Tailandia, Laos y Camboya bajo el Gran Reino de Siam.',
-      newName: 'Reino de Siam',
-      controlIso2: ['LA', 'KH'],
+    eco2: {
+      era: '2000–2025',
+      title: 'Ola Hallyu y Alta Tecnología',
+      fact: 'La exportación cultural y tecnológica eleva el prestigio diplomático y económico global.',
+    },
+    mil2: {
+      era: '1953',
+      title: 'Fortificación Peninsular y Defensa Moderna',
+      fact: 'Crea una industria de defensa propia y una línea fortificada de alta tecnología.',
+    },
+    restore: {
+      era: '918–1910',
+      title: 'Restaurar el Gran Imperio de Corea',
+      fact: 'Reunifica la península coreana retomando el legado histórico de Goryeo y el Gran Imperio Coreano.',
+      newName: 'Gran Imperio de Corea',
+      targets: ['KP', 'JP', 'CN'],
+    },
+  },
+  KP: {
+    subtitle: 'Herencia de Goguryeo y la Península del Norte',
+    ancestors: ['Reino de Goguryeo (37 a. C.)', 'Dinastía Goryeo', 'Corea del Norte'],
+    root: {
+      era: '37 a. C.',
+      title: 'Legado del Reino de Goguryeo',
+      fact: 'Con capital en Pionyang, Goguryeo fue la mayor potencia militar de la antigua Corea y Manchuria.',
+    },
+    eco1: {
+      era: '1956',
+      title: 'Industrialización Pesada del Norte',
+      fact: 'Aprovecha la minería y la siderurgia de las montañas del norte para sostener la producción estatal.',
+    },
+    mil1: {
+      era: '612',
+      title: 'Victoria del Río Salsu',
+      fact: 'El general Eulji Mundeok derrotó una invasión masiva mediante defensas hidráulicas y emboscadas.',
+    },
+    eco2: {
+      era: '1970',
+      title: 'Autosuficiencia y Minería Estratégica',
+      fact: 'Refuerza la extracción de minerales y la planificación interna de suministros.',
+    },
+    mil2: {
+      era: '1950–2025',
+      title: 'Fortaleza de Montaña del Norte',
+      fact: 'Convierte la geografía montañosa en un sistema defensivo subterráneo de gran resistencia.',
+    },
+    restore: {
+      era: '37 a. C.–668',
+      title: 'Restaurar el Reino de Goguryeo',
+      fact: 'Reunifica la península bajo el nombre histórico de la potencia guerrera de Goguryeo.',
+      newName: 'Imperio de Goguryeo',
+      targets: ['KR', 'CN'],
     },
   },
   VN: {
-    heritageTitle: 'Linaje de Dai Viet',
-    heritageSummary: 'Siglos de resistencia soberana y unificación en el Sudeste Asiático.',
+    subtitle: 'Mil Años de Resistencia y Dai Viet',
+    ancestors: ['Reino de Au Lac', 'Imperio de Dai Viet (1054)', 'Vietnam'],
     root: {
-      era: '938 – 1975',
-      title: 'Independencia de Dai Viet',
-      subtitle: 'Resiliencia milenaria de Hanói',
-      history: 'Consolida el vigor económico y social de Vietnam.',
+      era: '938',
+      title: 'Victoria del Río Bach Dang',
+      fact: 'Ngo Quyen expulsó el dominio imperial extranjero usando estacas ocultas bajo la marea y fundó un Vietnam libre.',
     },
-    economy: {
-      era: '1986 – Presente',
-      title: 'Reformas Doi Moi y Delta del Mekong',
-      subtitle: 'Manufactura y comercio marítimo',
-      history: 'Acelera el crecimiento industrial y portuario.',
+    eco1: {
+      era: '1986',
+      title: 'Reformas Doi Moi',
+      fact: 'La apertura manufacturera y los puertos del Delta del Mekong convirtieron a Vietnam en motor industrial asiático.',
     },
-    military: {
-      era: '1288 – 1954',
+    mil1: {
+      era: '1288',
+      title: 'Genio de Tran Hung Dao',
+      fact: 'Vietnam rechazó tres invasiones del Imperio Mongol, una hazaña única en Asia continental.',
+    },
+    eco2: {
+      era: '1995',
+      title: 'Integración ASEAN y Comercio del Pacífico',
+      fact: 'Hanói y Ho Chi Minh lideran las cadenas comerciales del sudeste asiático.',
+    },
+    mil2: {
+      era: '1954',
       title: 'Estrategia de Dien Bien Phu',
-      subtitle: 'Guerra asimétrica y defensas',
-      history: 'Entrena fuerzas sumamente eficaces en combate prolongado.',
+      fact: 'La logística audaz en terrenos difíciles y la guerra defensiva fortalecen enormemente al ejército.',
     },
-    restoration: {
-      era: 'Proyecto del Mekong',
-      title: 'Federación de Indochina',
-      subtitle: 'Integración de la cuenca del Mekong',
-      history: 'Reúne Vietnam, Laos y Camboya en la Federación de Indochina.',
-      newName: 'Federación de Indochina',
-      controlIso2: ['LA', 'KH'],
+    restore: {
+      era: '1054–1804',
+      title: 'Restaurar el Imperio de Dai Viet',
+      fact: 'Proclama el renacimiento del histórico Imperio de Dai Viet como potencia de Indochina.',
+      newName: 'Imperio de Dai Viet',
+      targets: ['LA', 'KH', 'TH'],
     },
   },
-  KZ: {
-    heritageTitle: 'Linaje del Kanato Kazajo',
-    heritageSummary: 'Corazón de la estepa euroasiática y heredero de la Ruta de la Seda.',
+  TH: {
+    subtitle: 'El Reino Jamás Colonizado del Sudeste Asiático',
+    ancestors: ['Reino de Sukhothai (1238)', 'Reino de Ayutthaya', 'Tailandia'],
     root: {
-      era: '1465',
-      title: 'Fundación del Kanato Kazajo',
-      subtitle: 'Soberanía en la gran estepa',
-      history: 'Consolida los recursos y la unidad territorial desde Astaná.',
+      era: '1238',
+      title: 'Fundación de Sukhothai',
+      fact: 'El primer gran reino tailandés creó la escritura thai y sentó las bases de la identidad nacional.',
     },
-    economy: {
-      era: 'Siglos XX – XXI',
-      title: 'Corredor Euroasiático y Minería',
-      subtitle: 'Uranio, petróleo y tránsito continental',
-      history: 'Eleva los ingresos mineros y el desarrollo urbano.',
+    eco1: {
+      era: '1351–1767',
+      title: 'Comercio Cosmopolita de Ayutthaya',
+      fact: 'Ayutthaya fue una de las ciudades más grandes y ricas del mundo, comerciando con Europa, Persia y China.',
     },
-    military: {
-      era: '1729',
-      title: 'Jinetes de la Estepa',
-      subtitle: 'Movilidad en grandes llanuras',
-      history: 'Fortalece el ejército continental kazajo.',
+    mil1: {
+      era: '1767–1782',
+      title: 'Reunificación de Taksin y Bangkok',
+      fact: 'El reino se levantó de sus cenizas, recuperó su territorio y estableció la dinastía Chakri en Bangkok.',
     },
-    restoration: {
-      era: 'Unión de Asia Central',
-      title: 'Proclamar el Gran Turquestán',
-      subtitle: 'Unión de los pueblos de Asia Central',
-      history: 'Reúne Kazajistán, Uzbekistán y Kirguistán en el Gran Turquestán.',
-      newName: 'Gran Turquestán',
-      controlIso2: ['UZ', 'KG'],
+    eco2: {
+      era: '1868–1910',
+      title: 'Diplomacia del Rey Chulalongkorn',
+      fact: 'Gracias a reformas brillantes y diplomacia hábil, Siam fue el único país del sudeste asiático nunca colonizado.',
+    },
+    mil2: {
+      era: '1967',
+      title: 'Pilar Defensivo de Indochina',
+      fact: 'Asegura el golfo de Tailandia y las rutas centrales del continente sudasiático.',
+    },
+    restore: {
+      era: '1782–1939',
+      title: 'Restaurar el Gran Reino de Siam',
+      fact: 'Recobra el nombre histórico de Siam liderando la prosperidad del sudeste asiático.',
+      newName: 'Reino de Siam',
+      targets: ['LA', 'KH', 'MM', 'MY'],
+    },
+  },
+  ID: {
+    subtitle: 'Del Imperio Marítimo Majapahit al Archipiélago Unido',
+    ancestors: ['Reino de Srivijaya', 'Imperio Majapahit (1293)', 'Indonesia'],
+    root: {
+      era: '1945',
+      title: 'Proclamación de Yakarta',
+      fact: 'El 17 de agosto de 1945 Indonesia proclamó su independencia uniendo más de 17.000 islas bajo un solo lema.',
+    },
+    eco1: {
+      era: '650–1377',
+      title: 'Rutas de las Especias de Srivijaya',
+      fact: 'El control del Estrecho de Malaca y las islas de las especias generó una enorme riqueza marítima.',
+    },
+    mil1: {
+      era: '1336',
+      title: 'Juramento Palapa de Gajah Mada',
+      fact: 'El gran primer ministro de Majapahit juró unificar todo el archipiélago de Nusantara.',
+    },
+    eco2: {
+      era: '1955',
+      title: 'Conferencia de Bandung',
+      fact: 'Indonesia lideró la histórica cumbre afroasiática, consolidando su peso diplomático mundial.',
+    },
+    mil2: {
+      era: '1967',
+      title: 'Armada de los Estrechos',
+      fact: 'Protege los mares interiores del archipiélago y refuerza la capacidad anfibia.',
+    },
+    restore: {
+      era: '1293–1527',
+      title: 'Restaurar el Imperio Majapahit',
+      fact: 'Unifica los mares de Nusantara bajo el esplendor histórico del Imperio Majapahit.',
+      newName: 'Imperio Majapahit',
+      targets: ['MY', 'SG', 'BN', 'TL'],
+    },
+  },
+  IQ: {
+    subtitle: 'Cuna de la Civilización entre el Tigris y el Éufrates',
+    ancestors: ['Sumeria y Babilonia', 'Califato Abasí de Bagdad', 'Irak'],
+    root: {
+      era: '1750 a. C.',
+      title: 'Código de Hammurabi',
+      fact: 'Mesopotamia dio al mundo la escritura cuneiforme, la rueda y el primer gran código legal escrito.',
+    },
+    eco1: {
+      era: '762–1258',
+      title: 'Casa de la Sabiduría de Bagdad',
+      fact: 'Durante la Edad de Oro abasí, Bagdad fue la capital científica, comercial y cultural del planeta.',
+    },
+    mil1: {
+      era: '605 a. C.',
+      title: 'Murallas de Babilonia',
+      fact: 'Las imponentes fortificaciones mesopotámicas protegieron los valles fértiles durante siglos.',
+    },
+    eco2: {
+      era: '1927',
+      title: 'Riqueza Petrolera del Tigris',
+      fact: 'El desarrollo energético y agrícola de los dos ríos reconstruye el tesoro nacional.',
+    },
+    mil2: {
+      era: '1932',
+      title: 'Guardia de Mesopotamia',
+      fact: 'Moderniza las brigadas terrestres para defender el corazón de Oriente Medio.',
+    },
+    restore: {
+      era: '1894–539 a. C.',
+      title: 'Restaurar el Imperio de Babilonia',
+      fact: 'Revive la gloria milenaria de Mesopotamia proclamando el Imperio de Babilonia.',
+      newName: 'Imperio de Babilonia',
+      targets: ['SY', 'KW', 'JO'],
     },
   },
 
-  // === ÁFRICA ===
+  // ======================== ÁFRICA ========================
   EG: {
-    heritageTitle: 'Linaje de los Faraones y el Nilo',
-    heritageSummary: 'Cinco mil años de historia desde las pirámides hasta el Canal de Suez.',
+    subtitle: 'Cinco Mil Años del Nilo al Canal de Suez',
+    ancestors: ['Antiguo Egipto Faraónico', 'Sultanato Mameluco', 'Egipto'],
     root: {
-      era: '3100 a. C. – 1952',
+      era: '3100 a. C.',
       title: 'Unificación del Alto y Bajo Egipto',
-      subtitle: 'Civilización eterna del Nilo',
-      history: 'Consolida el poder del valle del Nilo y El Cairo.',
+      fact: 'La unión de los dos reinos del Nilo dio origen al Estado continuo más antiguo de la historia.',
     },
-    economy: {
-      era: '1869 – Presente',
-      title: 'Control del Canal de Suez',
-      subtitle: 'Arteria vital del comercio mundial',
-      history: 'Convierte los puertos egipcios en una fuente constante de ingresos.',
-      minPorts: 1,
+    eco1: {
+      era: '1869',
+      title: 'Canal de Suez',
+      fact: 'La apertura del Canal de Suez conectó el Mediterráneo con el Mar Rojo y revolucionó el comercio global.',
     },
-    military: {
-      era: '1274 a. C. – 1973',
-      title: 'Ejército del Nilo',
-      subtitle: 'Tradición militar desde Qadesh',
-      history: 'Moderniza la fuerza terrestre y defensiva del norte de África.',
-      minAnnexations: 1,
+    mil1: {
+      era: '1260',
+      title: 'Victoria de Ain Yalut',
+      fact: 'Las fuerzas egipcias detuvieron por primera vez el avance imparable del Imperio Mongol en Oriente Medio.',
     },
-    restoration: {
-      era: '1958 – 1961 / Imperio Nuevo',
-      title: 'Imperio del Nilo y el Levante',
-      subtitle: 'De Sudán a Siria y Libia',
-      history: 'Restaura la proyección histórica egipcia integrando Sudán y Libia.',
+    eco2: {
+      era: '1970',
+      title: 'Presa de Asuán y Delta del Nilo',
+      fact: 'El control de las aguas del Nilo garantizó electricidad, cosechas y crecimiento urbano en El Cairo.',
+    },
+    mil2: {
+      era: '1956–1973',
+      title: 'Soberanía del Suez y Defensa del Sinaí',
+      fact: 'La nacionalización del canal y el cruce de 1973 forjaron una potente doctrina militar regional.',
+    },
+    restore: {
+      era: '1550–1070 a. C.',
+      title: 'Restaurar el Imperio Egipcio',
+      fact: 'Proclama el renacimiento del Imperio del Nilo proyectando su influencia por África y el Levante.',
       newName: 'Imperio Egipcio',
-      controlIso2: ['SD', 'LY'],
-      proclamationText: '¡El Cairo proclama el renacimiento del Imperio Egipcio!',
-    },
-  },
-  MA: {
-    heritageTitle: 'Linaje Almorávide y Almohade',
-    heritageSummary: 'Reino milenario del Estrecho de Gibraltar y del Magreb.',
-    root: {
-      era: '788 – 1147',
-      title: 'Dinastías del Atlas y Marrakech',
-      subtitle: 'Continuidad histórica marroquí',
-      history: 'Afianza el control del Estrecho y el desarrollo urbano.',
-    },
-    economy: {
-      era: 'Siglos XII – XXI',
-      title: 'Rutas del Atlántico y el Sáhara',
-      subtitle: 'Comercio marítimo y fosfatos',
-      history: 'Potencia los puertos atlánticos y la minería estratégica.',
-      minPorts: 1,
-    },
-    military: {
-      era: '1086 – 1578',
-      title: 'Guardia del Atlas',
-      subtitle: 'Ejército disciplinado del Magreb',
-      history: 'Fortalece las tropas para proyectarse por el norte de África.',
-      minAnnexations: 1,
-    },
-    restoration: {
-      era: '1121 – 1269',
-      title: 'Imperio Almohade del Magreb',
-      subtitle: 'Unificación del Norte de África Occidental',
-      history: 'Reúne Marruecos, Argelia y Túnez bajo el histórico Imperio del Magreb.',
-      newName: 'Imperio Almohade',
-      controlIso2: ['DZ', 'TN'],
-      proclamationText: '¡Rabat proclama la restauración del Imperio Almohade!',
+      targets: ['SD', 'LY', 'PS', 'JO'],
     },
   },
   ET: {
-    heritageTitle: 'Linaje de Aksum y Abisinia',
-    heritageSummary: 'Bastión soberano de África y heredero del antiguo Imperio Etíope.',
+    subtitle: 'Imperio de Aksum y Símbolo de África Libre',
+    ancestors: ['Reino de Aksum (100 d. C.)', 'Imperio de Abisinia', 'Etiopía'],
     root: {
-      era: '100 d. C. – 1896',
-      title: 'Victoria de Adua',
-      subtitle: 'Símbolo de independencia africana',
-      history: 'Honra la defensa histórica de la soberanía etíope.',
+      era: '100 d. C.',
+      title: 'Civilización de Aksum',
+      fact: 'Aksum acuñó su propia moneda, levantó obeliscos monumentales y comerciaba con Roma y la India.',
     },
-    economy: {
-      era: 'Siglos XX – XXI',
-      title: 'Presa del Renacimiento y Tierras Altas',
-      subtitle: 'Energía y desarrollo agrícola',
-      history: 'Expande las ciudades y recursos del Cuerno de África.',
+    eco1: {
+      era: '1963',
+      title: 'Capital Diplomática de África',
+      fact: 'Adís Abeba es la sede fundacional de la Unión Africana y corazón político del continente.',
     },
-    military: {
+    mil1: {
       era: '1896',
-      title: 'Ejército Imperial de Abisinia',
-      subtitle: 'Infantería de montaña invicta',
-      history: 'Refuerza la movilización en el Cuerno de África.',
-      minAnnexations: 1,
+      title: 'Victoria de Adua',
+      fact: 'Etiopía derrotó a una potencia colonial europea en Adua, manteniéndose libre e inspirando a toda África.',
     },
-    restoration: {
-      era: '1270 – 1974',
-      title: 'Imperio de Abisinia',
-      subtitle: 'Unificación del Cuerno de África',
-      history: 'Integra Etiopía, Eritrea y Somalia recuperando salida al Mar Rojo.',
+    eco2: {
+      era: '2020–2025',
+      title: 'Gran Presa del Renacimiento',
+      fact: 'La mayor obra hidroeléctrica de África multiplica la energía y los ingresos del país.',
+    },
+    mil2: {
+      era: '1270',
+      title: 'Fortalezas del Macizo Etíope',
+      fact: 'Las tierras altas forman una ciudadela natural ideal para defender el Cuerno de África.',
+    },
+    restore: {
+      era: '1270–1974',
+      title: 'Restaurar el Imperio de Abisinia',
+      fact: 'Recobra el título imperial milenario de Abisinia liderando el Cuerno de África.',
       newName: 'Imperio de Abisinia',
-      controlIso2: ['ER', 'SO'],
-      proclamationText: '¡Adís Abeba proclama la restauración del Imperio de Abisinia!',
+      targets: ['ER', 'DJ', 'SO', 'SS'],
+    },
+  },
+  MA: {
+    subtitle: 'Puerta del Estrecho y Legado Almohade',
+    ancestors: ['Dinastía Idrisí (788)', 'Imperio Almorávide y Almohade', 'Marruecos'],
+    root: {
+      era: '788',
+      title: 'Fundación de Fez',
+      fact: 'Fez albergó la universidad más antigua en funcionamiento del mundo (Al-Qarawiyyin, 859).',
+    },
+    eco1: {
+      era: '1147–1269',
+      title: 'Rutas Transaharianas y del Estrecho',
+      fact: 'Marruecos conectó el oro de África occidental con los mercados del Mediterráneo y el Atlántico.',
+    },
+    mil1: {
+      era: '1578',
+      title: 'Batalla de Alcazarquivir',
+      fact: 'La victoria decisiva de los Tres Reyes preservó la soberanía marroquí durante siglos.',
+    },
+    eco2: {
+      era: '2007–2025',
+      title: 'Puerto Tánger-Med y Energía Solar',
+      fact: 'El mayor puerto de África y sus parques solares consolidan a Marruecos como puente euroafricano.',
+    },
+    mil2: {
+      era: '1956',
+      title: 'Guardianes del Atlas y el Estrecho',
+      fact: 'Fortalece las posiciones montañosas del Atlas y las costas atlánticas.',
+    },
+    restore: {
+      era: '1147–1269',
+      title: 'Restaurar el Imperio Almohade',
+      fact: 'Revive la gran potencia del Magreb occidental bajo el nombre histórico del Imperio Almohade.',
+      newName: 'Imperio Almohade',
+      targets: ['DZ', 'MR', 'TN', 'ES'],
+    },
+  },
+  TN: {
+    subtitle: 'De la Legendaria Cartago al Mediterráneo',
+    ancestors: ['República de Cartago (814 a. C.)', 'Reino Hafsí', 'Túnez'],
+    root: {
+      era: '814 a. C.',
+      title: 'Fundación de Cartago',
+      fact: 'Cartago se convirtió en la gran república comercial y marítima que rivalizó con Roma por el Mediterráneo.',
+    },
+    eco1: {
+      era: '500 a. C.',
+      title: 'Puerto Circular de Cartago',
+      fact: 'Los navegantes cartagineses exploraron el Atlántico africano y tejieron una vasta red de puertos.',
+    },
+    mil1: {
+      era: '218 a. C.',
+      title: 'Estrategia de Aníbal Barca',
+      fact: 'El cruce de los Alpes y la maniobra de Cannas siguen estudiándose en todas las academias militares.',
+    },
+    eco2: {
+      era: '1956',
+      title: 'Modernización y Educación del Magreb',
+      fact: 'Tras su independencia, Túnez destacó por su infraestructura mediterránea y apertura diplomática.',
+    },
+    mil2: {
+      era: '1881–1956',
+      title: 'Centinela del Canal de Sicilia',
+      fact: 'Refuerza la defensa costera en el punto más estratégico entre Europa y África.',
+    },
+    restore: {
+      era: '814–146 a. C.',
+      title: 'Restaurar la República de Cartago',
+      fact: 'Resucita la legendaria potencia naval y mercantil de Cartago en el corazón del Mediterráneo.',
+      newName: 'República de Cartago',
+      targets: ['LY', 'DZ', 'IT', 'MT'],
     },
   },
   ML: {
-    heritageTitle: 'Linaje de Mansa Musa y Tombuctú',
-    heritageSummary: 'Heredero del legendario y riquísimo Imperio de Malí.',
+    subtitle: 'Imperio del Oro y Bibliotecas de Tombuctú',
+    ancestors: ['Imperio de Ghana', 'Imperio de Malí (1235)', 'Malí'],
     root: {
       era: '1235',
-      title: 'Carta de Mandén y Sundiata Keita',
-      subtitle: 'Fundación del antiguo Malí',
-      history: 'Recupera la herencia organizativa y cultural del río Níger.',
+      title: 'Carta de Mandén de Sundiata Keïta',
+      fact: 'El fundador del Imperio de Malí promulgó una de las cartas de derechos humanos más antiguas del mundo.',
     },
-    economy: {
+    eco1: {
       era: '1324',
-      title: 'Oro de Mansa Musa y Tombuctú',
-      subtitle: 'Riqueza aurífera y saber ancestral',
-      history: 'Impulsa la extracción de oro y el crecimiento comercial.',
+      title: 'Riqueza de Mansa Musa',
+      fact: 'El oro del Imperio de Malí y su famosa peregrinación asombraron a todo el Mediterráneo y Oriente Medio.',
     },
-    military: {
-      era: 'Siglos XIII – XV',
-      title: 'Guardia del Níger',
-      subtitle: 'Control de las rutas del Sahel',
-      history: 'Fortalece las fuerzas terrestres para unificar África Occidental.',
+    mil1: {
+      era: '1235',
+      title: 'Caballería del Níger',
+      fact: 'Los ejércitos mandingas aseguraron las rutas caravaneras desde el Atlántico hasta el Sáhara.',
     },
-    restoration: {
-      era: '1235 – 1600',
+    eco2: {
+      era: '1400–1591',
+      title: 'Universidad de Sankore en Tombuctú',
+      fact: 'Cientos de miles de manuscritos convirtieron a Tombuctú en faro mundial del saber y el comercio.',
+    },
+    mil2: {
+      era: '1464',
+      title: 'Herencia Songhai del Sahel',
+      fact: 'Organiza columnas rápidas del desierto para defender el gran arco del río Níger.',
+    },
+    restore: {
+      era: '1235–1600',
       title: 'Restaurar el Imperio de Malí',
-      subtitle: 'El retorno del Imperio Dorado',
-      history: 'Reunifica Malí, Senegal y Guinea en el histórico Imperio de Malí.',
+      fact: 'Recobra el esplendor dorado del Imperio de Malí en toda África Occidental.',
       newName: 'Imperio de Malí',
-      controlIso2: ['SN', 'GN'],
-      proclamationText: '¡Bamako proclama el renacimiento del Imperio de Malí!',
+      targets: ['SN', 'GN', 'BF', 'NE'],
     },
   },
   NG: {
-    heritageTitle: 'Linaje de Benín, Sokoto y el Níger',
-    heritageSummary: 'Gigante demográfico y económico de África Occidental.',
+    subtitle: 'De los Bronces de Benín al Gigante de África',
+    ancestors: ['Reino de Benín e Imperio Oyo', 'Califato de Sokoto', 'Nigeria'],
     root: {
       era: '1960',
-      title: 'Federación del Níger',
-      subtitle: 'Potencia emergente africana',
-      history: 'Consolida las grandes urbes y la administración federal de Abuya.',
+      title: 'Independencia de la Federación Nigeriana',
+      fact: 'Heredera de Nok, Benín y Sokoto, Nigeria nació como la nación más poblada y dinámica de África.',
     },
-    economy: {
-      era: '1956 – Presente',
-      title: 'Delta del Níger y Lagos',
-      subtitle: 'Energía y comercio del Golfo de Guinea',
-      history: 'Eleva los ingresos portuarios y urbanos a escala regional.',
-      minPorts: 1,
+    eco1: {
+      era: '1440–1897',
+      title: 'Artesanos y Comercio de Benín y Kano',
+      fact: 'Los célebres bronces de Benín y las rutas de Kano crearon grandes centros urbanos y comerciales.',
     },
-    military: {
-      era: '1990 – Presente',
+    mil1: {
+      era: '1804',
+      title: 'Unificación de Sokoto',
+      fact: 'Consolidó una de las administraciones y fuerzas militares más extensas del África precolonial.',
+    },
+    eco2: {
+      era: '1975–2025',
+      title: 'Lagos, Nollywood y Motor de la CEDEAO',
+      fact: 'La energía, las finanzas de Lagos y su industria cultural lideran la economía africana.',
+    },
+    mil2: {
+      era: '1990',
       title: 'Fuerza de Estabilización Occidental',
-      subtitle: 'Liderazgo militar regional',
-      history: 'Refuerza el mayor ejército de África Occidental.',
+      fact: 'Despliega el mayor ejército de África Occidental para asegurar la región del Golfo de Guinea.',
     },
-    restoration: {
-      era: 'Unión Regional',
-      title: 'Federación de África Occidental',
-      subtitle: 'Integración del Golfo de Guinea',
-      history: 'Une Nigeria, Benín y Ghana en una gran federación africana.',
-      newName: 'Federación de África Occidental',
-      controlIso2: ['BJ', 'GH'],
+    restore: {
+      era: '1804–1903',
+      title: 'Proclamar el Imperio de Benín y Sokoto',
+      fact: 'Fusiona el legado de los grandes reinos nigerianos en una superpotencia de África Occidental.',
+      newName: 'Imperio de Benín y Sokoto',
+      targets: ['BJ', 'CM', 'NE', 'GH'],
     },
   },
   ZA: {
-    heritageTitle: 'Linaje del Cabo y África Austral',
-    heritageSummary: 'Puerta entre el Atlántico y el Índico y motor industrial del sur de África.',
+    subtitle: 'Cabo de Buena Esperanza y Nación Arcoíris',
+    ancestors: ['Reinos Zulú y Xhosa', 'Unión Sudafricana (1910)', 'Sudáfrica'],
     root: {
-      era: '1910 – 1994',
-      title: 'Nación del Arcoíris y Unión del Cabo',
-      subtitle: 'Estabilidad institucional en Pretoria',
-      history: 'Consolida la cohesión nacional y el peso diplomático.',
+      era: '1994',
+      title: 'Transición Democrática de Mandela',
+      fact: 'El fin del apartheid y el liderazgo de Nelson Mandela inspiraron la reconciliación en todo el planeta.',
     },
-    economy: {
-      era: '1886 – Presente',
-      title: 'Oro de Witwatersrand y Cabo de Buena Esperanza',
-      subtitle: 'Gran minería y rutas oceánicas',
-      history: 'Potencia minas de oro y puertos interoceánicos.',
-      minPorts: 1,
+    eco1: {
+      era: '1886',
+      title: 'Oro y Diamantes de Johannesburgo',
+      fact: 'La riqueza minera del Witwatersrand levantó el mayor centro financiero e industrial del África austral.',
     },
-    military: {
-      era: 'Siglos XIX – XXI',
-      title: 'Ejército Austral Moderno',
-      subtitle: 'Proyección sobre el sur de África',
-      history: 'Organiza divisiones mecanizadas de alta movilidad.',
+    mil1: {
+      era: '1816–1879',
+      title: 'Táctica de los Cuernos del Búfalo',
+      fact: 'El ingenio táctico de Shaka Zulú revolucionó el combate de infantería en el sur de África.',
     },
-    restoration: {
-      era: 'Integración Austral',
-      title: 'Unión de África Austral',
-      subtitle: 'Del Cabo hasta el Zambeze',
-      history: 'Integra Sudáfrica, Namibia y Botsuana en una sola potencia austral.',
+    eco2: {
+      era: '1967',
+      title: 'Pioneros Médicos y Puertos del Cabo',
+      fact: 'Desde el primer trasplante cardíaco en Ciudad del Cabo hasta el comercio entre dos océanos.',
+    },
+    mil2: {
+      era: '1910',
+      title: 'Centinela de Dos Océanos',
+      fact: 'Controla el paso marítimo del Cabo de Buena Esperanza entre el Atlántico y el Índico.',
+    },
+    restore: {
+      era: '1910',
+      title: 'Proclamar la Unión de África Austral',
+      fact: 'Consolida una poderosa federación meridional uniendo las naciones del sur africano.',
       newName: 'Unión de África Austral',
-      controlIso2: ['NA', 'BW'],
+      targets: ['NA', 'BW', 'ZW', 'LS', 'SZ'],
     },
   },
-  KE: {
-    heritageTitle: 'Linaje del Valle del Rift y Suajili',
-    heritageSummary: 'Eje comercial, portuario y diplomático de África Oriental.',
+  ZW: {
+    subtitle: 'Herederos de las Murallas del Gran Zimbabue',
+    ancestors: ['Reino del Gran Zimbabue (1100)', 'Imperio Mutapa', 'Zimbabue'],
     root: {
-      era: '1963',
-      title: 'Harambee · Independencia de Kenia',
-      subtitle: 'Impulso comunitario y estatal',
-      history: 'Consolida Nairobi como capital económica del este africano.',
+      era: '1100–1450',
+      title: 'Ciudad de Piedra del Gran Zimbabue',
+      fact: 'Sus monumentales murallas de granito sin argamasa fueron la capital de un próspero reino del oro.',
     },
-    economy: {
-      era: 'Siglo XXI',
-      title: 'Puerto de Mombasa y Silicon Savannah',
-      subtitle: 'Innovación y comercio del Índico',
-      history: 'Acelera los ingresos urbanos y marítimos.',
-      minPorts: 1,
+    eco1: {
+      era: '1430',
+      title: 'Comercio de Oro del Imperio Mutapa',
+      fact: 'Las minas de la meseta conectaban directamente con las caravanas y barcos del Océano Índico.',
     },
-    military: {
-      era: '1963 – Presente',
-      title: 'Guardia del Rift',
-      subtitle: 'Seguridad y proyección regional',
-      history: 'Prepara tropas disciplinadas para liderar África Oriental.',
+    mil1: {
+      era: '1980',
+      title: 'Independencia de Zimbabue',
+      fact: 'Tras una larga lucha de liberación, el país adoptó el nombre de su legendaria civilización ancestral.',
     },
-    restoration: {
-      era: 'Proyecto Comunitario',
-      title: 'Federación de África Oriental',
-      subtitle: 'Unión del Lago Victoria al Índico',
-      history: 'Une Kenia, Tanzania y Uganda en la Federación de África Oriental.',
-      newName: 'Federación de África Oriental',
-      controlIso2: ['TZ', 'UG'],
+    eco2: {
+      era: '1960',
+      title: 'Presa de Kariba y Agricultura de la Meseta',
+      fact: 'Aprovecha la energía del Zambeze y las tierras fértiles para revitalizar las arcas.',
+    },
+    mil2: {
+      era: '1450',
+      title: 'Bastión del Zambeze',
+      fact: 'Fortifica las rutas comerciales y las mesetas del sur africano.',
+    },
+    restore: {
+      era: '1100–1629',
+      title: 'Restaurar el Imperio del Gran Zimbabue',
+      fact: 'Revive la grandeza de los constructores de piedra en el África austral.',
+      newName: 'Imperio del Gran Zimbabue',
+      targets: ['ZM', 'MZ', 'BW'],
     },
   },
 
-  // === OCEANÍA ===
+  // ======================== OCEANÍA ========================
   AU: {
-    heritageTitle: 'Linaje de la Mancomunidad Australiana',
-    heritageSummary: 'De la Federación de 1901 al liderazgo marítimo del Pacífico Sur.',
+    subtitle: 'De la Federación de 1901 a Australasia',
+    ancestors: ['Pueblos Aborígenes (60.000 años)', 'Colonias Australianas', 'Australia'],
     root: {
       era: '1901',
-      title: 'Federación de Australia',
-      subtitle: 'Unión continental en Canberra',
-      history: 'Consolida la administración de todo el continente australiano.',
+      title: 'Federación de la Mancomunidad de Australia',
+      fact: 'Las seis colonias se unieron pacíficamente el 1 de enero de 1901 para gobernar todo un continente.',
     },
-    economy: {
-      era: '1851 – Presente',
-      title: 'Fiebre del Oro y Recursos del Outback',
-      subtitle: 'Minería y puertos del Pacífico',
-      history: 'Impulsa la explotación mineral y el comercio marítimo.',
-      minPorts: 1,
+    eco1: {
+      era: '1851–1900',
+      title: 'Fiebre del Oro y Minería Continental',
+      fact: 'El oro de Victoria y los inmensos yacimientos minerales financiaron ciudades y puertos de clase mundial.',
     },
-    military: {
-      era: '1915 – Presente',
+    mil1: {
+      era: '1915',
       title: 'Espíritu ANZAC',
-      subtitle: 'Fuerza expedicionaria del Pacífico',
-      history: 'Entrena tropas de élite y proyección naval.',
-      minAllies: 1,
+      fact: 'La camaradería y valor de las tropas australianas y neozelandesas definieron la identidad militar del país.',
     },
-    restoration: {
-      era: 'Unión Oceánica',
-      title: 'Federación de Australasia',
-      subtitle: 'Unión de Oceanía y el Mar de Tasmania',
-      history: 'Integra Australia, Nueva Zelanda y Papúa Nueva Guinea en Australasia.',
+    eco2: {
+      era: '1973–2025',
+      title: 'Ópera de Sídney y Puente Indo-Pacífico',
+      fact: 'Ciencia, exportación de recursos y comercio marítimo hacen de Australia un pilar del Pacífico.',
+    },
+    mil2: {
+      era: '1942',
+      title: 'Escudo del Mar del Coral',
+      fact: 'Fortifica el norte y despliega una flota capaz de proteger todo el Pacífico Sur.',
+    },
+    restore: {
+      era: '1901',
+      title: 'Proclamar la Federación de Australasia',
+      fact: 'Integra el continente australiano y el Pacífico Sur en una gran federación oceánica.',
       newName: 'Federación de Australasia',
-      controlIso2: ['NZ', 'PG'],
-      proclamationText: '¡Canberra proclama la Federación de Australasia!',
+      targets: ['NZ', 'PG', 'FJ'],
     },
   },
   NZ: {
-    heritageTitle: 'Linaje Maorí y de Aotearoa',
-    heritageSummary: 'Del Tratado de Waitangi a la federación del Pacífico Sur.',
+    subtitle: 'Aotearoa: Navegantes Maoríes y Pioneros Democráticos',
+    ancestors: ['Navegantes Polinesios Maoríes', 'Tratado de Waitangi (1840)', 'Nueva Zelanda'],
     root: {
       era: '1840',
       title: 'Tratado de Waitangi',
-      subtitle: 'Fundación moderna de Aotearoa',
-      history: 'Consolida la identidad insular y la cohesión institucional.',
+      fact: 'El pacto fundacional de 1840 sentó las bases modernas de Aotearoa Nueva Zelanda.',
     },
-    economy: {
-      era: 'Siglos XIX – XXI',
-      title: 'Rutas Marítimas del Pacífico Sur',
-      subtitle: 'Exportación y puertos oceánicos',
-      history: 'Potencia los puertos y ciudades costeras neozelandesas.',
-      minPorts: 1,
+    eco1: {
+      era: '1893',
+      title: 'Primer País con Sufragio Femenino',
+      fact: 'En 1893 Nueva Zelanda hizo historia mundial al ser el primer país en aprobar el voto femenino.',
     },
-    military: {
-      era: '1915 – 1945',
-      title: 'Batallón ANZAC',
-      subtitle: 'Disciplina anfibia y expedicionaria',
-      history: 'Refuerza la proyección militar marítima.',
+    mil1: {
+      era: '1915',
+      title: 'Cuerpo ANZAC y Batallón Maorí',
+      fact: 'Sus unidades ganaron admiración internacional por su valentía y disciplina en ambos hemisferios.',
     },
-    restoration: {
-      era: 'Unión Oceánica',
-      title: 'Federación de Australasia',
-      subtitle: 'Liderazgo del Pacífico desde Wellington',
-      history: 'Reúne Nueva Zelanda y Australia bajo la Federación de Australasia.',
-      newName: 'Federación de Australasia',
-      controlIso2: ['AU'],
+    eco2: {
+      era: '1882–2025',
+      title: 'Comercio Refrigerado y Energía Geotérmica',
+      fact: 'Pioneros del transporte marítimo refrigerado y de energías limpias en el Pacífico Sur.',
+    },
+    mil2: {
+      era: '1280',
+      title: 'Rutas Oceánicas de Polinesia',
+      fact: 'Combina la tradición marítima del Pacífico con patrullaje y defensa insular moderna.',
+    },
+    restore: {
+      era: '1840',
+      title: 'Proclamar la Mancomunidad de Aotearoa',
+      fact: 'Erige a Aotearoa como gran unión marítima de las islas del Pacífico Sur.',
+      newName: 'Mancomunidad de Aotearoa',
+      targets: ['AU', 'FJ', 'WS', 'TO'],
+    },
+  },
+  TO: {
+    subtitle: 'El Reino Insular que Dominó el Pacífico',
+    ancestors: ['Cultura Lapita', 'Imperio Tu’i Tonga (950–1865)', 'Tonga'],
+    root: {
+      era: '950',
+      title: 'Dinastía Tu’i Tonga',
+      fact: 'Tonga construyó un vasto imperio marítimo polinesio y nunca perdió formalmente su monarquía soberana.',
+    },
+    eco1: {
+      era: '1200',
+      title: 'Trilito Ha’amonga y Rutas de Canoas',
+      fact: 'Los monumentos megalíticos y el comercio interinsular demostraron una ingeniería marítima admirable.',
+    },
+    mil1: {
+      era: '1845',
+      title: 'Unificación de Jorge Tupou I',
+      fact: 'Unificó el archipiélago, abolió la servidumbre y promulgó la constitución de 1875.',
+    },
+    eco2: {
+      era: '1970',
+      title: 'Foro de las Islas del Pacífico',
+      fact: 'Lidera la diplomacia oceánica y el aprovechamiento sostenible de la inmensa zona marítima.',
+    },
+    mil2: {
+      era: '1400',
+      title: 'Flota de Doble Casco (Kalia)',
+      fact: 'Inspirada en las legendarias canoas de guerra polinesias, proyecta fuerza en el Pacífico.',
+    },
+    restore: {
+      era: '950–1865',
+      title: 'Restaurar el Imperio Tu’i Tonga',
+      fact: 'Revive la gran talasocracia polinesia que unió a los archipiélagos del Pacífico Sur.',
+      newName: 'Imperio Tu’i Tonga',
+      targets: ['WS', 'FJ', 'NZ'],
     },
   },
 };
 
-// Regional historical formables for additional countries not listed individually above
-interface RegionalFormableGroup {
-  members: string[];
+// Specific curated formable names & historical deeds for ALL other iconic nations
+// so every country on Earth feels historically authentic!
+interface RegionalQuickSpec {
+  ancestors: string[];
+  restoredName: string;
   era: string;
-  title: string;
-  newName: string;
-  subtitle: string;
-  history: string;
-  requiredPartners: string[]; // members excluding self (up to 3)
+  rootDeed: string;
+  ecoDeed: string;
+  milDeed: string;
+  restoreFact: string;
+  targets?: string[];
 }
 
-const REGIONAL_FORMABLES: RegionalFormableGroup[] = [
-  {
-    members: ['HN', 'SV', 'NI', 'CR'],
-    era: '1823 – 1839',
-    title: 'República Federal de Centroamérica',
-    newName: 'Federación Centroamericana',
-    subtitle: 'Reunificación histórica de las provincias del Istmo',
-    history: 'Restaura la histórica República Federal uniendo las naciones hermanas de Centroamérica.',
-    requiredPartners: ['GT', 'HN', 'SV', 'NI', 'CR'],
+const COUNTRY_QUICK_SPECS: Record<string, RegionalQuickSpec> = {
+  // América extra
+  CR: {
+    ancestors: ['Provincia de Costa Rica', 'República Federal (1823)', 'Costa Rica'],
+    restoredName: 'República Federal de Centroamérica',
+    era: '1823–1839',
+    rootDeed: 'En 1821 proclamó su independencia pacífica y en 1948 abolió el ejército para invertir en educación y paz.',
+    ecoDeed: 'El café, la conservación ambiental y la alta tecnología convirtieron al país en modelo regional.',
+    milDeed: 'En 1856 la Campaña Nacional de Santa Rosa y Rivas defendió la libertad de toda Centroamérica.',
+    restoreFact: 'Desde San José, impulsa una moderna unión democrática de las repúblicas centroamericanas.',
+    targets: ['NI', 'PA', 'HN', 'SV', 'GT'],
   },
-  {
-    members: ['DO', 'HT', 'JM', 'BS', 'TT', 'BB', 'LC', 'GD', 'VC', 'AG', 'DM', 'KN'],
-    era: 'Proyecto Antillano',
-    title: 'Federación del Caribe',
-    newName: 'Federación del Caribe',
-    subtitle: 'Unidad soberana de las islas caribeñas',
-    history: 'Reúne las Grandes y Pequeñas Antillas en una potencia marítima del Caribe.',
-    requiredPartners: ['CU', 'DO', 'HT'],
+  SV: {
+    ancestors: ['Señorío de Cuzcatlán', 'Provincia de San Salvador', 'El Salvador'],
+    restoredName: 'República Federal de Centroamérica',
+    era: '1823–1839',
+    rootDeed: 'El primer grito de independencia centroamericano resonó en San Salvador el 5 de noviembre de 1811.',
+    ecoDeed: 'El añil, el café y la industria portuaria del Pacífico dinamizaron la economía salvadoreña.',
+    milDeed: 'Francisco Morazán lideró desde San Salvador la defensa histórica de la unión centroamericana.',
+    restoreFact: 'Reunifica el sueño federal de Morazán bajo la República Federal de Centroamérica.',
+    targets: ['GT', 'HN', 'NI', 'CR'],
   },
-  {
-    members: ['GY', 'SR', 'BZ'],
-    era: 'Unión Atlántica',
-    title: 'Mancomunidad de las Guayanas',
-    newName: 'Federación de las Guayanas',
-    subtitle: 'Integración costera y amazónica',
-    history: 'Unifica las costas del Escudo Guayanés en un Estado soberano próspero.',
-    requiredPartners: ['GY', 'SR'],
+  HN: {
+    ancestors: ['Copán Maya', 'Provincia de Honduras', 'Honduras'],
+    restoredName: 'República Federal de Centroamérica',
+    era: '1823–1839',
+    rootDeed: 'Cuna de la ciudad maya de Copán y de próceres unionistas como José Cecilio del Valle y Morazán.',
+    ecoDeed: 'Sus puertos caribeños y la producción agrícola integraron el comercio entre ambos océanos.',
+    milDeed: 'La defensa territorial centroamericana y la logística del istmo forjaron su fuerza armada.',
+    restoreFact: 'Retoma el ideario de Valle y Morazán para restaurar la Federación de Centroamérica.',
+    targets: ['GT', 'SV', 'NI', 'CR'],
   },
-  {
-    members: ['BE', 'LU'],
-    era: '1815 – 1944',
-    title: 'Unión del Benelux',
-    newName: 'Unión del Benelux',
-    subtitle: 'Integración de los Países Bajos históricos',
-    history: 'Une Bélgica, Países Bajos y Luxemburgo en el corazón comercial de Europa.',
-    requiredPartners: ['NL', 'BE', 'LU'],
+  NI: {
+    ancestors: ['Reinos Nicarao y Chorotega', 'Provincia de Nicaragua', 'Nicaragua'],
+    restoredName: 'República Federal de Centroamérica',
+    era: '1823–1839',
+    rootDeed: 'Tierra de lagos, volcanes y cuna del poeta Rubén Darío, revolucionó las letras hispanas.',
+    ecoDeed: 'La ruta de tránsito del río San Juan y el Gran Lago conectaron históricamente el Atlántico y el Pacífico.',
+    milDeed: 'La Batalla de San Jacinto en 1856 selló la defensa soberana del territorio nicaragüense.',
+    restoreFact: 'Unifica las naciones del istmo en la histórica República Federal de Centroamérica.',
+    targets: ['HN', 'CR', 'SV', 'GT'],
   },
-  {
-    members: ['FI', 'IS'],
-    era: 'Herencia Nórdica',
-    title: 'Unión Nórdica',
-    newName: 'Unión Nórdica',
-    subtitle: 'Hermandad escandinava y báltica',
-    history: 'Integra el norte europeo en una potencia nórdica unificada.',
-    requiredPartners: ['SE', 'NO'],
+  BZ: {
+    ancestors: ['Ciudades Mayas de Caracol', 'Honduras Británica', 'Belice'],
+    restoredName: 'Federación Maya del Caribe',
+    era: '1981',
+    rootDeed: 'Sede de grandes urbes mayas como Caracol y Xunantunich, obtuvo su plena independencia en 1981.',
+    ecoDeed: 'Su barrera de coral —la segunda más grande del mundo— y sus puertos impulsan el comercio caribeño.',
+    milDeed: 'La defensa de la Bahía de San Jorge en 1798 consolidó el control marítimo beliceño.',
+    restoreFact: 'Une el legado maya y caribeño bajo una potencia marítima del golfo de Honduras.',
+    targets: ['GT', 'MX', 'HN'],
   },
-  {
-    members: ['EE', 'LV', 'LT'],
-    era: '1989 · Cadena Báltica',
-    title: 'Federación del Báltico',
-    newName: 'Federación Báltica',
-    subtitle: 'Unión soberana de las tres repúblicas bálticas',
-    history: 'Consolida Estonia, Letonia y Lituania en un frente unido del Mar Báltico.',
-    requiredPartners: ['EE', 'LV', 'LT'],
+  JM: {
+    ancestors: ['Taínos de Xaymaca', 'Cimarrones Libres', 'Jamaica'],
+    restoredName: 'Federación de las Indias Occidentales',
+    era: '1958–1962',
+    rootDeed: 'Independiente en 1962, Jamaica proyectó su cultura, el reggae y el deporte por todo el planeta.',
+    ecoDeed: 'El puerto de Kingston y la minería de bauxita consolidaron su papel como eje comercial antillano.',
+    milDeed: 'La resistencia histórica de los cimarrones en las Montañas Azules demostró un espíritu indomable.',
+    restoreFact: 'Revive la gran Federación de las Indias Occidentales liderando el Caribe anglófono.',
+    targets: ['CU', 'HT', 'BS', 'TT'],
   },
-  {
-    members: ['HR', 'BA', 'SI', 'ME', 'MK'],
-    era: '1918 – 1991',
-    title: 'Federación Balcánica (Yugoslavia)',
-    newName: 'Federación Balcánica',
-    subtitle: 'Reunificación de los Balcanes Occidentales',
-    history: 'Integra el Adriático y los Balcanes en una sola federación.',
-    requiredPartners: ['RS', 'HR', 'BA'],
+  TT: {
+    ancestors: ['Pueblos Arahuacos y Caribes', 'Indias Occidentales', 'Trinidad y Tobago'],
+    restoredName: 'Federación de las Indias Occidentales',
+    era: '1958–1962',
+    rootDeed: 'Puerto España fue capital de la Federación de las Indias Occidentales y cuna del steelpan.',
+    ecoDeed: 'Sus reservas de gas natural, petróleo y el mayor lago de asfalto natural impulsan la industria.',
+    milDeed: 'Vigila el paso estratégico entre el Atlántico y el Caribe frente a Sudamérica.',
+    restoreFact: 'Desde Puerto España, reunifica a las islas del Caribe bajo la Federación Antillana.',
+    targets: ['BB', 'GD', 'VE', 'GY'],
   },
-  {
-    members: ['SK'],
-    era: '1918 – 1992',
-    title: 'Restaurar Checoslovaquia',
-    newName: 'Checoslovaquia',
-    subtitle: 'Unión histórica centroeuropea',
-    history: 'Reunifica Eslovaquia y Chequia en la República de Checoslovaquia.',
-    requiredPartners: ['CZ'],
+  GY: {
+    ancestors: ['Pueblos Arahuacos', 'Guayana', 'Guyana'],
+    restoredName: 'Federación de las Guayanas',
+    era: '1966',
+    rootDeed: 'Independiente en 1966, Georgetown alberga la sede de la Comunidad del Caribe (CARICOM).',
+    ecoDeed: 'Sus bosques amazónicos, bauxita y gigantescos yacimientos energéticos transforman su economía.',
+    milDeed: 'Resguarda los grandes ríos Esequibo y Demerara y la frontera amazónica.',
+    restoreFact: 'Unifica las tierras guayanesas en una próspera Federación de las Guayanas.',
+    targets: ['SR', 'VE', 'BR'],
   },
-  {
-    members: ['MD'],
-    era: '1918 – 1940',
-    title: 'Restaurar la Gran Rumania',
-    newName: 'Gran Rumania',
-    subtitle: 'Reunificación del Prut al Danubio',
-    history: 'Reúne Moldavia y Rumania en un solo Estado histórico.',
-    requiredPartners: ['RO'],
+  SR: {
+    ancestors: ['Pueblos Caribes', 'Guayana Neerlandesa', 'Surinam'],
+    restoredName: 'Federación de las Guayanas',
+    era: '1975',
+    rootDeed: 'Independiente en 1975, es uno de los países más boscosos y diversos de Sudamérica.',
+    ecoDeed: 'La bauxita, el oro y la energía hidroeléctrica sostienen el puerto de Paramaribo.',
+    milDeed: 'Protege la densa selva interior y las costas del Atlántico ecuatorial.',
+    restoreFact: 'Lidera la integración de la costa guayanesa bajo la Federación de las Guayanas.',
+    targets: ['GY', 'BR'],
   },
-  {
-    members: ['BG', 'AL'],
-    era: 'Siglos IX – XIV',
-    title: 'Imperio de los Balcanes',
-    newName: 'Imperio Balcánico',
-    subtitle: 'Hegemonía desde el Adriático al Mar Negro',
-    history: 'Restaura los antiguos imperios balcánicos uniendo sus vecinos históricos.',
-    requiredPartners: ['BG', 'MK', 'AL'],
+
+  // Europa extra
+  BE: {
+    ancestors: ['Flandes y Brabante', 'Revolución Belga (1830)', 'Bélgica'],
+    restoredName: 'Unión del Benelux',
+    era: '1830–1944',
+    rootDeed: 'En 1830 Bélgica proclamó su independencia y fue el primer país continental en industrializarse.',
+    ecoDeed: 'Bruselas es el corazón político de la Unión Europea y Amberes uno de los mayores puertos del mundo.',
+    milDeed: 'La tenaz defensa del río Yser en 1914 preservó la soberanía belga en los momentos más duros.',
+    restoreFact: 'Consolida la integración económica y política de los Países Bajos históricos en la Unión del Benelux.',
+    targets: ['NL', 'LU', 'FR'],
   },
-  {
-    members: ['CH', 'LI'],
-    era: '1291',
-    title: 'Confederación Alpina',
-    newName: 'Confederación Alpina',
-    subtitle: 'Fortaleza soberana de los Alpes',
-    history: 'Expande la histórica Confederación Helvética sobre los pasos alpinos.',
-    requiredPartners: ['CH', 'AT'],
+  CH: {
+    ancestors: ['Pacto Federal de 1291', 'Antigua Confederación', 'Suiza'],
+    restoredName: 'Confederación Helvética Alpina',
+    era: '1291–1848',
+    rootDeed: 'El Juramento del Rütli de 1291 fundó una de las confederaciones más longevas de la historia.',
+    ecoDeed: 'Relojería de precisión, banca, Ginebra como sede de la Cruz Roja y el acelerador CERN.',
+    milDeed: 'El Reducto Nacional Alpino y los célebres piqueros suizos garantizaron siglos de inviolabilidad.',
+    restoreFact: 'Amplía la paz y fortaleza de los cantones proclamando la Confederación Helvética Alpina.',
+    targets: ['AT', 'LI', 'IT', 'DE'],
   },
-  {
-    members: ['IE'],
-    era: 'Herencia Celta',
-    title: 'Unión Celta',
-    newName: 'Unión Celta',
-    subtitle: 'Soberanía de las islas atlánticas',
-    history: 'Reúne el archipiélago atlántico bajo el estandarte celta de Dublín.',
-    requiredPartners: ['GB'],
+  IE: {
+    ancestors: ['Altos Reyes de Tara', 'Alzamiento de Pascua (1916)', 'Irlanda'],
+    restoredName: 'Unión Celta',
+    era: '1922',
+    rootDeed: 'Tras siglos de resistencia cultural y la gesta de 1916, Irlanda consolidó su república independiente.',
+    ecoDeed: 'El "Tigre Celta" convirtió a Dublín en polo tecnológico, farmacéutico y literario mundial.',
+    milDeed: 'Las milicias irlandesas lograron la independencia con tácticas ágiles de defensa territorial.',
+    restoreFact: 'Revive la herencia histórica del Atlántico norte fundando la Unión Celta.',
+    targets: ['GB', 'IS', 'FR'],
   },
-  {
-    members: ['BY'],
-    era: '1253 – 1569',
-    title: 'Gran Ducado Histórico',
-    newName: 'Gran Ducado Oriental',
-    subtitle: 'Herencia de Minsk y Vilna',
-    history: 'Reconstruye el histórico espacio del Gran Ducado junto a Lituania y Ucrania.',
-    requiredPartners: ['LT', 'UA'],
+  FI: {
+    ancestors: ['Tierras de Kalevala', 'Independencia de 1917', 'Finlandia'],
+    restoredName: 'Mancomunidad Nórdica',
+    era: '1917',
+    rootDeed: 'Independiente en 1917, Finlandia creó un sistema educativo y tecnológico admirado en todo el mundo.',
+    ecoDeed: 'Ingeniería naval rompehielos, telecomunicaciones e industria forestal impulsan su economía.',
+    milDeed: 'La legendaria defensa invernal de 1939–1940 (Sisu) aseguró la libertad finlandesa.',
+    restoreFact: 'Desde Helsinki, articula la gran unión estratégica de las naciones nórdicas y bálticas.',
+    targets: ['SE', 'NO', 'EE'],
   },
-  {
-    members: ['GE', 'AM', 'AZ'],
+  CZ: {
+    ancestors: ['Reino de Bohemia (1198)', 'Checoslovaquia (1918)', 'Chequia'],
+    restoredName: 'República Checoslovaca',
+    era: '1918–1992',
+    rootDeed: 'Praga fue capital imperial de Carlos IV y cuna de la primera universidad de Europa Central (1348).',
+    ecoDeed: 'La ingeniería industrial, cristalera y automotriz de Bohemia es motor de Centroeuropa.',
+    milDeed: 'Las tácticas innovadoras de carros fortificados husitas cambiaron la guerra medieval europea.',
+    restoreFact: 'Reunifica el legado industrial y cultural de Bohemia, Moravia y Eslovaquia.',
+    targets: ['SK', 'AT', 'PL'],
+  },
+  SK: {
+    ancestors: ['Gran Moravia (833)', 'Checoslovaquia (1918)', 'Eslovaquia'],
+    restoredName: 'Gran Moravia',
+    era: '833–907',
+    rootDeed: 'Heredera de la Gran Moravia y de los montes Tatra, consolidó su república moderna en 1993.',
+    ecoDeed: 'Bratislava y su corredor automotriz del Danubio lideran la manufactura per cápita europea.',
+    milDeed: 'El Alzamiento Nacional Eslovaco de 1944 demostró el coraje defensivo en los Cárpatos.',
+    restoreFact: 'Restaura el histórico nombre medieval de la Gran Moravia en Europa Central.',
+    targets: ['CZ', 'HU', 'PL'],
+  },
+  RO: {
+    ancestors: ['Reino de Dacia', 'Principados de Valaquia y Moldavia', 'Rumania'],
+    restoredName: 'Gran Rumania (Dacia)',
+    era: '1859–1918',
+    rootDeed: 'La unión de Valaquia y Moldavia en 1859 y la Gran Unión de 1918 forjaron el Estado rumano.',
+    ecoDeed: 'El Delta del Danubio, el puerto de Constanza y los recursos de los Cárpatos sostienen la economía.',
+    milDeed: 'La defensa de los pasos de los Cárpatos en Mărășești (1917) salvó la nación.',
+    restoreFact: 'Reúne la herencia dacia y rumana bajo el nombre histórico de la Gran Rumania.',
+    targets: ['MD', 'BG', 'HU', 'UA'],
+  },
+  BG: {
+    ancestors: ['Primer Imperio Búlgaro (681)', 'Segundo Imperio Búlgaro', 'Bulgaria'],
+    restoredName: 'Imperio Búlgaro',
+    era: '681–1396',
+    rootDeed: 'Fundada en 681, Bulgaria dio al mundo eslavo el alfabeto cirílico en las escuelas de Preslav y Ohrid.',
+    ecoDeed: 'Sus puertos del Mar Negro y rutas hacia los Balcanes y Anatolia reactivan el comercio.',
+    milDeed: 'El zar Simeón el Grande llevó al Imperio Búlgaro a ser la gran potencia de Europa sudoriental.',
+    restoreFact: 'Restaura el esplendor medieval del Imperio Búlgaro sobre los Balcanes.',
+    targets: ['MK', 'RO', 'GR', 'RS'],
+  },
+  LT: {
+    ancestors: ['Gran Ducado de Lituania (1253)', 'Mancomunidad (1569)', 'Lituania'],
+    restoredName: 'Gran Ducado de Lituania',
+    era: '1253–1795',
+    rootDeed: 'El Gran Ducado de Lituania llegó a ser el Estado más extenso de Europa en el siglo XV.',
+    ecoDeed: 'Vilna y el puerto de Klaipėda lideran las finanzas digitales y el comercio báltico.',
+    milDeed: 'La victoria en la Batalla de Grunwald (1410) marcó la historia de Europa oriental.',
+    restoreFact: 'Devuelve a Vilna el título histórico del Gran Ducado de Lituania.',
+    targets: ['PL', 'LV', 'BY'],
+  },
+  HR: {
+    ancestors: ['Reino de Croacia (925)', 'República de Ragusa', 'Croacia'],
+    restoredName: 'Reino de Iliria y Croacia',
+    era: '925',
+    rootDeed: 'El rey Tomislav fundó el Reino de Croacia en 925 y Dubrovnik brilló como república diplomática.',
+    ecoDeed: 'La costa dálmata, los astilleros del Adriático y el comercio marítimo fortalecen las arcas.',
+    milDeed: 'La tenaz defensa costera y balcánica aseguró la independencia moderna en la década de 1990.',
+    restoreFact: 'Consolida el litoral adriático y los Balcanes occidentales en el Reino de Iliria.',
+    targets: ['SI', 'BA', 'ME', 'RS'],
+  },
+  BY: {
+    ancestors: ['Principado de Pólotsk', 'Gran Ducado de Lituania', 'Bielorrusia'],
+    restoredName: 'Gran Ducado de Rutenia',
+    era: '1991',
+    rootDeed: 'Cuna del Principado de Pólotsk y de los primeros libros impresos en eslavo oriental por Francysk Skaryna.',
+    ecoDeed: 'La industria mecánica, los fertilizantes de potasa y las rutas hacia el Báltico impulsan los ingresos.',
+    milDeed: 'Los bosques y llanuras centrales sirvieron históricamente como formidable línea de resistencia.',
+    restoreFact: 'Proclama la unión de las tierras rutenas bajo el Gran Ducado de Rutenia.',
+    targets: ['LT', 'UA', 'PL', 'RU'],
+  },
+  EE: {
+    ancestors: ['Liga Hanseática de Tallin', 'República de Estonia (1918)', 'Estonia'],
+    restoredName: 'Mancomunidad Báltica',
     era: '1918',
-    title: 'Federación Transcaucásica',
-    newName: 'Federación del Cáucaso',
-    subtitle: 'Unión del Mar Negro al Mar Caspio',
-    history: 'Reúne Georgia, Armenia y Azerbaiyán en la histórica federación del Cáucaso.',
-    requiredPartners: ['GE', 'AM', 'AZ'],
+    rootDeed: 'La Revolución Cantada de 1988–1991 recuperó pacíficamente la libertad y convirtió a Estonia en pionera digital.',
+    ecoDeed: 'El puerto hanseático de Tallin y el gobierno 100% digital multiplican la eficiencia económica.',
+    milDeed: 'La Guerra de Independencia de 1918–1920 consolidó la soberanía sobre el golfo de Finlandia.',
+    restoreFact: 'Unifica a las repúblicas del Báltico oriental bajo la Mancomunidad Báltica.',
+    targets: ['LV', 'LT', 'FI'],
   },
-  {
-    members: ['UZ', 'KG', 'TJ', 'TM'],
-    era: 'Ruta de la Seda',
-    title: 'Gran Turquestán',
-    newName: 'Gran Turquestán',
-    subtitle: 'Renacimiento de Samarcanda y Asia Central',
-    history: 'Reunifica las antiguas ciudades de la Ruta de la Seda en Asia Central.',
-    requiredPartners: ['KZ', 'UZ', 'KG'],
+  LV: {
+    ancestors: ['Confederación de Livonia', 'República de Letonia (1918)', 'Letonia'],
+    restoredName: 'Confederación de Livonia',
+    era: '1435–1561',
+    rootDeed: 'Riga fue joya de la Liga Hanseática y capital comercial del Báltico durante ocho siglos.',
+    ecoDeed: 'Los puertos libres de hielo, la madera y la logística báltica impulsan el tesoro.',
+    milDeed: 'Los fusileros letones de 1919 defendieron la recién nacida república contra enemigos superiores.',
+    restoreFact: 'Restaura el nombre histórico de la Confederación de Livonia en el Báltico.',
+    targets: ['EE', 'LT'],
   },
-  {
-    members: ['IQ', 'SY', 'JO', 'LB', 'PS', 'IL'],
-    era: 'Creciente Fértil',
-    title: 'Unión del Levante y Mesopotamia',
-    newName: 'Gran Levante',
-    subtitle: 'Cuna milenaria de civilizaciones',
-    history: 'Integra las históricas tierras del Levante mediterráneo y los ríos Éufrates y Tigris.',
-    requiredPartners: ['SY', 'JO', 'LB'],
-  },
-  {
-    members: ['AE', 'QA', 'KW', 'BH', 'OM', 'YE'],
-    era: 'Unión del Golfo',
-    title: 'Federación Arábiga',
-    newName: 'Federación Arábiga',
-    subtitle: 'Unión energética y marítima de la Península',
-    history: 'Consolida los Estados del Golfo y el Mar Arábigo en una sola federación.',
-    requiredPartners: ['SA', 'AE', 'OM'],
-  },
-  {
-    members: ['PK', 'AF', 'BD', 'NP', 'BT', 'LK', 'MV'],
-    era: '1526 – 1857',
-    title: 'Unión del Sur de Asia',
-    newName: 'Imperio del Indo',
-    subtitle: 'Herencia del valle del Indo y el Himalaya',
-    history: 'Integra las potencias históricas del sur de Asia en un gran imperio regional.',
-    requiredPartners: ['PK', 'AF'],
-  },
-  {
-    members: ['MY', 'SG', 'BN', 'PH', 'TL', 'MM', 'KH', 'LA'],
-    era: 'Comunidad del Sudeste',
-    title: 'Federación de Nusantara',
-    newName: 'Federación de Nusantara',
-    subtitle: 'Puente marítimo entre el Índico y el Pacífico',
-    history: 'Une los mares y rutas comerciales del Sudeste Asiático.',
-    requiredPartners: ['MY', 'ID'],
-  },
-  {
-    members: ['DZ', 'TN', 'LY', 'MR'],
-    era: 'Unión Magrebí',
-    title: 'Gran Unión del Magreb',
-    newName: 'Unión del Magreb',
-    subtitle: 'Del Atlántico hasta el Mediterráneo Central',
-    history: 'Reúne los pueblos del norte de África en la Unión del Magreb.',
-    requiredPartners: ['DZ', 'MA', 'TN'],
-  },
-  {
-    members: ['TZ', 'UG', 'RW', 'BI', 'SS'],
-    era: 'Integración Oriental',
-    title: 'Federación de África Oriental',
-    newName: 'Federación de África Oriental',
-    subtitle: 'Unión de los Grandes Lagos',
-    history: 'Consolida la histórica integración de África Oriental.',
-    requiredPartners: ['KE', 'TZ', 'UG'],
-  },
-  {
-    members: ['SN', 'GH', 'CI', 'BF', 'NE', 'GN', 'BJ', 'TG', 'SL', 'LR', 'GM', 'GW', 'CV'],
-    era: 'Herencia del Sahel y Guinea',
-    title: 'Federación de África Occidental',
-    newName: 'África Occidental Unida',
-    subtitle: 'Heredera de Malí, Songhai y Ashanti',
-    history: 'Reúne las naciones de África Occidental en un bloque soberano.',
-    requiredPartners: ['ML', 'SN', 'GH'],
-  },
-  {
-    members: ['CD', 'CG', 'AO', 'CM', 'GA', 'GQ', 'CF', 'TD', 'ST'],
-    era: '1390 – 1914',
-    title: 'Gran Imperio del Congo',
-    newName: 'Imperio del Congo',
-    subtitle: 'Corazón fluvial de África Central',
-    history: 'Restaura la histórica influencia del Reino del Congo en África Central.',
-    requiredPartners: ['CD', 'CG', 'AO'],
-  },
-  {
-    members: ['NA', 'BW', 'ZW', 'ZM', 'MZ', 'MW', 'LS', 'SZ', 'MG', 'MU', 'KM', 'SC'],
-    era: 'Unión Austral',
-    title: 'Unión de África Austral',
-    newName: 'Unión de África Austral',
-    subtitle: 'Integración del sur africano',
-    history: 'Unifica las economías y territorios de África Austral.',
-    requiredPartners: ['ZA', 'NA', 'BW'],
-  },
-  {
-    members: ['SD', 'ER', 'SO', 'DJ'],
-    era: 'Reinos de Nubia y el Mar Rojo',
-    title: 'Unión del Mar Rojo y Nubia',
-    newName: 'Federación del Mar Rojo',
-    subtitle: 'Dominio del paso entre África y Arabia',
-    history: 'Integra el Cuerno de África y el valle alto del Nilo.',
-    requiredPartners: ['ET', 'ER'],
-  },
-  {
-    members: ['PG', 'FJ', 'SB', 'VU', 'WS', 'TO', 'KI', 'FM', 'MH', 'PW', 'NR', 'TV'],
-    era: 'Navegantes del Pacífico',
-    title: 'Confederación del Pacífico',
-    newName: 'Confederación del Pacífico',
-    subtitle: 'Unión oceánica de navegantes',
-    history: 'Reúne las islas del Pacífico Sur en una gran confederación marítima.',
-    requiredPartners: ['FJ', 'PG'],
-  },
-];
 
-const REGIONAL_BY_ISO = new Map<string, RegionalFormableGroup>();
-for (const group of REGIONAL_FORMABLES) {
-  for (const iso of group.members) {
-    REGIONAL_BY_ISO.set(iso, group);
-  }
-}
+  // Asia extra
+  PK: {
+    ancestors: ['Civilización del Valle del Indo', 'Imperio Mogol', 'Pakistán'],
+    restoredName: 'Imperio del Indo',
+    era: '1947',
+    rootDeed: 'Cuna de Mohenjo-Daro y Harappa, una de las primeras civilizaciones urbanas de la humanidad.',
+    ecoDeed: 'La gran red de irrigación del río Indo y los puertos de Karachi y Gwadar impulsan el comercio.',
+    milDeed: 'La defensa de los pasos del Karakórum y el paso de Jáiber forjó un ejército numeroso y entrenado.',
+    restoreFact: 'Reclama el legado milenario de las tierras del río Indo bajo el Imperio del Indo.',
+    targets: ['AF', 'IN', 'IR'],
+  },
+  BD: {
+    ancestors: ['Sultanato de Bengala (1352)', 'Subah de Bengala', 'Bangladés'],
+    restoredName: 'Sultanato de Bengala',
+    era: '1352–1576',
+    rootDeed: 'En 1971 Bangladés ganó su independencia defendiendo su idioma y la cultura del gran delta bengalí.',
+    ecoDeed: 'Histórico centro mundial de muselinas y hoy gigante textil y portuario del golfo de Bengala.',
+    milDeed: 'La movilización fluvial de 1971 aseguró la liberación total del delta del Ganges.',
+    restoreFact: 'Revive la prosperidad histórica del Sultanato de Bengala sobre el golfo oriental.',
+    targets: ['IN', 'MM', 'NP'],
+  },
+  PH: {
+    ancestors: ['Rajanato de Cebú y Tondo', 'Primera República Filipina (1898)', 'Filipinas'],
+    restoredName: 'Mancomunidad de Filipinas y el Pacífico',
+    era: '1898',
+    rootDeed: 'En 1898 Filipinas fundó la primera república constitucional de Asia tras la revolución de Rizal y Bonifacio.',
+    ecoDeed: 'El Galeón de Manila conectó Asia con América durante 250 años, forjando una vocación marítima única.',
+    milDeed: 'Desde la resistencia de Lapu-Lapu en Mactán hasta la defensa del archipiélago en el siglo XX.',
+    restoreFact: 'Proyecta el poder del archipiélago formando la Mancomunidad del Pacífico Occidental.',
+    targets: ['ID', 'MY', 'VN'],
+  },
+  MY: {
+    ancestors: ['Sultanato de Malaca (1400)', 'Federación de Malasia (1963)', 'Malasia'],
+    restoredName: 'Sultanato de Malaca',
+    era: '1400–1511',
+    rootDeed: 'El Sultanato de Malaca fue el emporio comercial más rico entre la India y China.',
+    ecoDeed: 'Las Torres Petronas, la electrónica y el control del Estrecho de Malaca impulsan el desarrollo.',
+    milDeed: 'Las armadas del estrecho protegieron durante siglos el paso entre el Índico y el Pacífico.',
+    restoreFact: 'Restaura el prestigioso nombre del Sultanato de Malaca dominando la península y Borneo.',
+    targets: ['SG', 'BN', 'ID', 'TH'],
+  },
+  SG: {
+    ancestors: ['Reino de Singapura (1299)', 'Establecimientos de los Estrechos', 'Singapur'],
+    restoredName: 'Talasocracia de Singapura',
+    era: '1965',
+    rootDeed: 'Desde 1965 Singapur se transformó en una ciudad-Estado modelo en finanzas, educación y logística.',
+    ecoDeed: 'Uno de los puertos de contenedores y centros financieros más activos del planeta.',
+    milDeed: 'La doctrina del "puercoespín" dotó a la isla de una defensa tecnológica muy superior a su tamaño.',
+    restoreFact: 'Expande el modelo marítimo y financiero de la Ciudad del León en el Sudeste Asiático.',
+    targets: ['MY', 'ID', 'BN'],
+  },
+  KH: {
+    ancestors: ['Reino de Funan', 'Imperio Jemer (802–1431)', 'Camboya'],
+    restoredName: 'Imperio Jemer',
+    era: '802–1431',
+    rootDeed: 'Los constructores de Angkor Wat crearon el mayor complejo monumental y sistema hidráulico del mundo antiguo.',
+    ecoDeed: 'Los canales agrícolas de Angkor y el comercio del Mekong sostuvieron grandes ciudades.',
+    milDeed: 'El rey Suryavarman II expandió el Imperio Jemer por toda la península indochina.',
+    restoreFact: 'Restaura la majestad de Angkor proclamando nuevamente el Imperio Jemer.',
+    targets: ['TH', 'LA', 'VN'],
+  },
+  MM: {
+    ancestors: ['Reino de Pagan (849)', 'Dinastía Toungoo', 'Birmania'],
+    restoredName: 'Imperio de Toungoo',
+    era: '1510–1752',
+    rootDeed: 'Pagan levantó miles de templos dorados y la dinastía Toungoo forjó el mayor imperio del sudeste asiático.',
+    ecoDeed: 'El río Irawadi, el jade y las rutas entre la India y China impulsan la economía.',
+    milDeed: 'El rey Bayinnaung consolidó un ejército formidable que unificó valles y montañas.',
+    restoreFact: 'Recupera la grandeza histórica proclamando el Imperio de Toungoo.',
+    targets: ['TH', 'LA', 'BD'],
+  },
+  AF: {
+    ancestors: ['Bactriana y Gandhara', 'Imperio Durrani (1747)', 'Afganistán'],
+    restoredName: 'Imperio Durrani',
+    era: '1747–1823',
+    rootDeed: 'Ahmad Shah Durrani fundó en 1747 el Estado afgano moderno en la encrucijada de Asia.',
+    ecoDeed: 'Sus minerales de lapislázuli y las antiguas caravanas de la Ruta de la Seda enriquecen la región.',
+    milDeed: 'Las montañas del Hindu Kush otorgaron al país una reputación histórica de resistencia invencible.',
+    restoreFact: 'Restaura el histórico Imperio Durrani en la encrucijada de Asia Central y del Sur.',
+    targets: ['PK', 'TJ', 'UZ', 'IR'],
+  },
+  KZ: {
+    ancestors: ['Kanato Kazajo (1465)', 'Estepa Euroasiática', 'Kazajistán'],
+    restoredName: 'Gran Kanato Kazajo',
+    era: '1465–1847',
+    rootDeed: 'Fundado en 1465 en las estepas centrales, Kazajistán es hoy la mayor potencia de Asia Central y sede de Baikonur.',
+    ecoDeed: 'Energía, uranio, trigo y el gran corredor terrestre entre China y Europa impulsan las finanzas.',
+    milDeed: 'La caballería de las Tres Hordas defendió la estepa durante casi cuatro siglos.',
+    restoreFact: 'Reunifica el espíritu de la estepa central bajo el Gran Kanato Kazajo.',
+    targets: ['UZ', 'KG', 'TM', 'RU'],
+  },
+  UZ: {
+    ancestors: ['Transoxiana y Samarcanda', 'Imperio Timúrida (1370)', 'Uzbekistán'],
+    restoredName: 'Imperio Timúrida',
+    era: '1370–1507',
+    rootDeed: 'Samarcanda y Bujará fueron las joyas arquitectónicas, astronómicas y comerciales de la Ruta de la Seda.',
+    ecoDeed: 'El observatorio de Ulugh Beg y los bazares históricos inspiraron el florecimiento científico centroasiático.',
+    milDeed: 'Tamerlán forjó desde Samarcanda uno de los ejércitos más poderosos de Eurasia.',
+    restoreFact: 'Desde Samarcanda, restaura el esplendor del Imperio Timúrida en Asia Central.',
+    targets: ['KZ', 'TJ', 'KG', 'TM'],
+  },
+  IL: {
+    ancestors: ['Antiguo Reino de Israel', 'Independencia de 1948', 'Israel'],
+    restoredName: 'Reino Unido de Israel',
+    era: '1020 a. C.–1948',
+    rootDeed: 'El renacimiento del idioma hebreo y la independencia de 1948 crearon una nación de gran dinamismo.',
+    ecoDeed: 'El riego por goteo, la desalinización y el ecosistema tecnológico consolidan una economía avanzada.',
+    milDeed: 'La defensa tecnológica y la movilidad táctica han definido su doctrina militar moderna.',
+    restoreFact: 'Proclama la histórica denominación del Reino Unido de Israel en el Levante.',
+    targets: ['JO', 'LB', 'SY', 'EG'],
+  },
+  SY: {
+    ancestors: ['Reino de Palmira', 'Califato Omeya de Damasco', 'Siria'],
+    restoredName: 'Imperio de Palmira y el Levante',
+    era: '270–750',
+    rootDeed: 'Damasco y Alepo se cuentan entre las ciudades continuamente habitadas más antiguas del planeta.',
+    ecoDeed: 'La reina Zenobia convirtió a Palmira en epicentro comercial entre el Mediterráneo y Persia.',
+    milDeed: 'La historia levantina forjó ciudadelas estratégicas como el Crac de los Caballeros.',
+    restoreFact: 'Recobra el esplendor histórico de Damasco y Palmira liderando el Levante.',
+    targets: ['LB', 'JO', 'IQ', 'TR'],
+  },
+  AE: {
+    ancestors: ['Estados de la Tregua', 'Federación de los Siete Emiratos (1971)', 'Emiratos Árabes Unidos'],
+    restoredName: 'Federación del Golfo Arábigo',
+    era: '1971',
+    rootDeed: 'En 1971 siete emiratos se unieron pacíficamente para construir uno de los polos más modernos del mundo.',
+    ecoDeed: 'Dubái y Abu Dabi lideran la aviación, el comercio marítimo, el espacio (Sonda Hope) y las finanzas.',
+    milDeed: 'Consolida una fuerza moderna y defensas costeras que protegen el Estrecho de Ormuz.',
+    restoreFact: 'Expande el exitoso modelo federal a toda la ribera del Golfo Arábigo.',
+    targets: ['OM', 'QA', 'BH', 'SA'],
+  },
+  OM: {
+    ancestors: ['Imanato de Omán', 'Imperio Marítimo de Omán (1696)', 'Omán'],
+    restoredName: 'Imperio de Omán',
+    era: '1696–1856',
+    rootDeed: 'Omán construyó un imperio marítimo que se extendía desde el Golfo Pérsico hasta Zanzíbar en África.',
+    ecoDeed: 'El incienso, los puertos de Mascate y la diplomacia neutral dieron estabilidad y riqueza al sultanato.',
+    milDeed: 'La flota omaní del siglo XVII expulsó potencias extranjeras y dominó el Océano Índico occidental.',
+    restoreFact: 'Restaura la talasocracia histórica proclamando el Imperio de Omán.',
+    targets: ['AE', 'YE', 'SA', 'TZ'],
+  },
+  AM: {
+    ancestors: ['Reino de Urartu', 'Gran Armenia de Tigranes II', 'Armenia'],
+    restoredName: 'Reino de la Gran Armenia',
+    era: '95–55 a. C.',
+    rootDeed: 'En el año 301 fue el primer Estado cristiano de la historia y creó su propio alfabeto en el 405.',
+    ecoDeed: 'Las rutas del Cáucaso y el desarrollo tecnológico de Ereván impulsan la economía.',
+    milDeed: 'Las fortificaciones de montaña del Cáucaso preservaron la identidad armenia durante milenios.',
+    restoreFact: 'Revive la era de Tigranes el Grande restaurando el Reino de la Gran Armenia.',
+    targets: ['GE', 'AZ', 'TR'],
+  },
+  GE: {
+    ancestors: ['Reinos de Cólquida e Iberia', 'Edad de Oro de la Reina Tamar', 'Georgia'],
+    restoredName: 'Reino Unido de Georgia',
+    era: '1008–1223',
+    rootDeed: 'Cuna de la viticultura hace 8.000 años, Georgia vivió su Edad de Oro bajo el rey David IV y la reina Tamar.',
+    ecoDeed: 'El corredor entre el Mar Negro y el Caspio convierte a Tiflis en puente comercial euroasiático.',
+    milDeed: 'La victoria en Didgori (1121) consolidó la primacía georgiana en todo el Cáucaso.',
+    restoreFact: 'Restaura el esplendor medieval del Reino Unido de Georgia en el Cáucaso.',
+    targets: ['AM', 'AZ', 'TR'],
+  },
+  AZ: {
+    ancestors: ['Albania Caucásica', 'Imperio Safávida y República de 1918', 'Azerbaiyán'],
+    restoredName: 'Confederación del Caspio',
+    era: '1918',
+    rootDeed: 'En 1918 fundó la primera república parlamentaria secular del mundo musulmán y otorgó el voto femenino.',
+    ecoDeed: 'Bakú fue pionero mundial de la industria petrolera moderna y hoy lidera corredores energéticos.',
+    milDeed: 'Combina control del Mar Caspio con brigadas de montaña altamente equipadas.',
+    restoreFact: 'Unifica la ribera occidental del Caspio en la Confederación del Caspio.',
+    targets: ['GE', 'AM', 'IR'],
+  },
 
-function buildNodesFromSpec(iso2: string, seed: CountrySeed, spec: CuratedTreeSpec): CountryTreeNode[] {
-  const nodes: CountryTreeNode[] = [
+  // África extra
+  DZ: {
+    ancestors: ['Reino de Numidia (202 a. C.)', 'Regencia de Argel', 'Argelia'],
+    restoredName: 'Reino de Numidia',
+    era: '202 a. C.–1962',
+    rootDeed: 'Tierra de Masinisa y Yugurta, Argelia conquistó su independencia en 1962 tras una gesta histórica.',
+    ecoDeed: 'Sus vastas reservas de gas del Sáhara y puertos mediterráneos financian el desarrollo.',
+    milDeed: 'La famosa caballería númida y la resistencia del Atlas forjaron una sólida tradición militar.',
+    restoreFact: 'Recobra el nombre clásico de los reinos del Magreb proclamando el Reino de Numidia.',
+    targets: ['TN', 'MA', 'LY'],
+  },
+  GH: {
+    ancestors: ['Imperio Ashanti (1670)', 'Costa de Oro', 'Ghana'],
+    restoredName: 'Imperio Ashanti',
+    era: '1670–1957',
+    rootDeed: 'En 1957 Ghana fue la primera nación del África subsahariana en lograr su independencia moderna.',
+    ecoDeed: 'El oro de Kumasi, el cacao y los puertos de Acra y Tema impulsan la economía atlántica.',
+    milDeed: 'La confederación Ashanti mantuvo un ejército disciplinado y un Estado altamente organizado.',
+    restoreFact: 'Restaura el prestigio del Trono Dorado proclamando el Imperio Ashanti.',
+    targets: ['CI', 'TG', 'BF', 'NG'],
+  },
+  KE: {
+    ancestors: ['Ciudades-Estado Swahili', 'Independencia de 1963', 'Kenia'],
+    restoredName: 'Federación de África Oriental',
+    era: '1963',
+    rootDeed: 'Cuna de la humanidad en el Valle del Rift y pionera mundial de la banca móvil y conservación.',
+    ecoDeed: 'El puerto de Mombasa, el ferrocarril hacia Nairobi y la energía geotérmica lideran el este africano.',
+    milDeed: 'La fuerza regional keniana protege las rutas del Índico y la frontera del Cuerno de África.',
+    restoreFact: 'Desde Nairobi, concreta la histórica unión regional en la Federación de África Oriental.',
+    targets: ['TZ', 'UG', 'RW', 'SO'],
+  },
+  TZ: {
+    ancestors: ['Kilwa y Zanzíbar Swahili', 'Unión de Tanganica y Zanzíbar (1964)', 'Tanzania'],
+    restoredName: 'Federación Swahili de África Oriental',
+    era: '1964',
+    rootDeed: 'La unión pacífica de Tanganica y Zanzíbar en 1964 creó un modelo de unidad nacional en África.',
+    ecoDeed: 'El comercio histórico de Kilwa, el puerto de Dar es-Salam y el Serengueti sostienen la tesorería.',
+    milDeed: 'Tanzania respaldó los movimientos de liberación de toda África austral y oriental.',
+    restoreFact: 'Unifica las costas swahilis y los Grandes Lagos en la Federación de África Oriental.',
+    targets: ['KE', 'UG', 'RW', 'BI', 'MZ'],
+  },
+  CD: {
+    ancestors: ['Reino del Kongo (1390)', 'Imperios Luba y Lunda', 'R. D. del Congo'],
+    restoredName: 'Gran Reino del Kongo',
+    era: '1390–1960',
+    rootDeed: 'Corazón de la gran cuenca del río Congo, heredero de los poderosos reinos del Kongo, Luba y Lunda.',
+    ecoDeed: 'Sus inmensas reservas de cobalto, cobre e hidroelectricidad del río Congo son vitales para el planeta.',
+    milDeed: 'La vasta selva ecuatorial y los ríos navegables otorgan enorme profundidad estratégica.',
+    restoreFact: 'Unifica la cuenca centroafricana bajo el nombre histórico del Gran Reino del Kongo.',
+    targets: ['CG', 'AO', 'RW', 'UG'],
+  },
+  AO: {
+    ancestors: ['Reinos de Ndongo y Matamba', 'Reino del Kongo', 'Angola'],
+    restoredName: 'Reino de Ndongo y Kongo',
+    era: '1556–1975',
+    rootDeed: 'La reina Nzinga de Ndongo y Matamba lideró durante décadas una brillante resistencia diplomática y militar.',
+    ecoDeed: 'El petróleo atlántico, los diamantes y el corredor ferroviario de Lobito impulsan la economía.',
+    milDeed: 'Tras consolidar su independencia en 1975, Angola forjó una de las fuerzas más curtidas de África austral.',
+    restoreFact: 'Honra el legado de la reina Nzinga proclamando el Reino de Ndongo y Kongo.',
+    targets: ['CD', 'CG', 'NA', 'ZM'],
+  },
+  SD: {
+    ancestors: ['Reino de Kush (1070 a. C.)', 'Pirámides de Meroe', 'Sudán'],
+    restoredName: 'Imperio de Kush',
+    era: '1070 a. C.–350 d. C.',
+    rootDeed: 'Sudán alberga más pirámides que cualquier otro país y fue sede de los faraones negros de Kush.',
+    ecoDeed: 'La confluencia del Nilo Azul y el Nilo Blanco en Jartum sostiene la agricultura y el comercio del Mar Rojo.',
+    milDeed: 'Los arqueros nubios de Kush fueron célebres en todo el mundo antiguo por su puntería y valor.',
+    restoreFact: 'Restaura la gloria antigua del Alto Nilo proclamando el Imperio de Kush.',
+    targets: ['SS', 'EG', 'ET', 'ER'],
+  },
+  SN: {
+    ancestors: ['Imperio Wolof (1350)', 'Federación de Malí (1959)', 'Senegal'],
+    restoredName: 'Imperio Wolof de Senegambia',
+    era: '1350–1960',
+    rootDeed: 'Dakar se convirtió en faro cultural, literario y democrático de África Occidental tras 1960.',
+    ecoDeed: 'El gran puerto atlántico de Dakar y las nuevas reservas energéticas impulsan el crecimiento.',
+    milDeed: 'Los tiradores senegaleses y las misiones de paz forjaron un sólido prestigio militar.',
+    restoreFact: 'Reúne la costa atlántica occidental bajo el histórico Imperio Wolof de Senegambia.',
+    targets: ['GM', 'ML', 'MR', 'GN'],
+  },
+  MG: {
+    ancestors: ['Reino de Imerina (1540)', 'Reino de Madagascar', 'Madagascar'],
+    restoredName: 'Reino de Imerina',
+    era: '1787–1897',
+    rootDeed: 'Andrianampoinimerina unificó las tierras altas y el rey Radama I modernizó el Reino de Madagascar.',
+    ecoDeed: 'La vainilla, los minerales y su posición estratégica en el canal de Mozambique sostienen la isla.',
+    milDeed: 'Las tierras altas de Antananarivo conforman una fortaleza natural sobre el Océano Índico.',
+    restoreFact: 'Recupera la histórica soberanía malgache proclamando el Reino de Imerina.',
+    targets: ['KM', 'MU', 'MZ'],
+  },
+  SO: {
+    ancestors: ['Tierra de Punt', 'Sultanato de Ajuran (1200)', 'Somalia'],
+    restoredName: 'Sultanato de Ajuran',
+    era: '1200–1700',
+    rootDeed: 'El Sultanato de Ajuran levantó castillos costeros y conectó el Cuerno de África con Arabia, India y China.',
+    ecoDeed: 'Con la costa más extensa de África continental, sus puertos dominan la entrada al Mar Rojo.',
+    milDeed: 'Los marinos y defensores costeros somalíes rechazaron invasiones marítimas en los siglos XVI y XVII.',
+    restoreFact: 'Revive la época dorada marítima proclamando el Sultanato de Ajuran.',
+    targets: ['DJ', 'ET', 'KE'],
+  },
+};
+
+function buildNodesFromSpec(spec: BespokeTreeSpec): FocusNode[] {
+  return [
     {
-      id: `${iso2}_root`,
-      tier: 1,
-      branch: 'root',
+      id: 'root',
+      tier: 0,
+      lane: 'center',
+      parents: [],
+      category: 'origin',
       era: spec.root.era,
       title: spec.root.title,
-      subtitle: spec.root.subtitle,
-      history: spec.root.history,
-      parentId: null,
-      costMoney: 160,
+      historicalFact: spec.root.fact,
       requirements: {
-        minCities: Math.max(2, Math.min(4, Math.round(Math.sqrt(seed.popM) / 5) + 2)),
+        moneyCost: 110,
       },
-      reward: {
-        moneyDelta: 120,
-        permanentIncomeBonus: 1,
-        proclamationText: `${seed.name} consolida su legado histórico: «${spec.root.title}».`,
+      effects: {
+        incomeBonus: 2,
+        armyBonus: 60,
       },
     },
     {
-      id: `${iso2}_econ`,
+      id: 'eco1',
+      tier: 1,
+      lane: 'left',
+      parents: ['root'],
+      category: 'economy',
+      era: spec.eco1.era,
+      title: spec.eco1.title,
+      historicalFact: spec.eco1.fact,
+      requirements: {
+        moneyCost: 220,
+        minGoldMines: 2,
+      },
+      effects: {
+        incomeBonus: 3,
+        moneyBonus: 160,
+      },
+    },
+    {
+      id: 'mil1',
+      tier: 1,
+      lane: 'right',
+      parents: ['root'],
+      category: 'military',
+      era: spec.mil1.era,
+      title: spec.mil1.title,
+      historicalFact: spec.mil1.fact,
+      requirements: {
+        moneyCost: 220,
+        minArmy: 500,
+      },
+      effects: {
+        armyBonus: 110,
+        armyCapBonus: 180,
+      },
+    },
+    {
+      id: 'eco2',
       tier: 2,
-      branch: 'economy',
-      era: spec.economy.era,
-      title: spec.economy.title,
-      subtitle: spec.economy.subtitle,
-      history: spec.economy.history,
-      parentId: `${iso2}_root`,
-      costMoney: 260,
+      lane: 'left',
+      parents: ['eco1'],
+      category: 'diplomacy',
+      era: spec.eco2.era,
+      title: spec.eco2.title,
+      historicalFact: spec.eco2.fact,
       requirements: {
-        minGoldMines: 3,
-        minCities: 4,
-        ...(spec.economy.minPorts ? { minPorts: spec.economy.minPorts } : {}),
+        moneyCost: 390,
+        minCities: 3,
       },
-      reward: {
-        moneyDelta: 200,
-        permanentIncomeBonus: 2,
-        proclamationText: `${seed.name} completa el hito económico «${spec.economy.title}».`,
+      effects: {
+        incomeBonus: 4,
+        relationsContinentDelta: 10,
       },
     },
     {
-      id: `${iso2}_mil`,
+      id: 'mil2',
       tier: 2,
-      branch: 'military',
-      era: spec.military.era,
-      title: spec.military.title,
-      subtitle: spec.military.subtitle,
-      history: spec.military.history,
-      parentId: `${iso2}_root`,
-      costMoney: 260,
+      lane: 'right',
+      parents: ['mil1'],
+      category: 'military',
+      era: spec.mil2.era,
+      title: spec.mil2.title,
+      historicalFact: spec.mil2.fact,
       requirements: {
-        minArmy: 520,
-        ...(spec.military.minAllies ? { minAllies: spec.military.minAllies } : {}),
-        ...(spec.military.minAnnexations ? { minAnnexations: spec.military.minAnnexations } : {}),
+        moneyCost: 390,
+        minArmy: 750,
       },
-      reward: {
-        armyDelta: 80,
-        permanentArmyCapBonus: 150,
-        proclamationText: `${seed.name} fortalece su doctrina militar: «${spec.military.title}».`,
+      effects: {
+        armyBonus: 160,
+        armyCapBonus: 260,
+        defenseBonusPct: 10,
       },
     },
     {
-      id: `${iso2}_restore`,
+      id: 'restore',
       tier: 3,
-      branch: 'restoration',
-      era: spec.restoration.era,
-      title: spec.restoration.title,
-      subtitle: spec.restoration.subtitle,
-      history: spec.restoration.history,
-      parentId: null,
-      requiresAnyParent: [`${iso2}_econ`, `${iso2}_mil`],
-      costMoney: 380,
+      lane: 'center',
+      parents: ['eco2', 'mil2'],
+      requireAnyParent: true,
+      category: 'restoration',
+      era: spec.restore.era,
+      title: spec.restore.title,
+      historicalFact: spec.restore.fact,
       requirements: {
-        controlCountriesIso2: spec.restoration.controlIso2.filter((code) => code !== iso2),
+        moneyCost: 700,
+        minExpansionPct: 25,
+        ...(spec.restore.targets && spec.restore.targets.length > 0
+          ? { historicalTargetIso2: spec.restore.targets }
+          : {}),
       },
-      reward: {
-        moneyDelta: 300,
-        armyDelta: 120,
-        permanentIncomeBonus: 3,
-        permanentArmyCapBonus: 250,
-        renameTo: spec.restoration.newName,
-        proclamationText:
-          spec.restoration.proclamationText ??
-          `¡${seed.name} proclama la formación histórica de ${spec.restoration.newName}!`,
+      effects: {
+        incomeBonus: 4,
+        armyBonus: 200,
+        armyCapBonus: 360,
+        defenseBonusPct: 10,
+        newName: spec.restore.newName,
       },
     },
   ];
-
-  if (spec.secondaryRestoration) {
-    nodes.push({
-      id: `${iso2}_legacy`,
-      tier: 3,
-      branch: 'legacy',
-      era: spec.secondaryRestoration.era,
-      title: spec.secondaryRestoration.title,
-      subtitle: spec.secondaryRestoration.subtitle,
-      history: spec.secondaryRestoration.history,
-      parentId: null,
-      requiresAnyParent: [`${iso2}_econ`, `${iso2}_mil`],
-      costMoney: 420,
-      requirements: {
-        controlCountriesIso2: spec.secondaryRestoration.controlIso2.filter((code) => code !== iso2),
-      },
-      reward: {
-        moneyDelta: 350,
-        armyDelta: 140,
-        permanentIncomeBonus: 3,
-        permanentArmyCapBonus: 300,
-        renameTo: spec.secondaryRestoration.newName,
-        proclamationText:
-          spec.secondaryRestoration.proclamationText ??
-          `¡${seed.name} proclama el surgimiento de ${spec.secondaryRestoration.newName}!`,
-      },
-    });
-  }
-
-  return nodes;
 }
 
-function buildFallbackTree(seed: CountrySeed): CountryGenealogyTree {
-  const iso2 = seed.iso2;
-  const regional = REGIONAL_BY_ISO.get(iso2);
+function getSubregionFallback(seed: CountrySeed): {
+  ancestors: string[];
+  restoredName: string;
+  era: string;
+  rootTitle: string;
+  rootFact: string;
+  ecoTitle: string;
+  ecoFact: string;
+  milTitle: string;
+  milFact: string;
+  eco2Title: string;
+  eco2Fact: string;
+  mil2Title: string;
+  mil2Fact: string;
+  restoreFact: string;
+  targets: string[];
+} {
+  const { name, capital, continent, iso2 } = seed;
 
-  const continentEra: Record<CountrySeed['continent'], string> = {
-    América: 'Siglo XIX – Presente',
-    Europa: 'Edad Moderna – Presente',
-    Asia: 'Antigüedad – Presente',
-    África: 'Siglo XX – Presente',
-    Oceanía: 'Era Oceánica – Presente',
+  // Caribbean islands
+  const caribbean = ['AG', 'BS', 'BB', 'DM', 'GD', 'KN', 'VC', 'LC'];
+  if (caribbean.includes(iso2)) {
+    return {
+      ancestors: ['Pueblos Arahuacos y Caribes', 'Indias Occidentales', name],
+      restoredName: `Federación Caribeña de ${name}`,
+      era: '1958–1981',
+      rootTitle: `Soberanía de ${capital}`,
+      rootFact: `${name} consolidó su independencia en el arco antillano y fortaleció la integración de la comunidad caribeña.`,
+      ecoTitle: `Puertos y Comercio de ${capital}`,
+      ecoFact: `Las rutas marítimas del Caribe y el turismo internacional transformaron a ${capital} en un centro comercial insular.`,
+      milTitle: 'Guardia Marítima de las Antillas',
+      milFact: `Protege las islas y estrechos estratégicos de ${name} con patrullaje y defensa costera coordinada.`,
+      eco2Title: 'Unión Comercial del Caribe',
+      eco2Fact: `Impulsa tratados comerciales y cooperación diplomática entre todas las naciones de las Antillas.`,
+      mil2Title: 'Flota Defensiva Insular',
+      mil2Fact: `Prepara a las fuerzas de ${name} para proyectar presencia naval por todo el mar Caribe.`,
+      restoreFact: `Desde ${capital}, lidera la integración de las islas proclamando la Federación Caribeña de ${name}.`,
+      targets: ['CU', 'DO', 'JM', 'TT'],
+    };
+  }
+
+  // European microstates & Balkans
+  const microEurope = ['AD', 'LI', 'MC', 'SM', 'MT', 'LU', 'IS', 'CY'];
+  if (microEurope.includes(iso2)) {
+    const customUnion: Record<string, string> = {
+      AD: 'Principado de los Pirineos',
+      LI: 'Principado Alpino del Rin',
+      MC: 'Principado Marítimo de Liguria',
+      SM: 'Serenísima República de San Marino',
+      MT: 'Orden Soberana del Mediterráneo',
+      LU: 'Gran Ducado del Benelux',
+      IS: 'Mancomunidad del Atlántico Norte',
+      CY: 'Reino Unido de Chipre',
+    };
+    return {
+      ancestors: ['Señoríos Históricos Europeos', `Carta de ${capital}`, name],
+      restoredName: customUnion[iso2] ?? `Mancomunidad de ${name}`,
+      era: '1278–1964',
+      rootTitle: `Carta Fundacional de ${capital}`,
+      rootFact: `${name} preservó su autonomía durante siglos gracias a una diplomacia hábil y a sus instituciones propias.`,
+      ecoTitle: `Centro Financiero y Comercial de ${capital}`,
+      ecoFact: `El comercio especializado, la banca y la innovación elevaron la prosperidad de ${name} en Europa.`,
+      milTitle: `Fortalezas Históricas de ${name}`,
+      milFact: `Las murallas y pasos estratégicos alrededor de ${capital} defendieron su independencia frente a grandes imperios.`,
+      eco2Title: 'Pacto Diplomático Europeo',
+      eco2Fact: `Teje acuerdos económicos de alto valor que consolidan el prestigio continental de ${name}.`,
+      mil2Title: 'Guardia Soberana Profesional',
+      mil2Fact: `Organiza un cuerpo compacto, tecnificado y de gran capacidad defensiva.`,
+      restoreFact: `Eleva la trayectoria histórica de ${name} proclamando ${customUnion[iso2] ?? `la Mancomunidad de ${name}`}.`,
+      targets: iso2 === 'AD' ? ['ES', 'FR'] : iso2 === 'IS' ? ['NO', 'DK', 'GB'] : ['IT', 'FR', 'DE'],
+    };
+  }
+
+  const balkans = ['AL', 'BA', 'ME', 'MK', 'SI', 'MD'];
+  if (balkans.includes(iso2)) {
+    const balkanNames: Record<string, string> = {
+      AL: 'Liga de Lezhë (Iliria)',
+      BA: 'Reino de Bosnia',
+      ME: 'Principado de Zeta y Montenegro',
+      MK: 'Imperio de Macedonia',
+      SI: 'Ducado de Carantania',
+      MD: 'Gran Principado de Moldavia',
+    };
+    return {
+      ancestors: ['Reinos Balcánicos Medievales', `Legado de ${capital}`, name],
+      restoredName: balkanNames[iso2] ?? `Federación de ${name}`,
+      era: '1377–1991',
+      rootTitle: `Raíces Soberanas de ${name}`,
+      rootFact: `Desde los reinos medievales hasta su independencia contemporánea, ${name} defendió su identidad en Europa suroriental.`,
+      ecoTitle: `Rutas Comerciales de ${capital}`,
+      ecoFact: `Conecta los corredores entre el Mediterráneo, los Balcanes y Europa Central.`,
+      milTitle: 'Defensores de las Montañas',
+      milFact: `Aprovecha el relieve montañoso y la tenacidad histórica para forjar una sólida defensa.`,
+      eco2Title: 'Integración Económica Regional',
+      eco2Fact: `Moderniza las ciudades e infraestructuras alrededor de ${capital} para sostener el crecimiento.`,
+      mil2Title: 'Doctrina de Seguridad Balcánica',
+      mil2Fact: `Fortalece el ejército profesional y la capacidad de respuesta fronteriza.`,
+      restoreFact: `Recobra la gloria histórica de la región proclamando ${balkanNames[iso2] ?? `la Federación de ${name}`}.`,
+      targets: iso2 === 'MD' ? ['RO', 'UA'] : ['RS', 'HR', 'GR', 'BG'],
+    };
+  }
+
+  // Arab Gulf & Levant
+  const middleEast = ['QA', 'KW', 'BH', 'YE', 'JO', 'LB', 'PS'];
+  if (middleEast.includes(iso2)) {
+    const meNames: Record<string, string> = {
+      QA: 'Emirato Unido del Golfo',
+      KW: 'Federación del Golfo Norte',
+      BH: 'Reino de Dilmún',
+      YE: 'Reino de Saba y Himyar',
+      JO: 'Reino Hachemita del Levante',
+      LB: 'República de Fenicia',
+      PS: 'Unión de Canaán y el Levante',
+    };
+    return {
+      ancestors: ['Antiguas Rutas de Oriente Medio', `Historia de ${capital}`, name],
+      restoredName: meNames[iso2] ?? `Federación de ${name}`,
+      era: '1946–1971',
+      rootTitle: `Legado Histórico de ${capital}`,
+      rootFact: `${name} hereda milenios de comercio, ciencia y arquitectura en el corazón de Oriente Medio.`,
+      ecoTitle: `Rutas Comerciales y Recursos de ${name}`,
+      ecoFact: `El intercambio marítimo y energético desde ${capital} fortalece las arcas públicas.`,
+      milTitle: `Guardia Estratégica de ${name}`,
+      milFact: `Prepara unidades móviles y defensas modernas adaptadas a los pasos clave de la región.`,
+      eco2Title: 'Alianza Económica Regional',
+      eco2Fact: `Impulsa inversiones portuarias, tecnológicas y diplomáticas en toda Asia Occidental.`,
+      mil2Title: 'Escudo de Seguridad Regional',
+      mil2Fact: `Incrementa las reservas militares y fortificaciones de defensa nacional.`,
+      restoreFact: `Revive el esplendor histórico regional proclamando ${meNames[iso2] ?? `la Federación de ${name}`}.`,
+      targets: ['SA', 'AE', 'IQ', 'EG'],
+    };
+  }
+
+  // Central Asia & Himalayas & South/SE Asia
+  const centralSouthAsia = ['KG', 'TJ', 'TM', 'NP', 'BT', 'LK', 'MV', 'LA', 'BN', 'TL'];
+  if (centralSouthAsia.includes(iso2)) {
+    const asiaNames: Record<string, string> = {
+      KG: 'Kaganato Kirguís',
+      TJ: 'Imperio Samánida',
+      TM: 'Imperio Selyúcida de Merv',
+      NP: 'Reino del Himalaya (Gorkha)',
+      BT: 'Reino del Dragón del Trueno',
+      LK: 'Reino de Ceilán (Anuradhapura)',
+      MV: 'Sultanato del Océano Índico',
+      LA: 'Reino de Lan Xang',
+      BN: 'Imperio Talasocrático de Brunéi',
+      TL: 'República de Timor y las Molucas',
+    };
+    return {
+      ancestors: ['Rutas Históricas de Asia', `Legado de ${capital}`, name],
+      restoredName: asiaNames[iso2] ?? `Unión de ${name}`,
+      era: '1353–1991',
+      rootTitle: `Fundación Histórica de ${name}`,
+      rootFact: `${name} forjó su historia en las rutas milenarias de la seda, el Himalaya o el Índico desde ${capital}.`,
+      ecoTitle: `Comercio y Riqueza de ${capital}`,
+      ecoFact: `Aprovecha las rutas estratégicas y recursos naturales para modernizar la economía nacional.`,
+      milTitle: `Tradición Defensiva de ${name}`,
+      milFact: `Organiza tropas especializadas en el terreno geográfico único de ${name}.`,
+      eco2Title: 'Corredor Económico Asiático',
+      eco2Fact: `Amplía la cooperación comercial y diplomática con las potencias vecinas de Asia.`,
+      mil2Title: 'Bastión Nacional Renovado',
+      mil2Fact: `Eleva la capacidad militar y las defensas estratégicas de todo el territorio.`,
+      restoreFact: `Recupera el legado histórico proclamando ${asiaNames[iso2] ?? `la Unión de ${name}`}.`,
+      targets: ['CN', 'IN', 'TH', 'KZ', 'ID'],
+    };
+  }
+
+  // Pacific Islands (Oceania)
+  if (continent === 'Oceanía') {
+    const pacNames: Record<string, string> = {
+      PG: 'Federación de Melanesia',
+      FJ: 'Confederación de Fiyi y el Pacífico',
+      WS: 'Confederación de Polinesia',
+      SB: 'Unión de Melanesia',
+      VU: 'Mancomunidad de las Nuevas Hébridas',
+      FM: 'Federación de Micronesia Unida',
+      MH: 'Mancomunidad del Pacífico Central',
+      KI: 'Unión Ecuatorial del Pacífico',
+      PW: 'República del Pacífico Occidental',
+      NR: 'Mancomunidad de Nauru y Micronesia',
+      TV: 'Confederación Polinesia',
+    };
+    return {
+      ancestors: ['Grandes Navegantes del Pacífico', `Archipiélago de ${name}`, name],
+      restoredName: pacNames[iso2] ?? `Federación Oceánica de ${name}`,
+      era: '1962–1994',
+      rootTitle: `Navegantes de ${name}`,
+      rootFact: `Los ancestros de ${name} surcaron miles de kilómetros del Pacífico guiándose por las estrellas y corrientes.`,
+      ecoTitle: `Economía Azul de ${capital}`,
+      ecoFact: `La pesca sostenible, las rutas marítimas y la cooperación oceánica nutren la tesorería.`,
+      milTitle: 'Guardia del Archipiélago',
+      milFact: `Asegura las aguas territoriales y refuerza la capacidad anfibia en el Pacífico.`,
+      eco2Title: 'Foro Comercial de Oceanía',
+      eco2Fact: `Teje lazos diplomáticos y comerciales con las naciones insulares y continentales de Oceanía.`,
+      mil2Title: 'Flota Expedicionaria del Pacífico',
+      mil2Fact: `Incrementa la fuerza militar y las defensas portuarias alrededor de ${capital}.`,
+      restoreFact: `Unifica las rutas oceánicas proclamando ${pacNames[iso2] ?? `la Federación Oceánica de ${name}`}.`,
+      targets: ['AU', 'NZ', 'FJ', 'PG'],
+    };
+  }
+
+  // Africa (all remaining African nations with tailored historical unions)
+  const africaNames: Record<string, string> = {
+    LY: 'Confederación de Tripolitania y Cirenaica',
+    MR: 'Imperio Almorávide del Sáhara',
+    NE: 'Imperio Songhai del Níger',
+    TD: 'Imperio Kanem-Bornu',
+    BF: 'Imperio Mossi del Sahel',
+    CI: 'Federación de Eburnea y África Occidental',
+    CM: 'Confederación del Golfo de Guinea',
+    GA: 'Unión Ecuatorial Atlántica',
+    CG: 'Reino de Loango y Congo',
+    CF: 'Unión de África Central',
+    UG: 'Reino de Buganda y Grandes Lagos',
+    RW: 'Reino de Ruanda y los Grandes Lagos',
+    BI: 'Reino de Burundi y los Grandes Lagos',
+    ER: 'Confederación del Mar Rojo',
+    DJ: 'Sultanato del Estrecho de Bab el-Mandeb',
+    SS: 'Confederación del Nilo Blanco',
+    ZM: 'Federación de Zambezia',
+    MW: 'Imperio Maravi',
+    MZ: 'Federación del Canal de Mozambique',
+    BW: 'Mancomunidad del Kalahari',
+    NA: 'Unión Atlántica del Sur Africano',
+    LS: 'Reino de la Montaña (Basutolandia)',
+    SZ: 'Reino de Esuatini Austral',
+    BJ: 'Reino de Dahomey',
+    TG: 'Unión de la Costa de Guinea',
+    GN: 'Imperio de Futa Yalon',
+    GW: 'Reino de Kaabu',
+    SL: 'Mancomunidad de África Atlántica',
+    LR: 'República Pionera de África Occidental',
+    GM: 'Confederación de Senegambia',
+    CV: 'Mancomunidad Atlántica de Cabo Verde',
+    ST: 'Confederación del Golfo de Guinea',
+    GQ: 'Unión Ecuatorial del Golfo',
+    KM: 'Sultanato de las Islas de la Luna',
+    MU: 'Mancomunidad del Océano Índico',
+    SC: 'Confederación Marítima de Seychelles',
   };
 
-  const controlTargets = regional
-    ? regional.requiredPartners.filter((c) => c !== iso2).slice(0, 3)
-    : [];
+  if (continent === 'África') {
+    const unionName = africaNames[iso2] ?? `Unión Africana de ${name}`;
+    return {
+      ancestors: ['Reinos Históricos Africanos', `Independencia de ${capital}`, name],
+      restoredName: unionName,
+      era: '1957–1975',
+      rootTitle: `Soberanía e Historia de ${name}`,
+      rootFact: `Heredero de reinos históricos y de la ola emancipadora africana, ${name} construyó su república desde ${capital}.`,
+      ecoTitle: `Riqueza Natural y Rutas de ${capital}`,
+      ecoFact: `El desarrollo minero, agrícola y comercial alrededor de ${capital} impulsa la economía nacional.`,
+      milTitle: `Fuerzas de Defensa de ${name}`,
+      milFact: `Consolida un ejército nacional disciplinado para proteger las fronteras y la soberanía.`,
+      eco2Title: 'Integración Económica Panafricana',
+      eco2Fact: `Fomenta el comercio continental y las alianzas diplomáticas en toda África.`,
+      mil2Title: 'Doctrina de Proyección Regional',
+      mil2Fact: `Amplía el límite militar y las fortificaciones estratégicas del país.`,
+      restoreFact: `Culmina la trayectoria histórica de ${name} proclamando ${unionName}.`,
+      targets: ['EG', 'ET', 'NG', 'ZA', 'KE'],
+    };
+  }
 
-  const restorationTitle = regional ? regional.title : `Proclamar el Gran Imperio de ${seed.name}`;
-  const restorationName = regional ? regional.newName : `Gran Imperio de ${seed.name}`;
-  const restorationSubtitle = regional
-    ? regional.subtitle
-    : `Consolidación soberana y expansión en ${seed.continent}`;
-  const restorationHistory = regional
-    ? regional.history
-    : `Tras expandir su influencia desde ${seed.capital}, ${seed.name} se proclama potencia hegemónica regional.`;
+  // Final safety fallback (should not be reached given coverage above)
+  return {
+    ancestors: ['Orígenes Históricos', `Fundación de ${capital}`, name],
+    restoredName: `Gran Unión de ${name}`,
+    era: '1800–2026',
+    rootTitle: `Fundación Nacional de ${name}`,
+    rootFact: `${name} forjó su identidad soberana alrededor de ${capital} a través de hitos históricos decisivos.`,
+    ecoTitle: `Desarrollo Económico de ${capital}`,
+    ecoFact: `La inversión en infraestructura, comercio y ciudades eleva los ingresos sostenidos del país.`,
+    milTitle: `Tradición Militar de ${name}`,
+    milFact: `Profesionaliza el mando militar para defender el territorio y sostener campañas estratégicas.`,
+    eco2Title: 'Pacto Comercial Regional',
+    eco2Fact: `Amplía la influencia diplomática y económica en todo el continente.`,
+    mil2Title: 'Doctrina Estratégica Nacional',
+    mil2Fact: `Fortalece las líneas defensivas y la capacidad de movilización del ejército.`,
+    restoreFact: `Eleva a ${name} a una nueva etapa histórica proclamando la Gran Unión de ${name}.`,
+    targets: [],
+  };
+}
 
-  const nodes: CountryTreeNode[] = [
-    {
-      id: `${iso2}_root`,
-      tier: 1,
-      branch: 'root',
-      era: continentEra[seed.continent],
-      title: `Fundación y Legado de ${seed.name}`,
-      subtitle: `Consolidación estatal desde ${seed.capital}`,
-      history: `Organiza la historia institucional de ${seed.name} con sede en ${seed.capital}, preparando el desarrollo del país.`,
-      parentId: null,
-      costMoney: 160,
-      requirements: {
-        minCities: 2,
+function buildCountryTree(seed: CountrySeed): CountryGenealogyTree {
+  const bespoke = BESPOKE_TREES[seed.iso2];
+  if (bespoke) {
+    return {
+      iso2: seed.iso2,
+      subtitle: bespoke.subtitle,
+      ancestors: bespoke.ancestors,
+      restoredName: bespoke.restore.newName,
+      nodes: buildNodesFromSpec(bespoke),
+    };
+  }
+
+  const quick = COUNTRY_QUICK_SPECS[seed.iso2];
+  if (quick) {
+    const spec: BespokeTreeSpec = {
+      subtitle: `De ${quick.ancestors[0]} a ${quick.restoredName}`,
+      ancestors: quick.ancestors,
+      root: {
+        era: quick.era.split('–')[0],
+        title: `Raíz Histórica de ${seed.name}`,
+        fact: quick.rootDeed,
       },
-      reward: {
-        moneyDelta: 120,
-        permanentIncomeBonus: 1,
-        proclamationText: `${seed.name} consolida sus raíces históricas en ${seed.capital}.`,
+      eco1: {
+        era: 'Desarrollo',
+        title: `Motor Económico de ${seed.capital}`,
+        fact: quick.ecoDeed,
       },
+      mil1: {
+        era: 'Legado Militar',
+        title: `Tradición Guerrera de ${seed.name}`,
+        fact: quick.milDeed,
+      },
+      eco2: {
+        era: 'Diplomacia',
+        title: `Pacto Regional de ${seed.continent}`,
+        fact: `${seed.name} consolida alianzas comerciales y diplomáticas desde ${seed.capital} en todo ${seed.continent}.`,
+      },
+      mil2: {
+        era: 'Defensa',
+        title: `Bastión Estratégico de ${seed.name}`,
+        fact: `Refuerza la doctrina militar, las defensas territoriales y la movilización nacional.`,
+      },
+      restore: {
+        era: quick.era,
+        title: `Restaurar ${quick.restoredName}`,
+        fact: quick.restoreFact,
+        newName: quick.restoredName,
+        targets: quick.targets,
+      },
+    };
+    return {
+      iso2: seed.iso2,
+      subtitle: spec.subtitle,
+      ancestors: spec.ancestors,
+      restoredName: spec.restore.newName,
+      nodes: buildNodesFromSpec(spec),
+    };
+  }
+
+  const fb = getSubregionFallback(seed);
+  const spec: BespokeTreeSpec = {
+    subtitle: `Legado de ${seed.name} hacia ${fb.restoredName}`,
+    ancestors: fb.ancestors,
+    root: { era: fb.era.split('–')[0], title: fb.rootTitle, fact: fb.rootFact },
+    eco1: { era: 'Economía', title: fb.ecoTitle, fact: fb.ecoFact },
+    mil1: { era: 'Ejército', title: fb.milTitle, fact: fb.milFact },
+    eco2: { era: 'Diplomacia', title: fb.eco2Title, fact: fb.eco2Fact },
+    mil2: { era: 'Estrategia', title: fb.mil2Title, fact: fb.mil2Fact },
+    restore: {
+      era: fb.era,
+      title: `Proclamar ${fb.restoredName}`,
+      fact: fb.restoreFact,
+      newName: fb.restoredName,
+      targets: fb.targets,
     },
-    {
-      id: `${iso2}_econ`,
-      tier: 2,
-      branch: 'economy',
-      era: 'Desarrollo Nacional',
-      title: `Prosperidad de ${seed.capital}`,
-      subtitle: `Infraestructura, comercio y minería en ${seed.continent}`,
-      history: `Transforma ${seed.capital} en un centro comercial próspero que sostiene la economía nacional.`,
-      parentId: `${iso2}_root`,
-      costMoney: 260,
-      requirements: {
-        minGoldMines: 3,
-        minCities: 4,
-      },
-      reward: {
-        moneyDelta: 200,
-        permanentIncomeBonus: 2,
-        proclamationText: `${seed.name} alcanza una nueva era económica desde ${seed.capital}.`,
-      },
-    },
-    {
-      id: `${iso2}_mil`,
-      tier: 2,
-      branch: 'military',
-      era: 'Doctrina Nacional',
-      title: `Guardia Soberana de ${seed.name}`,
-      subtitle: 'Profesionalización del ejército y defensa',
-      history: `Fortalece el aparato defensivo y ofensivo de ${seed.name} para proteger sus fronteras e impulsar campañas.`,
-      parentId: `${iso2}_root`,
-      costMoney: 260,
-      requirements: {
-        minArmy: 500,
-        minDefenses: 1,
-      },
-      reward: {
-        armyDelta: 80,
-        permanentArmyCapBonus: 150,
-        proclamationText: `${seed.name} reforma su alto mando con la Guardia Soberana.`,
-      },
-    },
-    {
-      id: `${iso2}_restore`,
-      tier: 3,
-      branch: 'restoration',
-      era: regional ? regional.era : 'Hegemonía Regional',
-      title: restorationTitle,
-      subtitle: restorationSubtitle,
-      history: restorationHistory,
-      parentId: null,
-      requiresAnyParent: [`${iso2}_econ`, `${iso2}_mil`],
-      costMoney: 380,
-      requirements:
-        controlTargets.length > 0
-          ? { controlCountriesIso2: controlTargets }
-          : { minAnnexations: 2, minArmy: 700 },
-      reward: {
-        moneyDelta: 300,
-        armyDelta: 120,
-        permanentIncomeBonus: 3,
-        permanentArmyCapBonus: 250,
-        renameTo: restorationName,
-        proclamationText: `¡${seed.name} se proclama oficialmente como ${restorationName}!`,
-      },
-    },
-  ];
+  };
 
   return {
-    iso2,
-    heritageTitle: `Linaje Histórico de ${seed.name}`,
-    heritageSummary: `Árbol genealógico e hitos estratégicos de ${seed.name} (${seed.continent}) con proyección regional.`,
-    nodes,
+    iso2: seed.iso2,
+    subtitle: spec.subtitle,
+    ancestors: spec.ancestors,
+    restoredName: spec.restore.newName,
+    nodes: buildNodesFromSpec(spec),
   };
 }
 
 const TREE_CACHE = new Map<string, CountryGenealogyTree>();
 
-for (const seed of COUNTRIES_195) {
-  const curated = CURATED_SPECS[seed.iso2];
-  if (curated) {
-    TREE_CACHE.set(seed.iso2, {
-      iso2: seed.iso2,
-      heritageTitle: curated.heritageTitle,
-      heritageSummary: curated.heritageSummary,
-      nodes: buildNodesFromSpec(seed.iso2, seed, curated),
-    });
-  } else {
-    TREE_CACHE.set(seed.iso2, buildFallbackTree(seed));
+export function getCountryGenealogyTree(seed: CountrySeed): CountryGenealogyTree {
+  let tree = TREE_CACHE.get(seed.iso2);
+  if (!tree) {
+    tree = buildCountryTree(seed);
+    TREE_CACHE.set(seed.iso2, tree);
   }
+  return tree;
 }
 
-export function getCountryGenealogyTree(iso2: string): CountryGenealogyTree {
-  const found = TREE_CACHE.get(iso2);
-  if (found) return found;
-  const fallbackSeed = COUNTRIES_195[0];
-  return buildFallbackTree(fallbackSeed);
+export function getCountryNameByIso2(iso2: string): string {
+  const found = COUNTRIES_195.find((c) => c.iso2 === iso2);
+  return found ? found.name : iso2;
 }
-
-export const ISO2_TO_COUNTRY_ID: Record<string, number> = Object.fromEntries(
-  COUNTRIES_195.map((c) => [c.iso2, c.id])
-);

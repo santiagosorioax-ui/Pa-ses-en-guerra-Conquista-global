@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Anchor, Coins, GitBranch, Handshake, Shield, Swords, UserCheck, X } from 'lucide-react';
+import { Anchor, Coins, GitFork, Handshake, Radiation, Shield, Swords, UserCheck, X } from 'lucide-react';
+import { getCountryGenealogyTree } from '../data/countryTrees';
 import {
   ALLIANCE_REL_THRESHOLD,
   GIFT_MONEY_PER_REL,
+  NUKE_COST,
   PORT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
   canReachToAttack,
-  getCountryDisplayName,
+  getCountryName,
   getEnemies,
   getRelation,
   hasCoast,
@@ -23,8 +25,9 @@ interface CountryActionPopupProps {
   sim: SimulationState;
   targetId: number;
   onClose: () => void;
-  onOpenTreeModal: (countryId: number) => void;
   onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
+  onOpenCountryTree: (countryId: number) => void;
+  onStartNukeTarget: () => void;
 }
 
 export function CountryActionPopup({
@@ -32,8 +35,9 @@ export function CountryActionPopup({
   sim,
   targetId,
   onClose,
-  onOpenTreeModal,
   onExecuteAction,
+  onOpenCountryTree,
+  onStartNukeTarget,
 }: CountryActionPopupProps) {
   const [feedback, setFeedback] = useState<{
     text: string;
@@ -56,6 +60,9 @@ export function CountryActionPopup({
   const playerAtWar = getEnemies(sim, player.id).length > 0;
   const reach = canReachToAttack(sim, player.id, target.id);
   const humanOwner = sim.isMultiplayer ? sim.humanPlayers[target.id] : undefined;
+  const targetName = getCountryName(target);
+  const targetTree = getCountryGenealogyTree(target.seed);
+  const targetFocusCount = (target.completedFocusIds ?? []).length;
 
   const runAction = async (payload: GameActionPayload) => {
     setBusy(true);
@@ -120,15 +127,13 @@ export function CountryActionPopup({
                 }}
                 title="Color del país en el mapa"
               />
-              <span className="truncate">{getCountryDisplayName(target)}</span>
+              <span className="truncate">{targetName}</span>
             </h3>
-            {target.customName && target.customName !== target.seed.name && (
-              <div className="text-[10px] font-mono text-amber-300/85 truncate">
-                Antes: {target.seed.name}
-              </div>
-            )}
             <div className="text-xs text-amber-300 font-medium truncate">
               Capital: {target.seed.capital}
+              {target.customName && target.customName !== target.seed.name && (
+                <span className="text-slate-400 font-normal"> · Antes {target.seed.name}</span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400 flex items-center gap-1.5 truncate">
               <span>
@@ -143,29 +148,34 @@ export function CountryActionPopup({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => onOpenTreeModal(target.id)}
-            title="Ver árbol genealógico de este país"
-            className={`px-2 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-amber-300 hover:text-amber-200 font-semibold text-[11px] flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-              isMobile ? 'h-9' : 'h-7'
-            }`}
-          >
-            <GitBranch className="w-3.5 h-3.5 shrink-0" />
-            <span>Árbol</span>
-          </button>
-          <button
-            onClick={onClose}
-            title="Salir (Esc)"
-            aria-label="Cerrar"
-            className={`flex items-center justify-center bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs cursor-pointer shrink-0 ${
-              isMobile ? 'w-9 h-9' : 'w-7 h-7'
-            }`}
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          onClick={onClose}
+          title="Salir (Esc)"
+          aria-label="Cerrar"
+          className={`flex items-center justify-center bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white font-bold text-xs cursor-pointer shrink-0 ${
+            isMobile ? 'w-9 h-9' : 'w-7 h-7'
+          }`}
+        >
+          <X className="w-4 h-4" />
+        </button>
       </div>
+
+      {/* Ver Árbol Genealógico de este país */}
+      <button
+        type="button"
+        onClick={() => onOpenCountryTree(target.id)}
+        className={`w-full px-2.5 bg-[#0B121E] hover:bg-slate-800/90 border border-slate-700/90 hover:border-amber-500/60 text-left flex items-center justify-between gap-2 cursor-pointer ${
+          isMobile ? 'py-2 min-h-[40px]' : 'py-1.5'
+        }`}
+      >
+        <span className="flex items-center gap-1.5 text-xs text-amber-300 font-semibold min-w-0 truncate">
+          <GitFork className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Árbol Genealógico ({targetFocusCount}/{targetTree.nodes.length})</span>
+        </span>
+        <span className="text-[11px] text-slate-400 shrink-0 whitespace-nowrap">
+          Ver historia
+        </span>
+      </button>
 
       {!target.alive ? (
         <div className="p-2.5 bg-red-950/40 border border-red-800/60 text-xs text-red-200">
@@ -263,9 +273,7 @@ export function CountryActionPopup({
                   }`}
                 >
                   <Anchor className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">
-                    Construir Puerto hacia {getCountryDisplayName(target)} (${PORT_COST})
-                  </span>
+                  <span className="truncate">Construir Puerto hacia {targetName} (${PORT_COST})</span>
                 </button>
               )}
             </div>
@@ -390,6 +398,29 @@ export function CountryActionPopup({
                 </button>
               )}
             </div>
+          )}
+
+          {!allied && (
+            <button
+              type="button"
+              disabled={busy || (player.nukeCooldownDays ?? 0) > 0}
+              onClick={onStartNukeTarget}
+              className={`w-full px-3 bg-orange-950/70 hover:bg-orange-900/80 disabled:opacity-45 border border-orange-600/70 text-orange-200 font-bold text-xs flex items-center justify-between gap-2 cursor-pointer ${
+                isMobile ? 'min-h-[42px] py-2' : 'py-1.5'
+              }`}
+            >
+              <span className="flex items-center gap-1.5 truncate">
+                <Radiation className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                <span className="truncate">
+                  {(player.nukeCooldownDays ?? 0) > 0
+                    ? `Bomba Nuclear (recarga ${player.nukeCooldownDays}d)`
+                    : 'Apuntar Bomba Nuclear'}
+                </span>
+              </span>
+              <span className="font-mono-num text-[11px] text-orange-300 shrink-0">
+                ${NUKE_COST.toLocaleString('es-ES')}
+              </span>
+            </button>
           )}
         </>
       )}
