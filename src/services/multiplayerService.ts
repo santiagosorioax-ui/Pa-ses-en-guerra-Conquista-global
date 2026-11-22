@@ -19,11 +19,13 @@ import {
   db,
   formatFirestoreUserError,
   handleFirestoreError,
+  isFirestoreQuotaCooldownActive,
   isOnlineTesterUser,
   withTimeout,
 } from '../firebase';
 import {
   buildRoomWorldStatePayload,
+  stripUndefinedForFirestore,
   type RoomWorldStatePayload,
 } from '../engine/campaignSerializer';
 import type { GameActionPayload } from '../engine/gameActions';
@@ -74,24 +76,6 @@ function sanitizeDisplayName(user: User): string {
 
 function generateFourDigitCode(): string {
   return String(Math.floor(1000 + Math.random() * 9000));
-}
-
-function stripUndefinedDeep<T>(value: T): T {
-  if (Array.isArray(value)) {
-    return value
-      .filter((item) => item !== undefined)
-      .map((item) => stripUndefinedDeep(item)) as unknown as T;
-  }
-  if (value !== null && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (v !== undefined) {
-        out[k] = stripUndefinedDeep(v);
-      }
-    }
-    return out as T;
-  }
-  return value;
 }
 
 export async function createMultiplayerRoom(user: User): Promise<string> {
@@ -329,11 +313,8 @@ export async function hostStartMultiplayerMatch(
 ): Promise<void> {
   const stateRef = doc(db, 'rooms', roomCode, 'state', 'current');
   const roomRef = doc(db, 'rooms', roomCode);
-  const statePayload: RoomWorldStatePayload = buildRoomWorldStatePayload(
-    roomCode,
-    hostUid,
-    sim,
-    1
+  const statePayload: RoomWorldStatePayload = stripUndefinedForFirestore(
+    buildRoomWorldStatePayload(roomCode, hostUid, sim, 1)
   );
 
   const batch = writeBatch(db);
@@ -366,8 +347,14 @@ export async function hostBroadcastWorldState(
   tick: number,
   markFinished = false
 ): Promise<void> {
+  if (isFirestoreQuotaCooldownActive()) {
+    throw new Error('resource-exhausted: Quota limit exceeded.');
+  }
+
   const stateRef = doc(db, 'rooms', roomCode, 'state', 'current');
-  const payload = buildRoomWorldStatePayload(roomCode, hostUid, sim, tick);
+  const payload = stripUndefinedForFirestore(
+    buildRoomWorldStatePayload(roomCode, hostUid, sim, tick)
+  );
 
   try {
     if (markFinished) {
@@ -406,7 +393,7 @@ export async function sendRoomAction(
 ): Promise<string> {
   const actionId = `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const actionRef = doc(db, 'rooms', roomCode, 'actions', actionId);
-  const sanitizedPayload = stripUndefinedDeep(payload);
+  const sanitizedPayload = stripUndefinedForFirestore(payload);
 
   try {
     await withTimeout(

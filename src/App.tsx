@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Crown, Handshake, Lock, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
+import { Crown, Handshake, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
 import { AchievementsModal } from './components/AchievementsModal';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
@@ -50,7 +50,11 @@ import {
   type SimulationState,
 } from './engine/gameSimulation';
 import type { EmpireHighlightConfig } from './engine/pixelRenderer';
-import { isQuotaExceededError } from './firebase';
+import {
+  formatFirestoreUserError,
+  isFirestoreQuotaCooldownActive,
+  isQuotaExceededError,
+} from './firebase';
 import { MAP_H, MAP_W, buildWorldMapData, type WorldMapData } from './engine/mapRasterizer';
 import { soundEngine } from './engine/soundEngine';
 import {
@@ -108,6 +112,7 @@ export default function App() {
   const finishedBroadcastSentRef = useRef<boolean>(false);
   const broadcastThrottleRef = useRef<number | null>(null);
   const quotaCooldownUntilRef = useRef<number>(0);
+  const consecutiveSyncFailuresRef = useRef<number>(0);
   const processedActionIdsRef = useRef<Set<string>>(new Set());
 
   const [renderTick, setRenderTick] = useState(0);
@@ -329,7 +334,7 @@ export default function App() {
       const uid = uidOverride ?? user?.uid;
       const sim = simRef.current;
       if (!uid || !sim || sim.isMultiplayer) return;
-      if (Date.now() < quotaCooldownUntilRef.current) return;
+      if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
       if (isSavingRef.current) {
         pendingSaveRef.current = true;
         return;
@@ -337,15 +342,25 @@ export default function App() {
 
       isSavingRef.current = true;
       pendingSaveRef.current = false;
+      let failed = false;
       try {
         await saveCampaignToCloud(uid, activeCampaignIdRef.current, sim);
       } catch (err) {
-        if (isQuotaExceededError(err)) {
-          quotaCooldownUntilRef.current = Date.now() + 60_000;
+        failed = true;
+        pendingSaveRef.current = false;
+        if (isQuotaExceededError(err) || isFirestoreQuotaCooldownActive()) {
+          quotaCooldownUntilRef.current = Date.now() + 5 * 60_000;
+        } else {
+          quotaCooldownUntilRef.current = Date.now() + 20_000;
         }
       } finally {
         isSavingRef.current = false;
-        if (pendingSaveRef.current && Date.now() >= quotaCooldownUntilRef.current) {
+        if (
+          !failed &&
+          pendingSaveRef.current &&
+          Date.now() >= quotaCooldownUntilRef.current &&
+          !isFirestoreQuotaCooldownActive()
+        ) {
           pendingSaveRef.current = false;
           void performCloudSave(uid);
         } else {
@@ -358,14 +373,14 @@ export default function App() {
 
   const scheduleAutoCloudSave = useCallback(() => {
     if (!user?.uid || !simRef.current || simRef.current.isMultiplayer) return;
-    if (Date.now() < quotaCooldownUntilRef.current) return;
+    if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
     if (autoSaveTimerRef.current !== null) {
       window.clearTimeout(autoSaveTimerRef.current);
     }
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
       void performCloudSave(user.uid);
-    }, 4500);
+    }, 6000);
   }, [user?.uid, performCloudSave]);
 
   const handlePlayerMutation = useCallback(() => {
@@ -378,7 +393,15 @@ export default function App() {
     if (!mpRoomCode || !user?.uid || !sim || !sim.isMultiplayer) return;
     if (mpRoom && mpRoom.hostUid !== user.uid) return;
     if (sim.outcome !== 'none' && finishedBroadcastSentRef.current) return;
-    if (Date.now() < quotaCooldownUntilRef.current) return;
+    if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) {
+      pendingBroadcastRef.current = false;
+      if (isFirestoreQuotaCooldownActive()) {
+        setMpSyncError(
+          'Se alcanzó el límite diario gratuito de escrituras de Firebase Firestore. La cuota se restablece mañana.'
+        );
+      }
+      return;
+    }
 
     if (isBroadcastingRef.current) {
       pendingBroadcastRef.current = true;
@@ -388,6 +411,7 @@ export default function App() {
     isBroadcastingRef.current = true;
     pendingBroadcastRef.current = false;
     lastBroadcastAtRef.current = Date.now();
+    let failed = false;
     try {
       const nextTick = mpTickRef.current++;
       const shouldMarkFinished =
@@ -395,18 +419,49 @@ export default function App() {
         !finishedBroadcastSentRef.current &&
         mpRoom?.status !== 'finished';
       await hostBroadcastWorldState(mpRoomCode, user.uid, sim, nextTick, shouldMarkFinished);
+      consecutiveSyncFailuresRef.current = 0;
+      setMpSyncError((prev) => (prev ? null : prev));
       if (sim.outcome !== 'none') {
         finishedBroadcastSentRef.current = true;
       }
     } catch (err) {
-      if (isQuotaExceededError(err)) {
-        quotaCooldownUntilRef.current = Date.now() + 60_000;
+      failed = true;
+      pendingBroadcastRef.current = false;
+      if (broadcastThrottleRef.current !== null) {
+        window.clearTimeout(broadcastThrottleRef.current);
+        broadcastThrottleRef.current = null;
+      }
+      if (isQuotaExceededError(err) || isFirestoreQuotaCooldownActive()) {
+        quotaCooldownUntilRef.current = Date.now() + 5 * 60_000;
+        setMpSyncError(
+          formatFirestoreUserError(
+            err,
+            'Se alcanzó el límite diario gratuito de escrituras de Firebase Firestore. La cuota se restablece mañana.'
+          )
+        );
+      } else {
+        consecutiveSyncFailuresRef.current += 1;
+        const backoffMs = Math.min(
+          60_000,
+          12_000 * Math.pow(2, consecutiveSyncFailuresRef.current - 1)
+        );
+        quotaCooldownUntilRef.current = Date.now() + backoffMs;
+        if (consecutiveSyncFailuresRef.current >= 2) {
+          setMpSyncError(
+            formatFirestoreUserError(
+              err,
+              'La sincronización online está pausada temporalmente por saturación o falta de conexión.'
+            )
+          );
+        }
       }
     } finally {
       isBroadcastingRef.current = false;
       if (
+        !failed &&
         pendingBroadcastRef.current &&
         Date.now() >= quotaCooldownUntilRef.current &&
+        !isFirestoreQuotaCooldownActive() &&
         !(simRef.current?.outcome !== 'none' && finishedBroadcastSentRef.current)
       ) {
         pendingBroadcastRef.current = false;
@@ -419,21 +474,30 @@ export default function App() {
 
   const scheduleHostBroadcast = useCallback(
     (immediate = false) => {
-      if (Date.now() < quotaCooldownUntilRef.current) return;
+      if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
+      const sim = simRef.current;
+
       if (immediate) {
         if (broadcastThrottleRef.current !== null) {
           window.clearTimeout(broadcastThrottleRef.current);
           broadcastThrottleRef.current = null;
         }
-        void performHostBroadcast();
+        // Match-end sends right away; rapid human actions coalesce over 300ms to save Firestore write units
+        if (sim && sim.outcome !== 'none') {
+          void performHostBroadcast();
+          return;
+        }
+        broadcastThrottleRef.current = window.setTimeout(() => {
+          broadcastThrottleRef.current = null;
+          void performHostBroadcast();
+        }, 300);
         return;
       }
 
-      const sim = simRef.current;
       const isHighActivity = Boolean(
-        sim && (sim.wars.length > 0 || sim.invasions.length > 0 || speed >= 2)
+        sim && (sim.wars.length > 0 || sim.invasions.length > 0)
       );
-      const minIntervalMs = isHighActivity ? 550 : 900;
+      const minIntervalMs = isHighActivity ? 2500 : 4500;
       const elapsed = Date.now() - lastBroadcastAtRef.current;
 
       if (elapsed >= minIntervalMs && !isBroadcastingRef.current) {
@@ -446,13 +510,13 @@ export default function App() {
       }
 
       if (broadcastThrottleRef.current !== null) return;
-      const delay = Math.max(80, minIntervalMs - elapsed);
+      const delay = Math.max(250, minIntervalMs - elapsed);
       broadcastThrottleRef.current = window.setTimeout(() => {
         broadcastThrottleRef.current = null;
         void performHostBroadcast();
       }, delay);
     },
-    [performHostBroadcast, speed]
+    [performHostBroadcast]
   );
 
   const handleExecuteAction = useCallback(
@@ -1023,6 +1087,8 @@ export default function App() {
     lastBroadcastAtRef.current = Date.now();
     processedActionIdsRef.current.clear();
     finishedBroadcastSentRef.current = false;
+    consecutiveSyncFailuresRef.current = 0;
+    setMpSyncError(null);
     setRespondedOfferIds([]);
     lastOutcomeRef.current = 'none';
 
@@ -1057,6 +1123,7 @@ export default function App() {
     }
     pendingBroadcastRef.current = false;
     finishedBroadcastSentRef.current = false;
+    consecutiveSyncFailuresRef.current = 0;
     lastAppliedTickRef.current = 0;
     lastBroadcastAtRef.current = 0;
     setRespondedOfferIds([]);
@@ -1201,8 +1268,6 @@ export default function App() {
       if (!sim) return;
       if (sim.isMultiplayer && sim.outcome !== 'none') return;
 
-      const prevTopChronicleId = sim.chronicle[0]?.id ?? -1;
-      const prevWarCount = sim.wars.length;
       const prevOfferCount = sim.diplomaticOffers.length;
 
       stepSimulationDay(sim);
@@ -1215,11 +1280,7 @@ export default function App() {
           void performCloudSave(user.uid);
         }
       } else if (sim.isMultiplayer) {
-        const majorEventHappened =
-          (sim.chronicle[0]?.id ?? -1) !== prevTopChronicleId ||
-          sim.wars.length !== prevWarCount ||
-          sim.diplomaticOffers.length !== prevOfferCount;
-        if (majorEventHappened) {
+        if (sim.diplomaticOffers.length > prevOfferCount) {
           scheduleHostBroadcast(true);
         } else if (sim.wars.length > 0 || sim.invasions.length > 0) {
           scheduleHostBroadcast(false);
@@ -1409,11 +1470,11 @@ export default function App() {
     onlineDevNotice ? (
       <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[90] w-[min(94vw,470px)] bg-[#111B2B]/98 border border-amber-500/80 shadow-2xl px-3.5 py-2.5 flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-7 h-7 bg-amber-500/15 border border-amber-500/50 flex items-center justify-center shrink-0">
-            <Lock className="w-3.5 h-3.5 text-amber-400" />
+          <div className="px-2 py-1 bg-amber-500/15 border border-amber-500/50 flex items-center justify-center shrink-0">
+            <span className="font-mono-num text-[10px] font-bold text-amber-300">28/11/2026</span>
           </div>
           <span className="text-xs sm:text-sm font-bold text-amber-200 leading-snug">
-            El modo online está en desarrollo.
+            El online estará listo para el 28/11/2026.
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1827,8 +1888,23 @@ export default function App() {
             );
           })()}
 
+          {/* Multiplayer Sync / Quota Alert Banner */}
+          {sim.isMultiplayer && mpSyncError && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 w-[min(94vw,520px)] bg-amber-950/95 border border-amber-500/80 px-3 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-amber-100">
+              <span className="leading-snug">{mpSyncError}</span>
+              <button
+                type="button"
+                onClick={() => setMpSyncError(null)}
+                aria-label="Cerrar aviso de sincronización"
+                className="p-1 bg-amber-900/70 hover:bg-amber-800 border border-amber-600/60 text-amber-200 shrink-0 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Live Autonomous AI Geopolitical Feed (top-left of map) */}
-          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || placingAntiNuke || launchingNuke || empireHighlight)) && (
+          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || placingAntiNuke || launchingNuke || empireHighlight || mpSyncError)) && (
             <div
               className={`absolute z-20 space-y-1.5 pointer-events-none ${
                 isMobile

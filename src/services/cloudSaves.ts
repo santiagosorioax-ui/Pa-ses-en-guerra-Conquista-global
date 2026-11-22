@@ -24,6 +24,7 @@ import {
   db,
   formatFirestoreUserError,
   handleFirestoreError,
+  isFirestoreQuotaCooldownActive,
   withTimeout,
 } from '../firebase';
 
@@ -151,6 +152,9 @@ export async function saveCampaignToCloud(
   campaignId: string,
   sim: SimulationState
 ): Promise<{ saved: boolean; skippedDefeated?: boolean }> {
+  if (isFirestoreQuotaCooldownActive()) {
+    throw new Error('resource-exhausted: Quota limit exceeded.');
+  }
   const metaPath = `users/${uid}/campaigns/${campaignId}`;
   const snapPath = `users/${uid}/campaigns/${campaignId}/data/state`;
   const metaRef = doc(db, 'users', uid, 'campaigns', campaignId);

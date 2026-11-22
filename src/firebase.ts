@@ -15,7 +15,10 @@ import firebaseConfig from '../firebase-applet-config.json';
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(
   app,
-  { experimentalForceLongPolling: true },
+  {
+    experimentalForceLongPolling: true,
+    ignoreUndefinedProperties: true,
+  },
   firebaseConfig.firestoreDatabaseId
 );
 export const auth = getAuth(app);
@@ -72,6 +75,16 @@ export function isQuotaExceededError(error: unknown): boolean {
   );
 }
 
+let globalQuotaCooldownUntilMs = 0;
+
+export function markFirestoreQuotaExceeded(durationMs = 5 * 60_000): void {
+  globalQuotaCooldownUntilMs = Math.max(globalQuotaCooldownUntilMs, Date.now() + durationMs);
+}
+
+export function isFirestoreQuotaCooldownActive(): boolean {
+  return Date.now() < globalQuotaCooldownUntilMs;
+}
+
 export function formatFirestoreUserError(error: unknown, fallback: string): string {
   const msg = error instanceof Error ? error.message : String(error);
   const lower = msg.toLowerCase();
@@ -96,6 +109,13 @@ export async function withTimeout<T>(
   ms = 9000,
   timeoutMessage = 'La conexión con Firebase tardó demasiado. Es posible que el servidor esté saturado o sin red.'
 ): Promise<T> {
+  // Observe late quota rejections even if the timeout wins the race first
+  promise.then(undefined, (err) => {
+    if (isQuotaExceededError(err)) {
+      markFirestoreQuotaExceeded();
+    }
+  });
+
   let timer: number | undefined;
   try {
     return await Promise.race([
@@ -117,6 +137,9 @@ export function handleFirestoreError(
   path: string | null,
   rethrow = true
 ): void {
+  if (isQuotaExceededError(error)) {
+    markFirestoreQuotaExceeded();
+  }
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {

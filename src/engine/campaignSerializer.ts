@@ -336,6 +336,83 @@ function hydrateCountries(
   });
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Recursively removes `undefined` fields from plain objects and arrays while
+ * preserving Firestore class instances like `Bytes`, `Timestamp`, and `FieldValue`.
+ */
+export function stripUndefinedForFirestore<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefinedForFirestore(item)) as unknown as T;
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v !== undefined) {
+        out[k] = stripUndefinedForFirestore(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
+function serializeChronicle(entries: ChronicleEntry[], limit = 20): ChronicleEntry[] {
+  return entries.slice(0, limit).map((entry) => {
+    const clean: ChronicleEntry = {
+      id: Number(entry.id) || 0,
+      dateLabel: String(entry.dateLabel ?? ''),
+      type: entry.type,
+      text: String(entry.text ?? ''),
+    };
+    if (typeof entry.focusCountryId === 'number' && Number.isFinite(entry.focusCountryId)) {
+      clean.focusCountryId = entry.focusCountryId;
+    }
+    return clean;
+  });
+}
+
+function serializeInvasions(invasions: NavalInvasion[]): NavalInvasion[] {
+  return invasions.slice(0, 200).map((inv) => ({
+    id: Number(inv.id) || 0,
+    attackerId: Number(inv.attackerId) || 0,
+    defenderId: Number(inv.defenderId) || 0,
+    fromX: Number(inv.fromX) || 0,
+    fromY: Number(inv.fromY) || 0,
+    targetX: Number(inv.targetX) || 0,
+    targetY: Number(inv.targetY) || 0,
+    progress: Number(inv.progress) || 0,
+  }));
+}
+
+function serializeDiplomaticOffers(offers: HumanDiplomaticOffer[]): HumanDiplomaticOffer[] {
+  return offers.slice(-32).map((o) => ({
+    id: Number(o.id) || 0,
+    fromCountryId: Number(o.fromCountryId) || 0,
+    toCountryId: Number(o.toCountryId) || 0,
+    type: o.type,
+  }));
+}
+
+function serializePlayerHistory(history: PlayerHistoryPoint[]): PlayerHistoryPoint[] {
+  return history.slice(-60).map((pt) => ({
+    label: String(pt.label ?? ''),
+    dateLabel: String(pt.dateLabel ?? ''),
+    elapsedSeconds: Number(pt.elapsedSeconds) || 0,
+    money: Number(pt.money) || 0,
+    netIncome: Number(pt.netIncome) || 0,
+    army: Number(pt.army) || 0,
+    km2: Number(pt.km2) || 0,
+  }));
+}
+
 export function buildCampaignSnapshotPayload(
   uid: string,
   campaignId: string,
@@ -369,9 +446,9 @@ export function buildCampaignSnapshotPayload(
       b: w.b,
       startTotalDays: w.startTotalDays,
     })),
-    invasions: sim.invasions.slice(0, 200).map((inv) => ({ ...inv })),
-    chronicle: sim.chronicle.slice(0, 25).map((entry) => ({ ...entry })),
-    playerHistory: sim.playerHistory.slice(-60).map((pt) => ({ ...pt })),
+    invasions: serializeInvasions(sim.invasions),
+    chronicle: serializeChronicle(sim.chronicle, 25),
+    playerHistory: serializePlayerHistory(sim.playerHistory),
   };
 
   if (sim.pendingProposal) {
@@ -382,7 +459,7 @@ export function buildCampaignSnapshotPayload(
     };
   }
 
-  return payload;
+  return stripUndefinedForFirestore(payload);
 }
 
 export function restoreSimulationFromSnapshot(
@@ -467,7 +544,7 @@ export function buildRoomWorldStatePayload(
     };
   }
 
-  return {
+  return stripUndefinedForFirestore({
     roomCode,
     hostUid,
     version: SNAPSHOT_SCHEMA_VERSION,
@@ -492,11 +569,11 @@ export function buildRoomWorldStatePayload(
       b: w.b,
       startTotalDays: w.startTotalDays,
     })),
-    invasions: sim.invasions.slice(0, 200).map((inv) => ({ ...inv })),
-    chronicle: sim.chronicle.slice(0, 25).map((entry) => ({ ...entry })),
+    invasions: serializeInvasions(sim.invasions),
+    chronicle: serializeChronicle(sim.chronicle, 15),
     humanPlayers,
-    diplomaticOffers: sim.diplomaticOffers.slice(-32).map((o) => ({ ...o })),
-  };
+    diplomaticOffers: serializeDiplomaticOffers(sim.diplomaticOffers),
+  });
 }
 
 export function restoreRoomWorldState(

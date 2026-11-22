@@ -386,8 +386,10 @@ export function pushChronicle(
     dateLabel: formatDate(sim.month, sim.year),
     type,
     text,
-    focusCountryId,
   };
+  if (typeof focusCountryId === 'number' && Number.isFinite(focusCountryId)) {
+    entry.focusCountryId = focusCountryId;
+  }
   sim.chronicle = [entry, ...sim.chronicle.slice(0, 69)];
 }
 

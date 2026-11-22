@@ -6,7 +6,6 @@ import {
   HelpCircle,
   List,
   Loader2,
-  Lock,
   LogIn,
   LogOut,
   Play,
@@ -530,49 +529,49 @@ export function CountrySelectScreen({
                 soundEngine.playClick();
                 onOpenOnline();
               }}
-              title={canAccessOnline ? 'Online (Acceso de pruebas)' : 'Online (En desarrollo)'}
+              title={
+                canAccessOnline
+                  ? 'Online · 28/11/2026 (Acceso de pruebas)'
+                  : 'El online estará listo para el 28/11/2026'
+              }
               className={
                 canAccessOnline
-                  ? 'px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer'
+                  ? 'relative overflow-hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-emerald-500/70 text-slate-200 font-bold text-[11px] flex items-center gap-1 cursor-pointer'
                   : 'relative overflow-hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-600 text-slate-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer'
               }
             >
-              {canAccessOnline ? (
-                <>
-                  <Globe className="w-3 h-3 shrink-0" />
-                  <span>Online</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="w-3 h-3 text-amber-400 shrink-0" />
-                  <span className="opacity-80">Online</span>
-                  <svg
-                    viewBox="0 0 68 28"
-                    preserveAspectRatio="none"
-                    className="pointer-events-none absolute inset-0 w-full h-full opacity-55"
-                    aria-hidden="true"
-                  >
-                    <line
-                      x1="0"
-                      y1="26"
-                      x2="68"
-                      y2="2"
-                      stroke="#94A3B8"
-                      strokeWidth="2"
-                      strokeDasharray="4 2"
-                    />
-                    <line
-                      x1="0"
-                      y1="2"
-                      x2="68"
-                      y2="26"
-                      stroke="#94A3B8"
-                      strokeWidth="2"
-                      strokeDasharray="4 2"
-                    />
-                  </svg>
-                </>
-              )}
+              <Globe className="w-3 h-3 text-emerald-400/70 shrink-0 opacity-60" />
+              <span className="opacity-45">Online</span>
+              <svg
+                viewBox="0 0 80 28"
+                preserveAspectRatio="none"
+                className="pointer-events-none absolute inset-0 w-full h-full opacity-70"
+                aria-hidden="true"
+              >
+                <line
+                  x1="0"
+                  y1="26"
+                  x2="80"
+                  y2="2"
+                  stroke="#94A3B8"
+                  strokeWidth="2.2"
+                  strokeDasharray="4 2"
+                />
+                <line
+                  x1="0"
+                  y1="2"
+                  x2="80"
+                  y2="26"
+                  stroke="#94A3B8"
+                  strokeWidth="2.2"
+                  strokeDasharray="4 2"
+                />
+              </svg>
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <span className="px-1 py-0.2 bg-[#0B121E]/95 border border-slate-400 font-mono-num text-[9px] font-extrabold text-white leading-tight">
+                  28/11/2026
+                </span>
+              </span>
             </button>
             <PWAInstallButton compact />
           </div>

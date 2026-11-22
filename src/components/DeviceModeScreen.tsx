@@ -1,4 +1,4 @@
-import { Globe, Loader2, Lock, LogIn, LogOut, Play, RotateCcw } from 'lucide-react';
+import { Globe, Loader2, LogIn, LogOut, Play, RotateCcw } from 'lucide-react';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { PWAInstallButton } from './PWAInstallPrompt';
 import { soundEngine } from '../engine/soundEngine';
@@ -140,10 +140,12 @@ function ChainLinkOverlay() {
         </g>
       </svg>
 
-      {/* Center Padlock Seal */}
+      {/* Center Launch Date Seal */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-12 h-12 bg-[#0B121E]/95 border-2 border-slate-400 shadow-2xl flex items-center justify-center">
-          <Lock className="w-6 h-6 text-amber-400" />
+        <div className="px-3.5 py-1.5 bg-[#0B121E]/95 border-2 border-slate-400 shadow-2xl flex items-center justify-center">
+          <span className="font-mono-num text-sm sm:text-base font-extrabold tracking-wider text-white">
+            28/11/2026
+          </span>
         </div>
       </div>
     </div>
@@ -253,7 +255,7 @@ export function DeviceModeScreen({
               </div>
             </button>
 
-            {/* Botón Online: desbloqueado solo para cuentas de prueba autorizadas */}
+            {/* Botón Online con cadenas y fecha de lanzamiento 28/11/2026 (acceso de pruebas preservado para cuentas autorizadas) */}
             <button
               type="button"
               onClick={() => {
@@ -262,57 +264,38 @@ export function DeviceModeScreen({
               }}
               className={
                 canAccessOnline
-                  ? 'group text-left bg-[#111B2B] hover:bg-[#172338] border border-emerald-500/70 hover:border-emerald-400 p-5 sm:p-6 transition-colors cursor-pointer flex flex-col justify-between gap-4 min-h-[200px]'
+                  ? 'relative overflow-hidden group text-left bg-[#0E1726] hover:bg-[#142238] border border-emerald-500/70 hover:border-emerald-400 p-5 sm:p-6 transition-colors cursor-pointer flex flex-col justify-between gap-4 min-h-[200px]'
                   : 'relative overflow-hidden text-left bg-[#0E1726] hover:bg-[#121D30] border border-slate-700 p-5 sm:p-6 transition-colors cursor-pointer flex flex-col justify-between gap-4 min-h-[200px]'
               }
             >
-              <div className={`space-y-3 ${canAccessOnline ? '' : 'opacity-60'}`}>
-                <div
-                  className={`w-12 h-12 flex items-center justify-center text-emerald-400 ${
-                    canAccessOnline
-                      ? 'bg-emerald-500/15 border border-emerald-500/50'
-                      : 'bg-emerald-500/10 border border-emerald-600/40'
-                  }`}
-                >
+              <div className="space-y-3 opacity-60">
+                <div className="w-12 h-12 flex items-center justify-center text-emerald-400 bg-emerald-500/10 border border-emerald-600/40">
                   <Globe className="w-6 h-6" />
                 </div>
                 <div>
-                  <div
-                    className={`text-xl font-extrabold transition-colors ${
-                      canAccessOnline
-                        ? 'text-white group-hover:text-emerald-300'
-                        : 'text-slate-200'
-                    }`}
-                  >
+                  <div className="text-xl font-extrabold text-slate-200 transition-colors">
                     Online
                   </div>
-                  <p
-                    className={`mt-1 text-xs sm:text-sm leading-relaxed ${
-                      canAccessOnline ? 'text-slate-300' : 'text-slate-400'
-                    }`}
-                  >
+                  <p className="mt-1 text-xs sm:text-sm leading-relaxed text-slate-400">
                     Multijugador en vivo con amigos en salas privadas de 4 dígitos, guerras, alianzas y rebeliones.
                   </p>
                 </div>
               </div>
 
-              {canAccessOnline ? (
-                <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs font-bold text-emerald-400">
-                  <span>Acceso de pruebas</span>
-                  <span>Entrar →</span>
-                </div>
-              ) : (
-                <>
-                  <div className="relative z-10 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs font-semibold text-amber-300/90">
-                    <span className="flex items-center gap-1.5">
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>En desarrollo</span>
-                    </span>
-                    <span className="text-slate-400">Bloqueado</span>
-                  </div>
-                  <ChainLinkOverlay />
-                </>
-              )}
+              <div className="relative z-10 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs font-semibold">
+                {canAccessOnline ? (
+                  <>
+                    <span className="text-emerald-400">Acceso de pruebas</span>
+                    <span className="text-emerald-300 font-bold">Entrar →</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-amber-300/90 font-mono-num">Lanzamiento 28/11/2026</span>
+                    <span className="text-slate-400">Próximamente</span>
+                  </>
+                )}
+              </div>
+              <ChainLinkOverlay />
             </button>
           </div>
 
