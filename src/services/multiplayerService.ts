@@ -59,6 +59,7 @@ export interface RoomActionDoc {
   actorCountryId: number;
   payload: GameActionPayload;
   status: 'pending' | 'processed';
+  createdAtMs: number;
 }
 
 function toMillis(val: unknown): number {
@@ -566,9 +567,11 @@ export function subscribePendingRoomActions(
             actorCountryId: Number(raw.actorCountryId),
             payload: raw.payload as GameActionPayload,
             status: 'pending',
+            createdAtMs: toMillis(raw.createdAt),
           });
         }
       }
+      pending.sort((a, b) => (a.createdAtMs !== b.createdAtMs ? a.createdAtMs - b.createdAtMs : a.id.localeCompare(b.id)));
       onActions(pending);
     },
     (error) => {

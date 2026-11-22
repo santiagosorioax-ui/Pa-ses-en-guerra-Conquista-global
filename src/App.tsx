@@ -101,6 +101,8 @@ export default function App() {
   const [mpSyncError, setMpSyncError] = useState<string | null>(null);
   const [respondedOfferIds, setRespondedOfferIds] = useState<number[]>([]);
   const mpTickRef = useRef<number>(1);
+  const lastAppliedTickRef = useRef<number>(0);
+  const lastBroadcastAtRef = useRef<number>(0);
   const isBroadcastingRef = useRef<boolean>(false);
   const pendingBroadcastRef = useRef<boolean>(false);
   const finishedBroadcastSentRef = useRef<boolean>(false);
@@ -385,6 +387,7 @@ export default function App() {
 
     isBroadcastingRef.current = true;
     pendingBroadcastRef.current = false;
+    lastBroadcastAtRef.current = Date.now();
     try {
       const nextTick = mpTickRef.current++;
       const shouldMarkFinished =
@@ -425,13 +428,31 @@ export default function App() {
         void performHostBroadcast();
         return;
       }
+
+      const sim = simRef.current;
+      const isHighActivity = Boolean(
+        sim && (sim.wars.length > 0 || sim.invasions.length > 0 || speed >= 2)
+      );
+      const minIntervalMs = isHighActivity ? 550 : 900;
+      const elapsed = Date.now() - lastBroadcastAtRef.current;
+
+      if (elapsed >= minIntervalMs && !isBroadcastingRef.current) {
+        if (broadcastThrottleRef.current !== null) {
+          window.clearTimeout(broadcastThrottleRef.current);
+          broadcastThrottleRef.current = null;
+        }
+        void performHostBroadcast();
+        return;
+      }
+
       if (broadcastThrottleRef.current !== null) return;
+      const delay = Math.max(80, minIntervalMs - elapsed);
       broadcastThrottleRef.current = window.setTimeout(() => {
         broadcastThrottleRef.current = null;
         void performHostBroadcast();
-      }, 4500);
+      }, delay);
     },
-    [performHostBroadcast]
+    [performHostBroadcast, speed]
   );
 
   const handleExecuteAction = useCallback(
@@ -508,6 +529,19 @@ export default function App() {
         if (localError) {
           return localError;
         }
+
+        // Optimistic local execution so Guest sees immediate 0ms feedback while Host commits authoritatively
+        const optimisticRes = executeGameAction(sim, sim.playerId, action);
+        if (!optimisticRes.ok) {
+          return optimisticRes;
+        }
+        if (action.type === 'respond_human_offer') {
+          setRespondedOfferIds((prev) =>
+            prev.includes(action.offerId) ? prev : [...prev.slice(-31), action.offerId]
+          );
+        }
+        bumpRender();
+
         try {
           await sendRoomAction(
             mpRoom.roomCode,
@@ -516,18 +550,23 @@ export default function App() {
             sim.playerId,
             action
           );
-          if (action.type === 'respond_human_offer') {
-            setRespondedOfferIds((prev) =>
-              prev.includes(action.offerId) ? prev : [...prev.slice(-31), action.offerId]
-            );
-          }
-          soundEngine.playClick();
-          trackActionSuccess('');
-          return {
-            ok: true,
-            message: 'Orden enviada en vivo al anfitrión...',
-          };
+          trackActionSuccess(optimisticRes.message);
+          return optimisticRes;
         } catch (err) {
+          // Roll back optimistic local mutation by reloading latest authoritative world state
+          const latestRaw = await loadRoomWorldStateOnce(mpRoom.roomCode);
+          if (latestRaw && simRef.current?.isMultiplayer) {
+            if (!cachedMapDataRef.current) {
+              cachedMapDataRef.current = buildWorldMapData();
+            }
+            simRef.current = restoreRoomWorldState(
+              latestRaw,
+              sim.playerId,
+              cachedMapDataRef.current,
+              simRef.current.playerHistory
+            );
+            bumpRender();
+          }
           return {
             ok: false,
             message: err instanceof Error ? err.message : 'Error al enviar orden online.',
@@ -670,7 +709,18 @@ export default function App() {
     const unsubState = subscribeRoomState(
       mpRoomCode,
       (raw) => {
+        const incomingTick = Number(raw.tick ?? 0);
         const prevSim = simRef.current;
+
+        // Guard against stale or duplicate snapshots rewinding Guest state
+        if (
+          prevSim?.isMultiplayer &&
+          incomingTick > 0 &&
+          incomingTick <= lastAppliedTickRef.current
+        ) {
+          return;
+        }
+
         const myMember = mpMembersRef.current.find((m) => m.uid === user.uid);
         let myCountryId = myMember && myMember.countryId >= 0 ? myMember.countryId : -1;
 
@@ -696,21 +746,106 @@ export default function App() {
           prevSim?.isMultiplayer ? prevSim.playerHistory : []
         );
 
-        // Contextual sound cues on guest updates
+        if (incomingTick > 0) {
+          lastAppliedTickRef.current = incomingTick;
+        }
+
+        // Preserve live particles & synthesize frontline/nuke particles + audio cues from Host diff
         if (prevSim?.isMultiplayer) {
-          const prevWarCount = prevSim.wars.filter(
-            (w) => w.a === myCountryId || w.b === myCountryId
-          ).length;
-          const nextWarCount = nextSim.wars.filter(
-            (w) => w.a === myCountryId || w.b === myCountryId
-          ).length;
-          if (nextWarCount > prevWarCount) {
-            soundEngine.playWarDeclared();
+          const carriedParticles = prevSim.particles
+            .filter((p) => p.life > 1)
+            .map((p) => ({ ...p, life: p.life - 1 }));
+          nextSim.particles = carriedParticles;
+
+          // Frontline border-change sparks (sampled so it stays sub-millisecond)
+          const prevGrid = prevSim.ownerGrid;
+          const nextGrid = nextSim.ownerGrid;
+          let addedSparks = 0;
+          const totalPx = nextGrid.length;
+          for (let idx = 0; idx < totalPx && addedSparks < 48; idx += 3) {
+            const nextOwner = nextGrid[idx];
+            if (nextOwner !== prevGrid[idx] && nextOwner >= 0) {
+              const col = nextSim.countries[nextOwner]?.color;
+              if (col) {
+                nextSim.particles.push({
+                  x: idx % MAP_W,
+                  y: Math.floor(idx / MAP_W),
+                  r: col[0],
+                  g: col[1],
+                  b: col[2],
+                  life: 10,
+                  maxLife: 10,
+                });
+                addedSparks++;
+              }
+            }
           }
-          if (prevSim.outcome === 'none' && nextSim.outcome !== 'none') {
+
+          // Detect newly detonated nuclear strikes & play blast sound/particles
+          let heardNuke = false;
+          for (let cid = 0; cid < nextSim.countries.length; cid++) {
+            const ns = nextSim.countries[cid]?.lastNukeStrike;
+            const ps = prevSim.countries[cid]?.lastNukeStrike;
+            if (ns && (!ps || ns.id !== ps.id)) {
+              if (!heardNuke && (cid === myCountryId || nextSim.ownerGrid[ns.y * MAP_W + ns.x] === myCountryId || prevSim.ownerGrid[ns.y * MAP_W + ns.x] === myCountryId)) {
+                soundEngine.playNuclearExplosion();
+                heardNuke = true;
+              }
+              for (let k = 0; k < 14; k++) {
+                const ang = (Math.PI * 2 * k) / 14;
+                const dist = Math.round(ns.radius * (0.35 + (k % 3) * 0.25));
+                nextSim.particles.push({
+                  x: Math.max(0, Math.min(MAP_W - 1, Math.round(ns.x + Math.cos(ang) * dist))),
+                  y: Math.max(0, Math.min(MAP_H - 1, Math.round(ns.y + Math.sin(ang) * dist))),
+                  r: 255,
+                  g: k % 2 === 0 ? 180 : 90,
+                  b: 30,
+                  life: 14,
+                  maxLife: 14,
+                });
+              }
+            }
+          }
+          if (nextSim.particles.length > 180) {
+            nextSim.particles = nextSim.particles.slice(-180);
+          }
+
+          // Contextual sound cues on guest updates
+          const prevMyWars = prevSim.wars.filter(
+            (w) => w.a === myCountryId || w.b === myCountryId
+          ).length;
+          const nextMyWars = nextSim.wars.filter(
+            (w) => w.a === myCountryId || w.b === myCountryId
+          ).length;
+          if (nextMyWars > prevMyWars) {
+            soundEngine.playWarDeclared();
+          } else if (nextMyWars < prevMyWars && nextSim.countries[myCountryId]?.alive) {
+            soundEngine.playPeaceTreaty();
+          }
+
+          const prevIncomingOffers = prevSim.diplomaticOffers.filter(
+            (o) => o.toCountryId === myCountryId
+          ).length;
+          const nextIncomingOffers = nextSim.diplomaticOffers.filter(
+            (o) => o.toCountryId === myCountryId
+          ).length;
+          if (nextIncomingOffers > prevIncomingOffers) {
+            soundEngine.playEvent();
+          }
+
+          if (prevSim.countries[myCountryId]?.alive && !nextSim.countries[myCountryId]?.alive) {
+            soundEngine.playAnnexation(false);
+          } else if (prevSim.outcome === 'none' && nextSim.outcome !== 'none') {
             soundEngine.playAnnexation(nextSim.winnerCountryId === myCountryId);
           }
         }
+
+        // Clear respondedOfferIds for offers that the Host has already removed
+        const activeOfferIdSet = new Set(nextSim.diplomaticOffers.map((o) => o.id));
+        setRespondedOfferIds((prev) => {
+          const filtered = prev.filter((id) => activeOfferIdSet.has(id));
+          return filtered.length === prev.length ? prev : filtered;
+        });
 
         simRef.current = nextSim;
         lastOutcomeRef.current = nextSim.outcome;
@@ -884,6 +1019,8 @@ export default function App() {
     });
     simRef.current = sim;
     mpTickRef.current = 1;
+    lastAppliedTickRef.current = 0;
+    lastBroadcastAtRef.current = Date.now();
     processedActionIdsRef.current.clear();
     finishedBroadcastSentRef.current = false;
     setRespondedOfferIds([]);
@@ -920,6 +1057,8 @@ export default function App() {
     }
     pendingBroadcastRef.current = false;
     finishedBroadcastSentRef.current = false;
+    lastAppliedTickRef.current = 0;
+    lastBroadcastAtRef.current = 0;
     setRespondedOfferIds([]);
     if (mpRoomCode && user?.uid && mpRoom) {
       try {
@@ -966,11 +1105,13 @@ export default function App() {
       if (s > 0) lastActiveSpeedRef.current = s;
       setSpeed(s);
       soundEngine.playClick();
-      if (s === 0 && user?.uid && !simRef.current?.isMultiplayer) {
+      if (simRef.current?.isMultiplayer) {
+        scheduleHostBroadcast(true);
+      } else if (s === 0 && user?.uid) {
         void performCloudSave(user.uid);
       }
     },
-    [isRemoteGuest, user?.uid, performCloudSave]
+    [isRemoteGuest, user?.uid, performCloudSave, scheduleHostBroadcast]
   );
 
   // PC Keyboard Shortcuts
@@ -1059,13 +1200,29 @@ export default function App() {
       const sim = simRef.current;
       if (!sim) return;
       if (sim.isMultiplayer && sim.outcome !== 'none') return;
+
+      const prevTopChronicleId = sim.chronicle[0]?.id ?? -1;
+      const prevWarCount = sim.wars.length;
+      const prevOfferCount = sim.diplomaticOffers.length;
+
       stepSimulationDay(sim);
+
       if (sim.outcome !== lastOutcomeRef.current) {
         lastOutcomeRef.current = sim.outcome;
         if (sim.isMultiplayer) {
           scheduleHostBroadcast(true);
         } else if (user?.uid) {
           void performCloudSave(user.uid);
+        }
+      } else if (sim.isMultiplayer) {
+        const majorEventHappened =
+          (sim.chronicle[0]?.id ?? -1) !== prevTopChronicleId ||
+          sim.wars.length !== prevWarCount ||
+          sim.diplomaticOffers.length !== prevOfferCount;
+        if (majorEventHappened) {
+          scheduleHostBroadcast(true);
+        } else if (sim.wars.length > 0 || sim.invasions.length > 0) {
+          scheduleHostBroadcast(false);
         }
       }
       bumpRender();
@@ -1092,6 +1249,42 @@ export default function App() {
 
     return () => window.clearInterval(timer);
   }, [screen, speed, isRemoteGuest, bumpRender, scheduleHostBroadcast]);
+
+  // Guest smooth visual interpolation for particles and active naval landings between Host snapshots
+  useEffect(() => {
+    if (screen !== 'PLAYING' || !isRemoteGuest) return;
+
+    const timer = window.setInterval(() => {
+      const sim = simRef.current;
+      if (!sim || !sim.isMultiplayer || sim.outcome !== 'none') return;
+      let visualChanged = false;
+
+      if (sim.particles.length > 0) {
+        for (let i = sim.particles.length - 1; i >= 0; i--) {
+          sim.particles[i].life -= 1;
+          if (sim.particles[i].life <= 0) {
+            sim.particles.splice(i, 1);
+          }
+        }
+        visualChanged = true;
+      }
+
+      if (sim.invasions.length > 0) {
+        for (const inv of sim.invasions) {
+          if (inv.progress < 96) {
+            inv.progress = Math.min(96, inv.progress + 1.8);
+            visualChanged = true;
+          }
+        }
+      }
+
+      if (visualChanged) {
+        bumpRender();
+      }
+    }, 150);
+
+    return () => window.clearInterval(timer);
+  }, [screen, isRemoteGuest, bumpRender]);
 
   // Periodic Achievement Evaluator & Active Play-Time Tracker (every 1s while playing)
   useEffect(() => {
