@@ -3,6 +3,7 @@ import {
   Cloud,
   Dices,
   Globe,
+  HelpCircle,
   List,
   Loader2,
   Lock,
@@ -35,6 +36,7 @@ interface CountrySelectScreenProps {
   onOpenOnline: () => void;
   onOpenAchievements: () => void;
   achievementsUnlockedCount: number;
+  onResetTutorial: () => void;
 }
 
 const CONTINENTS: Array<'Todos' | Continent> = [
@@ -54,9 +56,11 @@ export function CountrySelectScreen({
   onOpenOnline,
   onOpenAchievements,
   achievementsUnlockedCount,
+  onResetTutorial,
 }: CountrySelectScreenProps) {
   const {
     user,
+    canAccessOnline,
     authReady,
     authBusy,
     authError,
@@ -502,6 +506,17 @@ export function CountrySelectScreen({
             <button
               onClick={() => {
                 soundEngine.playClick();
+                onResetTutorial();
+              }}
+              title="Reiniciar tutorial"
+              aria-label="Reiniciar tutorial"
+              className="w-8 h-8 bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-sky-400/70 text-sky-300 flex items-center justify-center cursor-pointer"
+            >
+              <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+            </button>
+            <button
+              onClick={() => {
+                soundEngine.playClick();
                 onOpenAchievements();
               }}
               title={`Logros (${achievementsUnlockedCount}/100)`}
@@ -515,36 +530,49 @@ export function CountrySelectScreen({
                 soundEngine.playClick();
                 onOpenOnline();
               }}
-              title="Online (En desarrollo)"
-              className="relative overflow-hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-600 text-slate-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+              title={canAccessOnline ? 'Online (Acceso de pruebas)' : 'Online (En desarrollo)'}
+              className={
+                canAccessOnline
+                  ? 'px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1 cursor-pointer'
+                  : 'relative overflow-hidden px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-600 text-slate-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer'
+              }
             >
-              <Lock className="w-3 h-3 text-amber-400 shrink-0" />
-              <span className="opacity-80">Online</span>
-              <svg
-                viewBox="0 0 68 28"
-                preserveAspectRatio="none"
-                className="pointer-events-none absolute inset-0 w-full h-full opacity-55"
-                aria-hidden="true"
-              >
-                <line
-                  x1="0"
-                  y1="26"
-                  x2="68"
-                  y2="2"
-                  stroke="#94A3B8"
-                  strokeWidth="2"
-                  strokeDasharray="4 2"
-                />
-                <line
-                  x1="0"
-                  y1="2"
-                  x2="68"
-                  y2="26"
-                  stroke="#94A3B8"
-                  strokeWidth="2"
-                  strokeDasharray="4 2"
-                />
-              </svg>
+              {canAccessOnline ? (
+                <>
+                  <Globe className="w-3 h-3 shrink-0" />
+                  <span>Online</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span className="opacity-80">Online</span>
+                  <svg
+                    viewBox="0 0 68 28"
+                    preserveAspectRatio="none"
+                    className="pointer-events-none absolute inset-0 w-full h-full opacity-55"
+                    aria-hidden="true"
+                  >
+                    <line
+                      x1="0"
+                      y1="26"
+                      x2="68"
+                      y2="2"
+                      stroke="#94A3B8"
+                      strokeWidth="2"
+                      strokeDasharray="4 2"
+                    />
+                    <line
+                      x1="0"
+                      y1="2"
+                      x2="68"
+                      y2="26"
+                      stroke="#94A3B8"
+                      strokeWidth="2"
+                      strokeDasharray="4 2"
+                    />
+                  </svg>
+                </>
+              )}
             </button>
             <PWAInstallButton compact />
           </div>

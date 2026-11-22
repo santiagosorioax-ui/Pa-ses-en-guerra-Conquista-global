@@ -22,6 +22,20 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
+export const ONLINE_TESTER_EMAILS = [
+  'santiagosorioax@gmail.com',
+  'leonelosorioa@gmail.com',
+] as const;
+
+export function isOnlineTesterUser(
+  user: { email?: string | null; emailVerified?: boolean | null } | null | undefined
+): boolean {
+  if (!user || !user.email) return false;
+  if (user.emailVerified === false) return false;
+  const normalized = user.email.trim().toLowerCase();
+  return (ONLINE_TESTER_EMAILS as readonly string[]).includes(normalized);
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

@@ -247,6 +247,14 @@ class SoundEngine {
     // 3. Eco metálico breve de alerta
     this.tone(520, 0.22, 'sawtooth', 0.026, 0.08, 220);
   }
+
+  playAntiNukeIntercept() {
+    // Bloqueo de radar + disparo interceptor + detonación defensiva en altura
+    this.tone(780, 0.07, 'sine', 0.05, 0, 1240);
+    this.tone(1180, 0.09, 'triangle', 0.055, 0.08, 1680);
+    this.tone(420, 0.16, 'sawtooth', 0.04, 0.16, 180);
+    this.tone(920, 0.18, 'sine', 0.045, 0.2, 640);
+  }
 }
 
 export const soundEngine = new SoundEngine();

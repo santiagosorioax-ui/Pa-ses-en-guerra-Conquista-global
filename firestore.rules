@@ -23,6 +23,15 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.email_verified == true;
     }
 
+    function isOnlineTester() {
+      return isVerified()
+        && request.auth.token.email is string
+        && request.auth.token.email.lower() in [
+          'santiagosorioax@gmail.com',
+          'leonelosorioa@gmail.com'
+        ];
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -394,12 +403,12 @@ service cloud.firestore {
         && (!('processedAt' in data) || data.processedAt is timestamp);
     }
 
-    // 8. Multiplayer Rooms Collection (Google-verified users only)
+    // 8. Multiplayer Rooms Collection (Allowlisted verified test accounts only)
     match /rooms/{roomCode} {
-      allow get: if isVerified() && isValidRoomCode(roomCode);
+      allow get: if isOnlineTester() && isValidRoomCode(roomCode);
       allow list: if false;
 
-      allow create: if isVerified()
+      allow create: if isOnlineTester()
         && isValidRoomCode(roomCode)
         && isValidMultiplayerRoom(incoming(), roomCode)
         && incoming().hostUid == request.auth.uid
@@ -407,7 +416,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
-      allow update: if isVerified()
+      allow update: if isOnlineTester()
         && isValidRoomCode(roomCode)
         && isValidMultiplayerRoom(incoming(), roomCode)
         && existing().hostUid == request.auth.uid
@@ -423,22 +432,22 @@ service cloud.firestore {
           (existing().status == 'playing' && incoming().status == 'finished')
         );
 
-      allow delete: if isVerified()
+      allow delete: if isOnlineTester()
         && isValidRoomCode(roomCode)
         && existing().hostUid == request.auth.uid;
 
       // Room Members Subcollection
       match /members/{memberId} {
-        allow get: if isVerified()
+        allow get: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(memberId)
           && exists(/databases/$(database)/documents/rooms/$(roomCode));
 
-        allow list: if isVerified()
+        allow list: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && existing().roomCode == roomCode;
 
-        allow create: if isVerified()
+        allow create: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(memberId)
           && memberId == request.auth.uid
@@ -453,7 +462,7 @@ service cloud.firestore {
             (incoming().isHost == false && getAfter(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid != request.auth.uid)
           );
 
-        allow update: if isVerified()
+        allow update: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(memberId)
           && memberId == request.auth.uid
@@ -466,7 +475,7 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/rooms/$(roomCode)).data.status == 'lobby'
           && incoming().diff(existing()).affectedKeys().hasOnly(['countryId', 'ready', 'displayName', 'photoUrl', 'updatedAt']);
 
-        allow delete: if isVerified()
+        allow delete: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(memberId)
           && (
@@ -477,14 +486,14 @@ service cloud.firestore {
 
       // Live World State Subcollection
       match /state/{stateId} {
-        allow get: if isVerified()
+        allow get: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && stateId == 'current'
           && exists(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid));
 
         allow list: if false;
 
-        allow create: if isVerified()
+        allow create: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && stateId == 'current'
           && isValidRoomWorldState(incoming(), roomCode)
@@ -492,7 +501,7 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid
           && incoming().updatedAt == request.time;
 
-        allow update: if isVerified()
+        allow update: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && stateId == 'current'
           && isValidRoomWorldState(incoming(), roomCode)
@@ -502,7 +511,7 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == request.auth.uid
           && incoming().updatedAt == request.time;
 
-        allow delete: if isVerified()
+        allow delete: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && stateId == 'current'
           && existing().hostUid == request.auth.uid;
@@ -510,17 +519,17 @@ service cloud.firestore {
 
       // Player Actions Subcollection
       match /actions/{actionId} {
-        allow get: if isVerified()
+        allow get: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(actionId)
           && (existing().senderUid == request.auth.uid || existing().hostUid == request.auth.uid);
 
-        allow list: if isVerified()
+        allow list: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && existing().roomCode == roomCode
           && (existing().hostUid == request.auth.uid || existing().senderUid == request.auth.uid);
 
-        allow create: if isVerified()
+        allow create: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(actionId)
           && isValidRoomAction(incoming(), roomCode)
@@ -531,7 +540,7 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/rooms/$(roomCode)).data.hostUid == incoming().hostUid
           && get(/databases/$(database)/documents/rooms/$(roomCode)/members/$(request.auth.uid)).data.countryId == incoming().actorCountryId;
 
-        allow update: if isVerified()
+        allow update: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(actionId)
           && existing().hostUid == request.auth.uid
@@ -541,7 +550,7 @@ service cloud.firestore {
           && incoming().processedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'processedAt']);
 
-        allow delete: if isVerified()
+        allow delete: if isOnlineTester()
           && isValidRoomCode(roomCode)
           && isValidId(actionId)
           && existing().hostUid == request.auth.uid;

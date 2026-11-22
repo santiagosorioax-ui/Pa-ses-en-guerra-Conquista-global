@@ -8,6 +8,7 @@ import {
   GitFork,
   Handshake,
   Pickaxe,
+  Radar,
   Radiation,
   ScrollText,
   Shield,
@@ -18,6 +19,8 @@ import {
 import { getCountryGenealogyTree } from '../data/countryTrees';
 import type { DeviceMode } from './DeviceModeScreen';
 import {
+  ANTI_NUKE_COST,
+  ANTI_NUKE_RADIUS,
   ARMY_RECRUIT_AMOUNT,
   ARMY_RECRUIT_COST,
   CITY_INCOME,
@@ -70,6 +73,8 @@ interface CommandDrawerProps {
   onExecuteAction: (action: GameActionPayload) => Promise<GameActionResult> | GameActionResult;
   placingDefense: boolean;
   onTogglePlaceDefense: () => void;
+  placingAntiNuke: boolean;
+  onTogglePlaceAntiNuke: () => void;
   launchingNuke: boolean;
   onToggleLaunchNuke: () => void;
   defenseFeedback: { text: string; ok: boolean } | null;
@@ -88,6 +93,8 @@ export function CommandDrawer({
   onExecuteAction,
   placingDefense,
   onTogglePlaceDefense,
+  placingAntiNuke,
+  onTogglePlaceAntiNuke,
   launchingNuke,
   onToggleLaunchNuke,
   defenseFeedback,
@@ -386,7 +393,13 @@ export function CommandDrawer({
               </button>
 
               <button
-                onClick={() => void runAction({ type: 'build_port', towardsId: inspected?.id })}
+                onClick={() =>
+                  void runAction(
+                    inspected
+                      ? { type: 'build_port', towardsId: inspected.id }
+                      : { type: 'build_port' }
+                  )
+                }
                 disabled={busy || !player.alive || !canBuildPort}
                 className="w-full p-2.5 bg-[#0B121E] hover:bg-slate-800/80 disabled:opacity-45 border border-slate-800 flex items-center justify-between text-left cursor-pointer"
               >
@@ -439,6 +452,38 @@ export function CommandDrawer({
                 </div>
                 <span className="font-mono-num text-xs text-amber-300 font-semibold shrink-0">
                   {placingDefense ? 'Cancelar' : `$${DEFENSE_COST}`}
+                </span>
+              </button>
+
+              <button
+                disabled={busy || !player.alive}
+                onClick={() => {
+                  setFeedback(null);
+                  onTogglePlaceAntiNuke();
+                }}
+                className={`w-full p-2.5 border flex items-center justify-between text-left cursor-pointer transition-colors disabled:opacity-45 ${
+                  placingAntiNuke
+                    ? 'bg-cyan-950/75 border-cyan-400'
+                    : 'bg-[#0B121E] hover:bg-slate-800/80 border-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Radar className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-100 truncate">
+                      {placingAntiNuke
+                        ? 'Colocando Antibombas (Toca en el mapa)'
+                        : `Antibombas (${player.antiNukes.length})`}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {placingAntiNuke
+                        ? 'Toca en tu territorio o pulsa Esc para cancelar'
+                        : `Radar ${ANTI_NUKE_RADIUS * 10} km (mayor que Defensa) · Intercepta bombas nucleares`}
+                    </div>
+                  </div>
+                </div>
+                <span className="font-mono-num text-xs text-cyan-300 font-semibold shrink-0 ml-2">
+                  {placingAntiNuke ? 'Cancelar' : `$${ANTI_NUKE_COST.toLocaleString('es-ES')}`}
                 </span>
               </button>
 

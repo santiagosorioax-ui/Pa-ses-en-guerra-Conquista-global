@@ -40,6 +40,7 @@ export interface SerializedCountry {
   citiesBuiltThisMonth: number;
   ports: PortCoord[];
   defenses: DefenseCoord[];
+  antiNukes?: DefenseCoord[];
   aggressiveExpansion: number;
   aiDoctrine: AiDoctrine;
   bboxMinX: number;
@@ -220,6 +221,9 @@ function serializeCountries(sim: SimulationState): SerializedCountry[] {
     citiesBuiltThisMonth: c.citiesBuiltThisMonth,
     ports: c.ports.slice(0, 32).map((p) => ({ x: p.x, y: p.y, nx: p.nx, ny: p.ny })),
     defenses: c.defenses.slice(0, 32).map((d) => ({ x: d.x, y: d.y, radius: d.radius })),
+    ...(c.antiNukes && c.antiNukes.length > 0
+      ? { antiNukes: c.antiNukes.slice(0, 16).map((a) => ({ x: a.x, y: a.y, radius: a.radius })) }
+      : {}),
     aggressiveExpansion: c.aggressiveExpansion,
     aiDoctrine: c.aiDoctrine,
     bboxMinX: c.bboxMinX,
@@ -304,6 +308,7 @@ function hydrateCountries(
       citiesBuiltThisMonth: sc.citiesBuiltThisMonth,
       ports: (sc.ports ?? []).map((p) => ({ ...p })),
       defenses: (sc.defenses ?? []).map((d) => ({ ...d })),
+      antiNukes: (sc.antiNukes ?? []).map((a) => ({ ...a })),
       aggressiveExpansion: sc.aggressiveExpansion,
       aiDoctrine: sc.aiDoctrine,
       color: seed.color,
@@ -425,6 +430,7 @@ export function restoreSimulationFromSnapshot(
       ...w,
     })),
     invasions: ((raw.invasions as NavalInvasion[]) ?? []).map((inv) => ({ ...inv })),
+    nukeIntercepts: [],
     particles: [],
     chronicle: ((raw.chronicle as ChronicleEntry[]) ?? []).map((entry) => ({ ...entry })),
     playerHistory: ((raw.playerHistory as PlayerHistoryPoint[]) ?? []).map((pt) => ({ ...pt })),
@@ -582,6 +588,7 @@ export function restoreRoomWorldState(
       ...w,
     })),
     invasions: ((raw.invasions as NavalInvasion[]) ?? []).map((inv) => ({ ...inv })),
+    nukeIntercepts: [],
     particles: [],
     chronicle: ((raw.chronicle as ChronicleEntry[]) ?? []).map((entry) => ({ ...entry })),
     playerHistory: nextHistory,

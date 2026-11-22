@@ -11,27 +11,30 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
-
+import { ARMY_RECRUIT_AMOUNT, ARMY_RECRUIT_COST } from '../engine/gameSimulation';
 import type { DeviceMode } from './DeviceModeScreen';
 
 interface TutorialOverlayProps {
-  countryName: string;
+  countryName?: string;
   deviceMode?: DeviceMode;
+  isMainMenuPreview?: boolean;
   onFinish: () => void;
 }
 
 export function TutorialOverlay({
   countryName,
-  deviceMode = 'desktop',
+  deviceMode = 'mobile',
+  isMainMenuPreview = false,
   onFinish,
 }: TutorialOverlayProps) {
   const [step, setStep] = useState(0);
   const isMobile = deviceMode === 'mobile';
+  const nationTitle = countryName ? `Bienvenido al mando de ${countryName}` : 'Guía básica de campaña';
 
   const steps = [
     {
       badge: 'Paso 1 de 3 · Navegación',
-      title: `Bienvenido al mando de ${countryName}`,
+      title: nationTitle,
       subtitle: 'Controles básicos para explorar el mapa mundial en tiempo real.',
       icon: Compass,
       items: [
@@ -58,7 +61,7 @@ export function TutorialOverlay({
       ],
     },
     {
-      badge: 'Paso 2 de 3 · Economía y Minas',
+      badge: 'Paso 2 de 3 · Gestión Económica',
       title: 'Genera dinero cada segundo',
       subtitle: isMobile
         ? 'Abre la pestaña inferior «Mando» para construir y fortalecer tu economía.'
@@ -69,35 +72,35 @@ export function TutorialOverlay({
           icon: Pickaxe,
           color: 'text-amber-400',
           label: 'Minas de Oro y Ciudades',
-          desc: 'Las Minas de Oro (máx. 1/mes) y Ciudades (máx. 1/mes) aumentan tu ingreso por segundo; las Ciudades además amplían tu capacidad militar.',
+          desc: 'Las Minas de Oro (máx. 1/mes) y Ciudades (máx. 1/mes) aumentan tu ingreso por segundo. Las Ciudades además amplían tu capacidad militar y reserva máxima.',
         },
         {
           icon: Coins,
           color: 'text-emerald-400',
           label: 'Puertos y Defensas',
-          desc: 'Construye Puertos hacia un objetivo para atacar por mar y coloca Defensas para proteger tu territorio.',
+          desc: 'Construye Puertos en tu costa para invadir países por mar y coloca Defensas en tu territorio para frenar ataques enemigos y proteger tus fronteras.',
         },
       ],
     },
     {
-      badge: 'Paso 3 de 3 · Ejército y Diplomacia',
+      badge: 'Paso 3 de 3 · Gestión Militar y Diplomacia',
       title: 'Recluta soldados, alíate o conquista',
-      subtitle: 'La fuerza numérica y tus alianzas deciden cada guerra.',
+      subtitle: 'Tu ejército, capacidad militar y alianzas deciden cada guerra.',
       icon: Swords,
       items: [
         {
           icon: Swords,
           color: 'text-rose-400',
-          label: 'Gestión del Ejército ($120 = +20 soldados)',
+          label: `Ejército ($${ARMY_RECRUIT_COST} = +${ARMY_RECRUIT_AMOUNT} soldados · Botón «Max»)`,
           desc: isMobile
-            ? 'Toca «Mando» → «Ejército» para reclutar tropas (con cupo mensual y límite militar). Capturar una capital enemiga reduce 30% de su ejército.'
-            : 'Pulsa «Ejército» en el panel Mando para reclutar tropas (con cupo mensual y límite militar). Capturar una capital enemiga reduce 30% de su ejército.',
+            ? 'Toca «Mando» → «Ejército» para reclutar tropas o pulsa «Max» para invertir todo tu dinero disponible hasta llenar tu capacidad militar. Capturar una capital enemiga reduce 30% de su ejército.'
+            : 'Pulsa «Ejército» en el panel Mando para reclutar tropas o «Max» para invertir todo tu dinero hasta tu capacidad militar. Capturar una capital enemiga reduce 30% de su ejército.',
         },
         {
           icon: Shield,
           color: 'text-sky-400',
           label: isMobile ? 'Toca cualquier país en el mapa' : 'Haz clic en cualquier país',
-          desc: 'Verás su bandera, capital y botones para Atacar, enviar dinero (+1 relación por $100), formar Alianza o Pedir ayuda.',
+          desc: 'Verás su bandera, capital y opciones para Atacar, enviar dinero (+1 relación por $100), formar Alianzas o ver su Árbol Genealógico para conquistar imperios gratis.',
         },
       ],
     },
@@ -108,7 +111,11 @@ export function TutorialOverlay({
   const isLast = step === steps.length - 1;
 
   return (
-    <div className="absolute inset-0 z-40 bg-[#07101D]/65 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-4">
+    <div
+      className={`${
+        isMainMenuPreview ? 'fixed' : 'absolute'
+      } inset-0 z-[80] bg-[#07101D]/70 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-4`}
+    >
       <div className="w-full max-w-lg max-h-[88vh] overflow-y-auto bg-[#111B2B]/98 border border-amber-500/60 shadow-2xl p-4 sm:p-5 space-y-3.5 sm:space-y-4">
         {/* Top bar: step badge & skip */}
         <div className="flex items-center justify-between gap-2 sm:gap-3 border-b border-slate-800 pb-3">
@@ -127,12 +134,18 @@ export function TutorialOverlay({
           <button
             onClick={onFinish}
             className="px-2.5 py-1.5 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1 shrink-0 cursor-pointer"
-            title="Saltar tutorial (Esc)"
+            title="Cerrar tutorial (Esc)"
           >
-            <span>Saltar</span>
+            <span>{isMainMenuPreview ? 'Cerrar' : 'Saltar'}</span>
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {isMainMenuPreview && (
+          <div className="px-3 py-2 bg-emerald-950/45 border border-emerald-700/60 text-[11px] text-emerald-200">
+            Tutorial reiniciado: también volverá a mostrarse automáticamente al comenzar tu próxima campaña.
+          </div>
+        )}
 
         <p className="text-xs text-slate-300">{current.subtitle}</p>
 
@@ -171,12 +184,14 @@ export function TutorialOverlay({
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={onFinish}
-              className="hidden sm:inline-block px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
-            >
-              Saltar tutorial
-            </button>
+            {!isMainMenuPreview && (
+              <button
+                onClick={onFinish}
+                className="hidden sm:inline-block px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                Saltar tutorial
+              </button>
+            )}
 
             {step > 0 && (
               <button
@@ -201,7 +216,7 @@ export function TutorialOverlay({
                 onClick={onFinish}
                 className="px-4 py-2 sm:py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer"
               >
-                ¡Entendido, a jugar!
+                {isMainMenuPreview ? '¡Listo!' : '¡Entendido, a jugar!'}
               </button>
             )}
           </div>

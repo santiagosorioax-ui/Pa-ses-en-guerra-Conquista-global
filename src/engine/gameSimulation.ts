@@ -51,6 +51,17 @@ export interface NukeStrikeRecord {
   totalDays: number;
 }
 
+export interface NukeInterceptRecord {
+  id: number;
+  defenderId: number;
+  attackerId: number;
+  fromX: number;
+  fromY: number;
+  targetX: number;
+  targetY: number;
+  totalDays: number;
+}
+
 export interface CountryState {
   id: number;
   seed: CountrySeed;
@@ -72,6 +83,7 @@ export interface CountryState {
   citiesBuiltThisMonth: number;
   ports: PortCoord[];
   defenses: DefenseCoord[];
+  antiNukes: DefenseCoord[];
   aggressiveExpansion: number;
   aiDoctrine: AiDoctrine;
   color: [number, number, number];
@@ -177,6 +189,7 @@ export interface SimulationState {
   truceMonths: Int16Array; // N*N
   wars: Array<{ a: number; b: number; startTotalDays: number }>;
   invasions: NavalInvasion[];
+  nukeIntercepts: NukeInterceptRecord[];
   particles: BattleParticle[];
   chronicle: ChronicleEntry[];
   playerHistory: PlayerHistoryPoint[];
@@ -219,6 +232,8 @@ export const MAX_CITIES_TOTAL = 50;
 export const DEFENSE_COST = 120;
 export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
+export const ANTI_NUKE_COST = 10000;
+export const ANTI_NUKE_RADIUS = 36; // radar más grande que la defensa (360 km vs 240 km)
 export const NUKE_COST = 1200;
 export const NUKE_RADIUS = 19; // un poco menos radio que la defensa (24 -> 19)
 export const NUKE_COOLDOWN_DAYS = 90; // 3 meses de recarga entre lanzamientos
@@ -530,6 +545,7 @@ export function createSimulation(
       citiesBuiltThisMonth: 0,
       ports: [],
       defenses: [],
+      antiNukes: [],
       aggressiveExpansion: 0,
       aiDoctrine: seed.military >= 65 && seed.id % 3 !== 0 ? 'expansionist' : 'diplomatic',
       color: mapData.countryColors[seed.id],
@@ -673,6 +689,7 @@ export function createSimulation(
     truceMonths,
     wars: [],
     invasions: [],
+    nukeIntercepts: [],
     particles: [],
     chronicle: [],
     playerHistory: [],
@@ -763,6 +780,16 @@ export function declareWar(
   setTreatyFlag(sim, attackerId, defenderId, TREATY_WAR, true);
   setRelation(sim, attackerId, defenderId, Math.min(15, getRelation(sim, attackerId, defenderId) - 40));
 
+  if (sim.diplomaticOffers.length > 0) {
+    sim.diplomaticOffers = sim.diplomaticOffers.filter(
+      (o) =>
+        !(
+          (o.fromCountryId === attackerId && o.toCountryId === defenderId) ||
+          (o.fromCountryId === defenderId && o.toCountryId === attackerId)
+        )
+    );
+  }
+
   att.capitalLostPenaltyDone = false;
   def.capitalLostPenaltyDone = false;
 
@@ -791,7 +818,18 @@ export function declareWar(
     if (allyId === attackerId) continue;
     if (!hasTreaty(sim, allyId, attackerId, TREATY_WAR) && !hasTreaty(sim, allyId, attackerId, TREATY_ALLIANCE)) {
       setTreatyFlag(sim, allyId, attackerId, TREATY_WAR, true);
+      sim.truceMonths[idxPair(allyId, attackerId)] = 0;
+      sim.truceMonths[idxPair(attackerId, allyId)] = 0;
       setRelation(sim, allyId, attackerId, 10);
+      if (sim.diplomaticOffers.length > 0) {
+        sim.diplomaticOffers = sim.diplomaticOffers.filter(
+          (o) =>
+            !(
+              (o.fromCountryId === allyId && o.toCountryId === attackerId) ||
+              (o.fromCountryId === attackerId && o.toCountryId === allyId)
+            )
+        );
+      }
       sim.wars.push({ a: allyId, b: attackerId, startTotalDays: sim.totalDays });
       pushChronicle(
         sim,
@@ -825,6 +863,16 @@ export function makePeace(
         (inv.attackerId === bId && inv.defenderId === aId)
       )
   );
+  if (sim.diplomaticOffers.length > 0) {
+    sim.diplomaticOffers = sim.diplomaticOffers.filter(
+      (o) =>
+        !(
+          o.type === 'peace' &&
+          ((o.fromCountryId === aId && o.toCountryId === bId) ||
+            (o.fromCountryId === bId && o.toCountryId === aId))
+        )
+    );
+  }
   sim.countries[aId].capitalLostPenaltyDone = false;
   sim.countries[bId].capitalLostPenaltyDone = false;
   addRelation(sim, aId, bId, 15);
@@ -878,7 +926,7 @@ export function proposeAlliance(
         type: 'alliance',
       },
     ];
-    soundEngine.playClick();
+    if (fromId === sim.playerId) soundEngine.playClick();
     return {
       accepted: false,
       pendingHuman: true,
@@ -903,7 +951,7 @@ export function proposeAlliance(
     };
   }
 
-  soundEngine.playClick();
+  if (fromId === sim.playerId) soundEngine.playClick();
   return {
     accepted: false,
     reason: `${getCountryName(to)} rechaza la alianza (relación ${rel}/100, requiere ${ALLIANCE_REL_THRESHOLD}/100).`,
@@ -941,7 +989,7 @@ export function sendDiplomaticGift(
   from.money -= cost;
   to.money = Math.min(getMoneyCap(to), to.money + cost);
   addRelation(sim, fromId, toId, actualPoints);
-  soundEngine.playClick();
+  if (fromId === sim.playerId) soundEngine.playClick();
   return { ok: true, gained: actualPoints };
 }
 
@@ -1135,13 +1183,20 @@ export function respondToHumanDiplomaticOffer(
 
   if (!accept) {
     addRelation(sim, offer.fromCountryId, offer.toCountryId, -4);
-    soundEngine.playClick();
+    if (responderCountryId === sim.playerId) soundEngine.playClick();
     return;
   }
 
   if (offer.type === 'peace') {
+    if (!hasTreaty(sim, offer.fromCountryId, offer.toCountryId, TREATY_WAR)) return;
     makePeace(sim, offer.fromCountryId, offer.toCountryId);
   } else if (offer.type === 'alliance') {
+    if (
+      hasTreaty(sim, offer.fromCountryId, offer.toCountryId, TREATY_WAR) ||
+      hasTreaty(sim, offer.fromCountryId, offer.toCountryId, TREATY_ALLIANCE)
+    ) {
+      return;
+    }
     setTreatyFlag(sim, offer.fromCountryId, offer.toCountryId, TREATY_ALLIANCE, true);
     addRelation(sim, offer.fromCountryId, offer.toCountryId, 12);
     pushChronicle(
@@ -1154,9 +1209,16 @@ export function respondToHumanDiplomaticOffer(
       soundEngine.playAllianceFormed();
     }
   } else if (offer.type === 'alliance_help') {
+    if (
+      !hasTreaty(sim, offer.fromCountryId, offer.toCountryId, TREATY_ALLIANCE) ||
+      hasTreaty(sim, offer.fromCountryId, offer.toCountryId, TREATY_WAR)
+    ) {
+      return;
+    }
     const enemies = getEnemies(sim, offer.fromCountryId);
     let joined = false;
     for (const eid of enemies) {
+      if (eid === offer.toCountryId) continue;
       if (!hasTreaty(sim, offer.toCountryId, eid, TREATY_WAR)) {
         setTreatyFlag(sim, offer.toCountryId, eid, TREATY_ALLIANCE, false);
         setTreatyFlag(sim, offer.toCountryId, eid, TREATY_WAR, true);
@@ -1177,7 +1239,9 @@ export function respondToHumanDiplomaticOffer(
         `¡${getCountryName(to)} entra en la guerra en apoyo de su aliado ${getCountryName(from)}!`,
         offer.toCountryId
       );
-      soundEngine.playAllyJoinedWar();
+      if (offer.fromCountryId === sim.playerId || offer.toCountryId === sim.playerId) {
+        soundEngine.playAllyJoinedWar();
+      }
     }
   }
 }
@@ -1801,6 +1865,33 @@ export function buildDefenseAt(
   return null;
 }
 
+export function buildAntiNukeAt(
+  sim: SimulationState,
+  countryId: number,
+  x: number,
+  y: number
+): string | null {
+  const c = sim.countries[countryId];
+  if (!c || !c.alive) return 'País inactivo.';
+  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) {
+    return 'Posición fuera del mapa.';
+  }
+  if (sim.ownerGrid[y * MAP_W + x] !== countryId) {
+    return 'Debes colocar el Antibombas dentro de tu propio territorio.';
+  }
+  if (c.antiNukes.some((a) => Math.hypot(a.x - x, a.y - y) < 8)) {
+    return 'Ya existe un Antibombas muy cerca de ese punto.';
+  }
+  if (c.money < ANTI_NUKE_COST) {
+    return `Necesitas $${ANTI_NUKE_COST.toLocaleString('es-ES')} para construir un Antibombas.`;
+  }
+
+  c.money -= ANTI_NUKE_COST;
+  c.antiNukes.push({ x, y, radius: ANTI_NUKE_RADIUS });
+  if (countryId === sim.playerId) soundEngine.playBuildStructure('defense');
+  return null;
+}
+
 export function isPixelIrradiated(sim: SimulationState, px: number, py: number): boolean {
   for (const c of sim.countries) {
     const s = c.lastNukeStrike;
@@ -1879,6 +1970,95 @@ export function launchNukeAt(
     return {
       ok: false,
       message: 'Debes apuntar a territorio extranjero enemigo o neutral (no al océano).',
+    };
+  }
+
+  // Check if any hostile/defending nation's Antibombas radar intercepts the incoming nuclear warhead
+  let interceptor: { defenderId: number; station: DefenseCoord; distSq: number } | null = null;
+  for (const other of sim.countries) {
+    if (!other.alive || other.id === attackerId || other.antiNukes.length === 0) continue;
+    if (hasTreaty(sim, attackerId, other.id, TREATY_ALLIANCE)) continue;
+    for (const an of other.antiNukes) {
+      // Only operational if the defender still controls the station tile
+      if (sim.ownerGrid[an.y * MAP_W + an.x] !== other.id) continue;
+      const dx = an.x - x;
+      const dy = an.y - y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq <= an.radius * an.radius) {
+        if (!interceptor || dSq < interceptor.distSq) {
+          interceptor = { defenderId: other.id, station: an, distSq: dSq };
+        }
+      }
+    }
+  }
+
+  if (interceptor) {
+    const def = sim.countries[interceptor.defenderId];
+    att.money = Math.max(0, att.money - NUKE_COST);
+    att.nukeCooldownDays = NUKE_COOLDOWN_DAYS;
+    att.aggressiveExpansion = Math.min(100, att.aggressiveExpansion + 8);
+    sim.globalTension = Math.min(100, sim.globalTension + 5);
+
+    sim.nukeIntercepts = [
+      ...sim.nukeIntercepts.filter((r) => sim.totalDays - r.totalDays <= 12).slice(-11),
+      {
+        id: sim.nextIdCounter++,
+        defenderId: def.id,
+        attackerId,
+        fromX: interceptor.station.x,
+        fromY: interceptor.station.y,
+        targetX: x,
+        targetY: y,
+        totalDays: sim.totalDays,
+      },
+    ];
+
+    // Attempting a nuclear launch still triggers war & diplomatic fallout with the targeted nation
+    const affectedIds = new Set<number>([def.id]);
+    if (centerOwner >= 0 && centerOwner !== attackerId && !hasTreaty(sim, attackerId, centerOwner, TREATY_ALLIANCE)) {
+      affectedIds.add(centerOwner);
+    }
+    for (const tid of affectedIds) {
+      addRelation(sim, attackerId, tid, -25);
+      if (!hasTreaty(sim, attackerId, tid, TREATY_WAR)) {
+        sim.truceMonths[idxPair(attackerId, tid)] = 0;
+        sim.truceMonths[idxPair(tid, attackerId)] = 0;
+        setTreatyFlag(sim, attackerId, tid, TREATY_WAR, true);
+        sim.wars.push({ a: attackerId, b: tid, startTotalDays: sim.totalDays });
+      }
+    }
+
+    // Cyan defensive interception particles at target point
+    for (let i = 0; i < 24; i++) {
+      const angle = (Math.PI * 2 * i) / 24 + Math.random() * 0.15;
+      const dist = Math.random() * 8;
+      const px = Math.max(0, Math.min(MAP_W - 1, Math.round(x + Math.cos(angle) * dist)));
+      const py = Math.max(0, Math.min(MAP_H - 1, Math.round(y + Math.sin(angle) * dist)));
+      sim.particles.push({
+        x: px,
+        y: py,
+        r: i % 3 === 0 ? 224 : 34,
+        g: i % 3 === 0 ? 242 : 211,
+        b: i % 3 === 0 ? 254 : 238,
+        life: 12,
+        maxLife: 12,
+      });
+    }
+
+    pushChronicle(
+      sim,
+      'event',
+      `¡ANTIBOMBAS! El radar de ${getCountryName(def)} interceptó y destruyó en el aire la bomba nuclear de ${getCountryName(att)}.`,
+      def.id
+    );
+
+    if (attackerId === sim.playerId || def.id === sim.playerId || hitCounts.has(sim.playerId)) {
+      soundEngine.playAntiNukeIntercept();
+    }
+
+    return {
+      ok: true,
+      message: `¡Bomba nuclear interceptada! El radar Antibombas de ${getCountryName(def)} derribó el misil sin daños.`,
     };
   }
 
@@ -2000,7 +2180,9 @@ export function launchNukeAt(
     attackerId
   );
 
-  soundEngine.playNuclearExplosion();
+  if (attackerId === sim.playerId || hitCounts.has(sim.playerId)) {
+    soundEngine.playNuclearExplosion();
+  }
 
   return {
     ok: true,
@@ -2840,6 +3022,7 @@ function processFrontlineBattles(sim: SimulationState) {
     l.pixels = 0;
     l.ports = [];
     l.defenses = [];
+    l.antiNukes = [];
     l.annexedById = winner;
     l.rebelUnrest = 0;
 
@@ -2875,6 +3058,11 @@ function processFrontlineBattles(sim: SimulationState) {
     }
     sim.wars = sim.wars.filter((war) => war.a !== loser && war.b !== loser);
     sim.invasions = sim.invasions.filter((inv) => inv.attackerId !== loser && inv.defenderId !== loser);
+    if (sim.diplomaticOffers.length > 0) {
+      sim.diplomaticOffers = sim.diplomaticOffers.filter(
+        (o) => o.fromCountryId !== loser && o.toCountryId !== loser
+      );
+    }
 
     pushChronicle(
       sim,
@@ -2939,6 +3127,47 @@ function getAiCandidates(sim: SimulationState, c: CountryState): number[] {
   return Array.from(set);
 }
 
+function pickAiNukeTarget(sim: SimulationState, enemy: CountryState): { x: number; y: number } | null {
+  if (!enemy.alive || enemy.pixels <= 0) return null;
+
+  const isCoveredByEnemyAntiNuke = (tx: number, ty: number) =>
+    enemy.antiNukes.some(
+      (an) =>
+        sim.ownerGrid[an.y * MAP_W + an.x] === enemy.id &&
+        (an.x - tx) ** 2 + (an.y - ty) ** 2 <= an.radius * an.radius
+    );
+
+  // Prefer enemy capital if still held by enemy (with slight evasion against anti-nuke,
+  // while still hitting the capital most of the time so defensive radars intercept visibly)
+  if (sim.ownerGrid[enemy.capitalY * MAP_W + enemy.capitalX] === enemy.id) {
+    if (!isCoveredByEnemyAntiNuke(enemy.capitalX, enemy.capitalY) || Math.random() < 0.65) {
+      return { x: enemy.capitalX, y: enemy.capitalY };
+    }
+  }
+
+  // Otherwise try enemy defense cluster or random owned territory tile
+  for (const def of enemy.defenses) {
+    if (sim.ownerGrid[def.y * MAP_W + def.x] === enemy.id && !isCoveredByEnemyAntiNuke(def.x, def.y)) {
+      return { x: def.x, y: def.y };
+    }
+  }
+
+  const w = Math.max(1, enemy.bboxMaxX - enemy.bboxMinX + 1);
+  const h = Math.max(1, enemy.bboxMaxY - enemy.bboxMinY + 1);
+  let fallback: { x: number; y: number } | null = null;
+  for (let tries = 0; tries < 28; tries++) {
+    const rx = Math.max(0, Math.min(MAP_W - 1, enemy.bboxMinX + Math.floor(Math.random() * w)));
+    const ry = Math.max(0, Math.min(MAP_H - 1, enemy.bboxMinY + Math.floor(Math.random() * h)));
+    if (sim.ownerGrid[ry * MAP_W + rx] === enemy.id) {
+      if (!isCoveredByEnemyAntiNuke(rx, ry)) {
+        return { x: rx, y: ry };
+      }
+      fallback = { x: rx, y: ry };
+    }
+  }
+  return fallback;
+}
+
 function runAiAgentDecision(sim: SimulationState, c: CountryState) {
   if (!c.alive || c.id === sim.playerId) return;
 
@@ -2948,6 +3177,44 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
   // 1. Improve army and build economy over time (respecting supply & monthly build limits)
   const armyCap = getArmyCap(c);
   if (atWar) {
+    // 1a. Autonomous AI Nuclear Strike decision when at war and nuclear-capable
+    if (
+      (c.nukeCooldownDays ?? 0) <= 0 &&
+      c.money >= NUKE_COST &&
+      sim.totalDays >= 150
+    ) {
+      const targetEnemyId = enemies[Math.floor(Math.random() * enemies.length)];
+      const enemy = sim.countries[targetEnemyId];
+      const war = sim.wars.find(
+        (w) =>
+          (w.a === c.id && w.b === targetEnemyId) ||
+          (w.a === targetEnemyId && w.b === c.id)
+      );
+      const warDuration = war ? sim.totalDays - war.startTotalDays : 0;
+      const underPressure =
+        enemy && (enemy.army >= c.army * 0.85 || c.pixels < c.initialPixels * 0.8);
+      const strikeChance = underPressure
+        ? 0.13
+        : c.aiDoctrine === 'expansionist'
+          ? 0.075
+          : 0.04;
+
+      if (
+        enemy &&
+        enemy.alive &&
+        (warDuration >= 25 || underPressure) &&
+        Math.random() < strikeChance
+      ) {
+        const coords = pickAiNukeTarget(sim, enemy);
+        if (coords) {
+          const strikeRes = launchNukeAt(sim, c.id, coords.x, coords.y);
+          if (strikeRes.ok) {
+            return;
+          }
+        }
+      }
+    }
+
     let recruits = 0;
     while (recruits < 3 && c.army < armyCap && c.money >= ARMY_RECRUIT_COST) {
       c.money -= ARMY_RECRUIT_COST;
@@ -2985,6 +3252,13 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
     }
     if (c.defenses.length < 3 && c.money >= DEFENSE_COST && Math.random() < 0.14) {
       buildDefenseAt(sim, c.id, c.capitalX, c.capitalY);
+    }
+    if (
+      c.antiNukes.length < 2 &&
+      c.money >= ANTI_NUKE_COST + 400 &&
+      Math.random() < 0.15
+    ) {
+      buildAntiNukeAt(sim, c.id, c.capitalX, c.capitalY);
     }
     // AI nations gradually advance their own historical genealogical tree
     if (Math.random() < 0.08) {

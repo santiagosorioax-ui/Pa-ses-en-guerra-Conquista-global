@@ -5,12 +5,12 @@ import {
   Crown,
   Globe,
   Loader2,
+  Lock,
   LogIn,
-  Monitor,
+  LogOut,
   Play,
   Plus,
   Search,
-  Smartphone,
   Users,
   ArrowLeft,
   DoorOpen,
@@ -63,7 +63,8 @@ export function OnlineLobbyScreen({
   onHostStartMatch,
   onBack,
 }: OnlineLobbyScreenProps) {
-  const { user, authReady, authBusy, authError, signInWithGoogle } = useFirebase();
+  const { user, canAccessOnline, authReady, authBusy, authError, signInWithGoogle, signOutUser } =
+    useFirebase();
 
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [showJoinBox, setShowJoinBox] = useState(false);
@@ -101,10 +102,28 @@ export function OnlineLobbyScreen({
     [members, user?.uid]
   );
 
+  const duplicateCountryIds = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const m of members) {
+      if (m.countryId >= 0) {
+        counts.set(m.countryId, (counts.get(m.countryId) ?? 0) + 1);
+      }
+    }
+    const dups = new Set<number>();
+    for (const [cid, count] of counts.entries()) {
+      if (count > 1) dups.add(cid);
+    }
+    return dups;
+  }, [members]);
+
+  const hasDuplicateCountry = duplicateCountryIds.size > 0;
   const isHost = Boolean(
     user && ((room && room.hostUid === user.uid) || myMember?.isHost)
   );
-  const allPicked = members.length > 0 && members.every((m) => m.countryId >= 0);
+  const allPicked =
+    members.length > 0 &&
+    members.every((m) => m.countryId >= 0) &&
+    !hasDuplicateCountry;
 
   const handleCreateRoom = async () => {
     if (!user) return;
@@ -173,45 +192,6 @@ export function OnlineLobbyScreen({
   const isMobile = deviceMode === 'mobile';
   const myPickedCountry =
     myMember && myMember.countryId >= 0 ? COUNTRIES_195[myMember.countryId] : null;
-
-  const renderDeviceSwitcher = () => (
-    <div
-      className="flex items-center bg-[#0B121E] border border-slate-700 p-0.5 shrink-0"
-      role="group"
-      aria-label="Modo de pantalla"
-    >
-      <button
-        onClick={() => {
-          soundEngine.playClick();
-          onChangeDeviceMode('desktop');
-        }}
-        title="Modo Computador"
-        className={`px-2 sm:px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
-          deviceMode === 'desktop'
-            ? 'bg-amber-500 text-slate-950'
-            : 'text-slate-400 hover:text-white'
-        }`}
-      >
-        <Monitor className="w-3.5 h-3.5 shrink-0" />
-        <span>PC</span>
-      </button>
-      <button
-        onClick={() => {
-          soundEngine.playClick();
-          onChangeDeviceMode('mobile');
-        }}
-        title="Modo Celular"
-        className={`px-2 sm:px-2.5 py-1.5 text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap ${
-          deviceMode === 'mobile'
-            ? 'bg-sky-500 text-slate-950'
-            : 'text-slate-400 hover:text-white'
-        }`}
-      >
-        <Smartphone className="w-3.5 h-3.5 shrink-0" />
-        <span>Celular</span>
-      </button>
-    </div>
-  );
 
   const renderRoomCodeCard = (compact = false) => (
     <div
@@ -494,7 +474,6 @@ export function OnlineLobbyScreen({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {renderDeviceSwitcher()}
           {user && (
             <div className="flex items-center gap-2 bg-[#0B121E] border border-slate-800 px-2 py-1">
               {user.photoURL && (
@@ -506,18 +485,27 @@ export function OnlineLobbyScreen({
               )}
               <span
                 className={`text-xs font-medium text-slate-200 truncate ${
-                  isMobile ? 'hidden sm:inline max-w-[90px]' : 'max-w-[115px]'
+                  isMobile ? 'hidden sm:inline max-w-[110px]' : 'max-w-[130px]'
                 }`}
               >
                 {user.displayName || 'Comandante'}
               </span>
+              <button
+                type="button"
+                onClick={() => void signOutUser()}
+                disabled={authBusy}
+                title="Cambiar cuenta"
+                className="p-0.5 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
         </div>
       </header>
 
       {/* Mobile Waiting Room Navigation Tabs */}
-      {user && roomCode && isMobile && (
+      {user && canAccessOnline && roomCode && isMobile && (
         <div className="grid grid-cols-2 border-b border-slate-800 bg-[#0E1726] shrink-0">
           <button
             onClick={() => {
@@ -603,6 +591,48 @@ export function OnlineLobbyScreen({
                 )}
                 <span>Iniciar sesión con Google</span>
               </button>
+            </div>
+          </div>
+        ) : !canAccessOnline ? (
+          /* Restricted Testing Gate for non-allowlisted accounts */
+          <div className="flex-1 flex items-center justify-center p-3">
+            <div className="w-full max-w-md bg-[#111B2B] border border-amber-500/60 p-5 sm:p-6 space-y-5 text-center shadow-2xl">
+              <div className="w-14 h-14 mx-auto bg-amber-500/15 border border-amber-500/50 flex items-center justify-center text-amber-400">
+                <Lock className="w-7 h-7" />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-lg sm:text-xl font-extrabold text-white">
+                  El modo online está en desarrollo
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                  Actualmente el multijugador está en fase de pruebas privadas y solo está habilitado para cuentas autorizadas.
+                </p>
+                {user.email && (
+                  <p className="text-[11px] font-mono-num text-slate-400">
+                    Sesión actual: {user.email}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="min-h-[42px] py-2.5 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs cursor-pointer"
+                >
+                  Volver
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await signOutUser();
+                    await signInWithGoogle();
+                  }}
+                  disabled={authBusy}
+                  className="min-h-[42px] py-2.5 px-3 bg-sky-600 hover:bg-sky-500 disabled:opacity-60 text-white font-semibold text-xs cursor-pointer"
+                >
+                  Cambiar cuenta
+                </button>
+              </div>
             </div>
           </div>
         ) : !roomCode ? (
@@ -753,7 +783,7 @@ export function OnlineLobbyScreen({
       </main>
 
       {/* Pinned Always-Visible Action Footer inside Lobby */}
-      {user && roomCode && (
+      {user && canAccessOnline && roomCode && (
         <footer
           className={`shrink-0 border-t border-slate-800 bg-[#111B2B] ${
             isMobile ? 'px-3 py-2.5' : 'px-4 sm:px-6 py-3'
@@ -772,7 +802,15 @@ export function OnlineLobbyScreen({
                   <PixelFlag country={myPickedCountry} size="sm" />
                   <div className="text-xs truncate">
                     <span className="text-slate-400">Tu país: </span>
-                    <span className="font-bold text-emerald-300">{myPickedCountry.name}</span>
+                    <span
+                      className={`font-bold ${
+                        duplicateCountryIds.has(myPickedCountry.id)
+                          ? 'text-red-400'
+                          : 'text-emerald-300'
+                      }`}
+                    >
+                      {myPickedCountry.name}
+                    </span>
                   </div>
                 </div>
               ) : (
@@ -794,7 +832,13 @@ export function OnlineLobbyScreen({
                 </div>
               )}
 
-              {(errorMsg || syncError) && (
+              {hasDuplicateCountry && (
+                <span className="text-xs text-red-400 font-semibold truncate">
+                  País duplicado: uno de los jugadores debe cambiar de país.
+                </span>
+              )}
+
+              {!hasDuplicateCountry && (errorMsg || syncError) && (
                 <span className="text-xs text-red-400 truncate">{errorMsg || syncError}</span>
               )}
             </div>
@@ -833,9 +877,11 @@ export function OnlineLobbyScreen({
                   isMobile ? 'py-2.5 px-3' : 'px-4 py-2'
                 }`}
               >
-                {myPickedCountry
-                  ? 'Esperando a que el anfitrión pulse «Empezar la partida»...'
-                  : 'Escoge tu país en la lista para estar listo.'}
+                {hasDuplicateCountry
+                  ? 'Dos jugadores eligieron el mismo país. Cambia de país para comenzar.'
+                  : myPickedCountry
+                    ? 'Esperando a que el anfitrión pulse «Empezar la partida»...'
+                    : 'Escoge tu país en la lista para estar listo.'}
               </div>
             )}
           </div>

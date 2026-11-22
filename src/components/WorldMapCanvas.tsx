@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MAP_H, MAP_W } from '../engine/mapRasterizer';
 import {
+  ANTI_NUKE_RADIUS,
   DEFENSE_RADIUS,
   NUKE_FALLOUT_DAYS,
   NUKE_RADIUS,
@@ -33,6 +34,9 @@ interface WorldMapCanvasProps {
   placingDefense: boolean;
   onPlaceDefense: (mx: number, my: number) => void;
   onCancelPlaceDefense: () => void;
+  placingAntiNuke: boolean;
+  onPlaceAntiNuke: (mx: number, my: number) => void;
+  onCancelPlaceAntiNuke: () => void;
   launchingNuke: boolean;
   onLaunchNuke: (mx: number, my: number) => void;
   onCancelLaunchNuke: () => void;
@@ -50,6 +54,9 @@ export function WorldMapCanvas({
   placingDefense,
   onPlaceDefense,
   onCancelPlaceDefense,
+  placingAntiNuke,
+  onPlaceAntiNuke,
+  onCancelPlaceAntiNuke,
   launchingNuke,
   onLaunchNuke,
   onCancelLaunchNuke,
@@ -80,11 +87,14 @@ export function WorldMapCanvas({
   const hoverMapPosRef = useRef<{ mx: number; my: number } | null>(null);
   const placingDefenseRef = useRef<boolean>(placingDefense);
   placingDefenseRef.current = placingDefense;
+  const placingAntiNukeRef = useRef<boolean>(placingAntiNuke);
+  placingAntiNukeRef.current = placingAntiNuke;
   const launchingNukeRef = useRef<boolean>(launchingNuke);
   launchingNukeRef.current = launchingNuke;
   const empireHighlightRef = useRef<EmpireHighlightConfig | null>(empireHighlight);
   empireHighlightRef.current = empireHighlight;
   const nukeAnimStartRef = useRef<Map<number, number>>(new Map());
+  const interceptAnimStartRef = useRef<Map<number, number>>(new Map());
 
   const [hoverInfo, setHoverInfo] = useState<{
     id: number;
@@ -352,27 +362,118 @@ export function WorldMapCanvas({
         }
       }
 
-      // Draw Active Nuclear Detonations & Radioactive Fallout Zones
+      // Draw Placed Antibombas (Anti-Nuke) Radar Stations & Larger Coverage Domes (radius 36 vs Defense 24)
       const nowMs = Date.now();
+      const radarSweepAngle = ((nowMs % 3600) / 3600) * Math.PI * 2;
+      for (const c of sim.countries) {
+        if (!c.alive || !c.antiNukes || c.antiNukes.length === 0) continue;
+        const isPlayer = c.id === sim.playerId;
+        const showStations =
+          isPlayer ||
+          c.id === selectedId ||
+          c.id === hoveredIdRef.current ||
+          launchingNukeRef.current ||
+          placingAntiNukeRef.current ||
+          cam.zoom >= 1.6;
+        if (!showStations) continue;
+
+        const showRadarDome =
+          isPlayer ||
+          c.id === selectedId ||
+          c.id === hoveredIdRef.current ||
+          placingAntiNukeRef.current ||
+          launchingNukeRef.current;
+
+        for (const an of c.antiNukes) {
+          if (sim.ownerGrid[an.y * MAP_W + an.x] !== c.id) continue;
+          const ax = offsetX + (an.x + 0.5) * scale;
+          const ay = offsetY + (an.y + 0.5) * scale;
+          const rPx = an.radius * scale;
+          if (ax + rPx < -30 || ax - rPx > cw + 30 || ay + rPx < -30 || ay - rPx > ch + 30) {
+            continue;
+          }
+
+          if (showRadarDome) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(ax, ay, rPx, 0, Math.PI * 2);
+            ctx.fillStyle = isPlayer
+              ? 'rgba(6, 182, 212, 0.11)'
+              : 'rgba(56, 189, 248, 0.09)';
+            ctx.fill();
+            ctx.setLineDash([6, 4]);
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = isPlayer
+              ? 'rgba(34, 211, 238, 0.85)'
+              : 'rgba(125, 211, 252, 0.65)';
+            ctx.stroke();
+
+            // Subtle rotating radar sweep beam inside the dome
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(
+              ax + Math.cos(radarSweepAngle) * rPx,
+              ay + Math.sin(radarSweepAngle) * rPx
+            );
+            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = isPlayer
+              ? 'rgba(103, 232, 249, 0.55)'
+              : 'rgba(125, 211, 252, 0.38)';
+            ctx.stroke();
+
+            // Inner reference ring
+            ctx.beginPath();
+            ctx.arc(ax, ay, rPx * 0.5, 0, Math.PI * 2);
+            ctx.lineWidth = 0.85;
+            ctx.strokeStyle = isPlayer
+              ? 'rgba(34, 211, 238, 0.32)'
+              : 'rgba(125, 211, 252, 0.24)';
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Diamond radar station marker
+          const sz = isPlayer ? Math.max(5, Math.round(scale * 1.05)) : 4;
+          ctx.save();
+          ctx.translate(ax, ay);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = '#07101D';
+          ctx.fillRect(-sz / 2 - 1, -sz / 2 - 1, sz + 2, sz + 2);
+          ctx.fillStyle = isPlayer ? '#22D3EE' : '#38BDF8';
+          ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+          ctx.restore();
+        }
+      }
+
+      // Draw Active Nuclear Detonations & Radioactive Fallout Zones
       for (const c of sim.countries) {
         const strike = c.lastNukeStrike;
         if (!strike) continue;
         const ageDays = sim.totalDays - strike.totalDays;
         if (ageDays < 0 || ageDays > NUKE_FALLOUT_DAYS) continue;
 
+        const nx = offsetX + (strike.x + 0.5) * scale;
+        const ny = offsetY + (strike.y + 0.5) * scale;
+        const rPx = strike.radius * scale;
+        const onScreen =
+          nx + rPx >= -30 && nx - rPx <= cw + 30 && ny + rPx >= -30 && ny - rPx <= ch + 30;
+
         let animStart = nukeAnimStartRef.current.get(strike.id);
         if (animStart === undefined) {
           animStart = ageDays <= 1 ? nowMs : nowMs - 2500;
           nukeAnimStartRef.current.set(strike.id, animStart);
-          if (ageDays <= 1 && c.id !== sim.playerId) {
+          if (
+            ageDays <= 1 &&
+            c.id !== sim.playerId &&
+            onScreen &&
+            sim.ownerGrid[strike.y * MAP_W + strike.x] !== sim.playerId
+          ) {
             soundEngine.playNuclearExplosion();
           }
         }
 
-        const nx = offsetX + (strike.x + 0.5) * scale;
-        const ny = offsetY + (strike.y + 0.5) * scale;
-        const rPx = strike.radius * scale;
-        if (nx + rPx < -30 || nx - rPx > cw + 30 || ny + rPx < -30 || ny - rPx > ch + 30) {
+        if (!onScreen) {
           continue;
         }
 
@@ -422,6 +523,67 @@ export function WorldMapCanvas({
         ctx.restore();
       }
 
+      // Draw Active Antibombas Mid-Air Nuclear Interceptions
+      for (const ic of sim.nukeIntercepts ?? []) {
+        const ageDays = sim.totalDays - ic.totalDays;
+        if (ageDays < 0 || ageDays > 10) continue;
+
+        let animStart = interceptAnimStartRef.current.get(ic.id);
+        if (animStart === undefined) {
+          animStart = ageDays <= 1 ? nowMs : nowMs - 2600;
+          interceptAnimStartRef.current.set(ic.id, animStart);
+        }
+        const elapsedMs = nowMs - animStart;
+        if (elapsedMs > 2400) continue;
+
+        const fx = offsetX + (ic.fromX + 0.5) * scale;
+        const fy = offsetY + (ic.fromY + 0.5) * scale;
+        const tx = offsetX + (ic.targetX + 0.5) * scale;
+        const ty = offsetY + (ic.targetY + 0.5) * scale;
+
+        const t = Math.min(1, elapsedMs / 2400);
+        const fade = Math.max(0, 1 - Math.pow(t, 1.4));
+
+        ctx.save();
+        // Interceptor beam from radar station to mid-air intercept point
+        ctx.beginPath();
+        ctx.moveTo(fx, fy);
+        ctx.lineTo(tx, ty);
+        ctx.lineWidth = Math.max(1.8, 3.2 * fade);
+        ctx.strokeStyle = `rgba(34, 211, 238, ${(0.95 * fade).toFixed(2)})`;
+        ctx.stroke();
+
+        // Expanding defensive cyan shockwave ring
+        const burstR = Math.max(8, 12 * scale * (0.25 + 0.75 * Math.pow(t, 0.5)));
+        ctx.beginPath();
+        ctx.arc(tx, ty, burstR, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(103, 232, 249, ${(0.28 * fade).toFixed(2)})`;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = `rgba(224, 242, 254, ${(0.95 * fade).toFixed(2)})`;
+        ctx.stroke();
+
+        // Crisp tactical "INTERCEPTADA" tag
+        const label = 'INTERCEPTADA';
+        ctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+        const tw = ctx.measureText(label).width;
+        const bw = Math.ceil(tw + 10);
+        const bh = 17;
+        const bx = Math.round(tx - bw / 2);
+        const by = Math.round(ty - burstR - bh - 4);
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = 'rgba(8, 51, 68, 0.94)';
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#22D3EE';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+        ctx.fillStyle = '#CFFAFE';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, Math.round(tx), by + bh / 2 + 0.5);
+        ctx.restore();
+      }
+
       // Draw Live Defense Placement Preview under Cursor
       if (placingDefenseRef.current && hoverMapPosRef.current) {
         const { mx, my } = hoverMapPosRef.current;
@@ -445,6 +607,47 @@ export function WorldMapCanvas({
 
           ctx.fillStyle = valid ? '#10B981' : '#EF4444';
           ctx.fillRect(Math.round(px - 3), Math.round(py - 3), 6, 6);
+          ctx.restore();
+        }
+      }
+
+      // Draw Live Antibombas Placement Preview under Cursor (ANTI_NUKE_RADIUS = 36, larger than Defense = 24)
+      if (placingAntiNukeRef.current && hoverMapPosRef.current) {
+        const { mx, my } = hoverMapPosRef.current;
+        if (mx >= 0 && mx < MAP_W && my >= 0 && my < MAP_H) {
+          const valid = sim.ownerGrid[my * MAP_W + mx] === sim.playerId;
+          const px = offsetX + (mx + 0.5) * scale;
+          const py = offsetY + (my + 0.5) * scale;
+          const rPx = ANTI_NUKE_RADIUS * scale;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(px, py, rPx, 0, Math.PI * 2);
+          ctx.fillStyle = valid
+            ? 'rgba(6, 182, 212, 0.20)'
+            : 'rgba(239, 68, 68, 0.22)';
+          ctx.fill();
+          ctx.setLineDash([6, 4]);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = valid ? '#22D3EE' : '#F87171';
+          ctx.stroke();
+
+          // Radar sweep preview
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(
+            px + Math.cos(radarSweepAngle) * rPx,
+            py + Math.sin(radarSweepAngle) * rPx
+          );
+          ctx.lineWidth = 1.35;
+          ctx.strokeStyle = valid ? 'rgba(103, 232, 249, 0.7)' : 'rgba(248, 113, 113, 0.6)';
+          ctx.stroke();
+
+          ctx.translate(px, py);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = valid ? '#22D3EE' : '#EF4444';
+          ctx.fillRect(-3.5, -3.5, 7, 7);
           ctx.restore();
         }
       }
@@ -759,6 +962,10 @@ export function WorldMapCanvas({
         onCancelLaunchNuke();
         return;
       }
+      if (placingAntiNukeRef.current) {
+        onCancelPlaceAntiNuke();
+        return;
+      }
       if (placingDefenseRef.current) {
         onCancelPlaceDefense();
         return;
@@ -770,6 +977,8 @@ export function WorldMapCanvas({
       if (pos) {
         if (launchingNukeRef.current) {
           onLaunchNuke(pos.mx, pos.my);
+        } else if (placingAntiNukeRef.current) {
+          onPlaceAntiNuke(pos.mx, pos.my);
         } else if (placingDefenseRef.current) {
           onPlaceDefense(pos.mx, pos.my);
         } else {
@@ -830,13 +1039,14 @@ export function WorldMapCanvas({
       onContextMenu={(e) => {
         e.preventDefault();
         if (launchingNukeRef.current) onCancelLaunchNuke();
+        if (placingAntiNukeRef.current) onCancelPlaceAntiNuke();
         if (placingDefenseRef.current) onCancelPlaceDefense();
       }}
     >
       <canvas
         ref={canvasRef}
         className={`w-full h-full block pixelated touch-none ${
-          placingDefense || launchingNuke ? 'cursor-cell' : 'cursor-crosshair'
+          placingDefense || placingAntiNuke || launchingNuke ? 'cursor-cell' : 'cursor-crosshair'
         }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

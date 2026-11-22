@@ -19,6 +19,7 @@ import {
   db,
   formatFirestoreUserError,
   handleFirestoreError,
+  isOnlineTesterUser,
   withTimeout,
 } from '../firebase';
 import {
@@ -74,7 +75,28 @@ function generateFourDigitCode(): string {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefinedDeep(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v !== undefined) {
+        out[k] = stripUndefinedDeep(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
 export async function createMultiplayerRoom(user: User): Promise<string> {
+  if (!isOnlineTesterUser(user)) {
+    throw new Error('El modo online está en desarrollo y solo está habilitado para cuentas autorizadas de prueba.');
+  }
   const hostName = sanitizeDisplayName(user);
   let chosenCode: string | null = null;
 
@@ -145,6 +167,9 @@ export async function createMultiplayerRoom(user: User): Promise<string> {
 }
 
 export async function joinMultiplayerRoom(user: User, rawCode: string): Promise<MultiplayerRoom> {
+  if (!isOnlineTesterUser(user)) {
+    throw new Error('El modo online está en desarrollo y solo está habilitado para cuentas autorizadas de prueba.');
+  }
   const code = rawCode.trim();
   if (!/^[0-9]{4}$/.test(code)) {
     throw new Error('El código debe tener exactamente 4 dígitos numéricos.');
@@ -256,8 +281,16 @@ export async function leaveMultiplayerRoom(
 ): Promise<void> {
   const memberRef = doc(db, 'rooms', roomCode, 'members', uid);
   const roomRef = doc(db, 'rooms', roomCode);
+  const stateRef = doc(db, 'rooms', roomCode, 'state', 'current');
   try {
-    if (isHost && roomStatus === 'lobby') {
+    if (isHost) {
+      if (roomStatus !== 'lobby') {
+        try {
+          await withTimeout(deleteDoc(stateRef), 3500);
+        } catch {
+          // state/current may not exist yet or already deleted
+        }
+      }
       const batch = writeBatch(db);
       batch.delete(memberRef);
       batch.delete(roomRef);
@@ -267,6 +300,24 @@ export async function leaveMultiplayerRoom(
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `rooms/${roomCode}/members/${uid}`, false);
+  }
+}
+
+export async function loadRoomWorldStateOnce(
+  roomCode: string
+): Promise<Record<string, unknown> | null> {
+  const stateRef = doc(db, 'rooms', roomCode, 'state', 'current');
+  try {
+    const snap = await withTimeout(
+      getDocFromServer(stateRef),
+      8000,
+      'Tardó demasiado al recuperar el estado de la partida.'
+    );
+    if (!snap.exists()) return null;
+    return snap.data() as Record<string, unknown>;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `rooms/${roomCode}/state/current`, false);
+    return null;
   }
 }
 
@@ -354,6 +405,7 @@ export async function sendRoomAction(
 ): Promise<string> {
   const actionId = `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const actionRef = doc(db, 'rooms', roomCode, 'actions', actionId);
+  const sanitizedPayload = stripUndefinedDeep(payload);
 
   try {
     await withTimeout(
@@ -362,7 +414,7 @@ export async function sendRoomAction(
         hostUid,
         senderUid,
         actorCountryId,
-        payload,
+        payload: sanitizedPayload,
         status: 'pending',
         createdAt: serverTimestamp(),
       }),
@@ -383,12 +435,16 @@ export async function markRoomActionProcessed(
 ): Promise<void> {
   const actionRef = doc(db, 'rooms', roomCode, 'actions', actionId);
   try {
-    await updateDoc(actionRef, {
-      status: 'processed',
-      processedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}/actions/${actionId}`, false);
+    await deleteDoc(actionRef);
+  } catch {
+    try {
+      await updateDoc(actionRef, {
+        status: 'processed',
+        processedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `rooms/${roomCode}/actions/${actionId}`, false);
+    }
   }
 }
 
@@ -486,7 +542,8 @@ export function subscribeRoomState(
 export function subscribePendingRoomActions(
   roomCode: string,
   hostUid: string,
-  onActions: (actions: RoomActionDoc[]) => void
+  onActions: (actions: RoomActionDoc[]) => void,
+  onError?: (message: string) => void
 ): Unsubscribe {
   const path = `rooms/${roomCode}/actions`;
   const q = query(
@@ -516,6 +573,7 @@ export function subscribePendingRoomActions(
     },
     (error) => {
       handleFirestoreError(error, OperationType.LIST, path, false);
+      onError?.(formatFirestoreUserError(error, 'Error al recibir órdenes de los jugadores.'));
     }
   );
 }

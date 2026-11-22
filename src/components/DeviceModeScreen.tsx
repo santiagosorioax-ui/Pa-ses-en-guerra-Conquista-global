@@ -1,4 +1,5 @@
-import { Globe, Lock, Play } from 'lucide-react';
+import { Globe, Loader2, Lock, LogIn, LogOut, Play, RotateCcw } from 'lucide-react';
+import { useFirebase } from '../contexts/FirebaseContext';
 import { PWAInstallButton } from './PWAInstallPrompt';
 import { soundEngine } from '../engine/soundEngine';
 
@@ -7,6 +8,7 @@ export type DeviceMode = 'desktop' | 'mobile';
 interface DeviceModeScreenProps {
   onStartPlay: () => void;
   onPressOnline: () => void;
+  onResetTutorial: () => void;
 }
 
 function ChainLinkOverlay() {
@@ -148,21 +150,67 @@ function ChainLinkOverlay() {
   );
 }
 
-export function DeviceModeScreen({ onStartPlay, onPressOnline }: DeviceModeScreenProps) {
+export function DeviceModeScreen({
+  onStartPlay,
+  onPressOnline,
+  onResetTutorial,
+}: DeviceModeScreenProps) {
+  const { user, canAccessOnline, authBusy, signInWithGoogle, signOutUser } = useFirebase();
+
   return (
     <div className="w-screen h-screen bg-[#0B121E] text-slate-100 flex flex-col overflow-y-auto">
-      <header className="px-4 sm:px-8 py-4 border-b border-slate-800 bg-[#111B2B] flex items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="px-4 sm:px-8 py-3.5 border-b border-slate-800 bg-[#111B2B] flex items-center justify-between gap-2.5 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           <img
             src="/pwa-192x192.png"
             alt="Países en Guerra"
             className="w-8 h-8 border border-slate-700 shrink-0"
           />
-          <h1 className="font-pixel text-base sm:text-lg tracking-wide text-amber-400 truncate">
+          <h1 className="font-pixel text-sm sm:text-lg tracking-wide text-amber-400 truncate">
             PAÍSES EN GUERRA
           </h1>
         </div>
-        <PWAInstallButton />
+        <div className="flex items-center gap-2 shrink-0">
+          {user ? (
+            <div className="flex items-center gap-1.5 bg-[#0B121E] border border-slate-700 px-2 py-1">
+              {user.photoURL && (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName ?? 'Usuario'}
+                  className="w-5 h-5 object-cover border border-slate-700 shrink-0"
+                />
+              )}
+              <span className="text-[11px] text-slate-200 max-w-[110px] sm:max-w-[160px] truncate hidden xs:inline sm:inline">
+                {user.email || user.displayName}
+              </span>
+              <button
+                type="button"
+                onClick={() => void signOutUser()}
+                disabled={authBusy}
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+                className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void signInWithGoogle()}
+              disabled={authBusy}
+              className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              {authBusy ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <LogIn className="w-3.5 h-3.5" />
+              )}
+              <span>Google</span>
+            </button>
+          )}
+          <PWAInstallButton compact />
+        </div>
       </header>
 
       <main className="flex-1 flex items-center justify-center p-4 sm:p-8">
@@ -205,40 +253,95 @@ export function DeviceModeScreen({ onStartPlay, onPressOnline }: DeviceModeScree
               </div>
             </button>
 
-            {/* Botón Encadenado: Online (En desarrollo) */}
+            {/* Botón Online: desbloqueado solo para cuentas de prueba autorizadas */}
             <button
               type="button"
               onClick={() => {
                 soundEngine.playClick();
                 onPressOnline();
               }}
-              className="relative overflow-hidden text-left bg-[#0E1726] hover:bg-[#121D30] border border-slate-700 p-5 sm:p-6 transition-colors cursor-pointer flex flex-col justify-between gap-4 min-h-[200px]"
+              className={
+                canAccessOnline
+                  ? 'group text-left bg-[#111B2B] hover:bg-[#172338] border border-emerald-500/70 hover:border-emerald-400 p-5 sm:p-6 transition-colors cursor-pointer flex flex-col justify-between gap-4 min-h-[200px]'
+                  : 'relative overflow-hidden text-left bg-[#0E1726] hover:bg-[#121D30] border border-slate-700 p-5 sm:p-6 transition-colors cursor-pointer flex flex-col justify-between gap-4 min-h-[200px]'
+              }
             >
-              <div className="space-y-3 opacity-60">
-                <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-600/40 flex items-center justify-center text-emerald-400">
+              <div className={`space-y-3 ${canAccessOnline ? '' : 'opacity-60'}`}>
+                <div
+                  className={`w-12 h-12 flex items-center justify-center text-emerald-400 ${
+                    canAccessOnline
+                      ? 'bg-emerald-500/15 border border-emerald-500/50'
+                      : 'bg-emerald-500/10 border border-emerald-600/40'
+                  }`}
+                >
                   <Globe className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="text-xl font-extrabold text-slate-200">
+                  <div
+                    className={`text-xl font-extrabold transition-colors ${
+                      canAccessOnline
+                        ? 'text-white group-hover:text-emerald-300'
+                        : 'text-slate-200'
+                    }`}
+                  >
                     Online
                   </div>
-                  <p className="mt-1 text-xs sm:text-sm text-slate-400 leading-relaxed">
+                  <p
+                    className={`mt-1 text-xs sm:text-sm leading-relaxed ${
+                      canAccessOnline ? 'text-slate-300' : 'text-slate-400'
+                    }`}
+                  >
                     Multijugador en vivo con amigos en salas privadas de 4 dígitos, guerras, alianzas y rebeliones.
                   </p>
                 </div>
               </div>
 
-              <div className="relative z-10 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs font-semibold text-amber-300/90">
-                <span className="flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>En desarrollo</span>
-                </span>
-                <span className="text-slate-400">Bloqueado</span>
-              </div>
-
-              <ChainLinkOverlay />
+              {canAccessOnline ? (
+                <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs font-bold text-emerald-400">
+                  <span>Acceso de pruebas</span>
+                  <span>Entrar →</span>
+                </div>
+              ) : (
+                <>
+                  <div className="relative z-10 pt-2.5 border-t border-slate-800 flex items-center justify-between text-xs font-semibold text-amber-300/90">
+                    <span className="flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>En desarrollo</span>
+                    </span>
+                    <span className="text-slate-400">Bloqueado</span>
+                  </div>
+                  <ChainLinkOverlay />
+                </>
+              )}
             </button>
           </div>
+
+          {/* Opción: Reiniciar Tutorial */}
+          <button
+            type="button"
+            onClick={() => {
+              soundEngine.playClick();
+              onResetTutorial();
+            }}
+            className="w-full text-left bg-[#111B2B] hover:bg-[#172338] border border-slate-700 hover:border-sky-400/70 px-4 py-3.5 transition-colors cursor-pointer flex items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 bg-sky-500/15 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0">
+                <RotateCcw className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-bold text-slate-100">
+                  Reiniciar tutorial
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-400 leading-snug">
+                  Aprende la gestión económica y militar básica y vuelve a mostrar la guía al iniciar partida.
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-semibold text-sky-400 shrink-0 whitespace-nowrap">
+              Ver guía →
+            </span>
+          </button>
         </div>
       </main>
     </div>

@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { auth, loginWithGoogle, logoutFirebase } from '../firebase';
+import { auth, isOnlineTesterUser, loginWithGoogle, logoutFirebase } from '../firebase';
 import {
   ensureUserProfile,
   subscribeUserCampaigns,
@@ -16,6 +16,7 @@ import {
 
 interface FirebaseContextValue {
   user: User | null;
+  canAccessOnline: boolean;
   authReady: boolean;
   authBusy: boolean;
   authError: string | null;
@@ -113,10 +114,13 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const canAccessOnline = isOnlineTesterUser(user);
+
   return (
     <FirebaseContext.Provider
       value={{
         user,
+        canAccessOnline,
         authReady,
         authBusy,
         authError,
