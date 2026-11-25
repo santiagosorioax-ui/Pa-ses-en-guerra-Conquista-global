@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Anchor,
   Building2,
+  Castle,
   Coins,
   Crown,
   Flame,
@@ -23,6 +24,9 @@ import {
   ANTI_NUKE_RADIUS,
   ARMY_RECRUIT_AMOUNT,
   ARMY_RECRUIT_COST,
+  BARRACKS_ARMY_CAP_BONUS,
+  BARRACKS_COST,
+  BARRACKS_RADIUS,
   CITY_INCOME,
   DEFENSE_COST,
   DEFENSE_RADIUS,
@@ -53,6 +57,7 @@ import {
   getTopRelations,
   hasCoast,
   hasTreaty,
+  isCountryCoveredByBarracks,
   type SimulationState,
 } from '../engine/gameSimulation';
 import type { GameActionPayload, GameActionResult } from '../engine/gameActions';
@@ -75,6 +80,8 @@ interface CommandDrawerProps {
   onTogglePlaceDefense: () => void;
   placingAntiNuke: boolean;
   onTogglePlaceAntiNuke: () => void;
+  placingBarracks: boolean;
+  onTogglePlaceBarracks: () => void;
   launchingNuke: boolean;
   onToggleLaunchNuke: () => void;
   defenseFeedback: { text: string; ok: boolean } | null;
@@ -95,6 +102,8 @@ export function CommandDrawer({
   onTogglePlaceDefense,
   placingAntiNuke,
   onTogglePlaceAntiNuke,
+  placingBarracks,
+  onTogglePlaceBarracks,
   launchingNuke,
   onToggleLaunchNuke,
   defenseFeedback,
@@ -488,6 +497,38 @@ export function CommandDrawer({
               </button>
 
               <button
+                disabled={busy || !player.alive}
+                onClick={() => {
+                  setFeedback(null);
+                  onTogglePlaceBarracks();
+                }}
+                className={`w-full p-2.5 border flex items-center justify-between text-left cursor-pointer transition-colors disabled:opacity-45 ${
+                  placingBarracks
+                    ? 'bg-purple-950/75 border-purple-400'
+                    : 'bg-[#0B121E] hover:bg-slate-800/80 border-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Castle className="w-4 h-4 text-purple-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-100 truncate">
+                      {placingBarracks
+                        ? 'Colocando Cuartel Militar (Toca en el mapa)'
+                        : `Cuartel Militar (${player.barracks.length}) · +${(player.barracks.length * BARRACKS_ARMY_CAP_BONUS).toLocaleString('es-ES')} cap.`}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {placingBarracks
+                        ? 'Toca en tu territorio o pulsa Esc para cancelar'
+                        : `+${BARRACKS_ARMY_CAP_BONUS} cap. militar · Radio ${BARRACKS_RADIUS * 10} km (-50% rebeldía en su zona)`}
+                    </div>
+                  </div>
+                </div>
+                <span className="font-mono-num text-xs text-purple-300 font-semibold shrink-0 ml-2">
+                  {placingBarracks ? 'Cancelar' : `$${BARRACKS_COST.toLocaleString('es-ES')}`}
+                </span>
+              </button>
+
+              <button
                 disabled={busy || !player.alive || (!launchingNuke && (player.nukeCooldownDays ?? 0) > 0)}
                 onClick={() => {
                   setFeedback(null);
@@ -596,12 +637,13 @@ export function CommandDrawer({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-snug">
-                  Los países fuertes pueden independizarse y rebelarse contra ti. Coloca una Defensa en su territorio o reprime focos rebeldes.
+                  Los países fuertes pueden independizarse y rebelarse contra ti. Coloca un Cuartel Militar (-50% rebeldía en su zona), una Defensa o reprime focos rebeldes.
                 </p>
                 <div className="space-y-1.5">
                   {occupiedNations.slice(0, 6).map((occNation) => {
                     const unrest = Math.min(100, Math.max(0, Math.round(occNation.rebelUnrest ?? 0)));
                     const strength = getCountryRebellionStrength(occNation);
+                    const coveredByBarracks = isCountryCoveredByBarracks(sim, player, occNation.id);
                     const barColor =
                       unrest >= 75
                         ? 'bg-red-500'
@@ -623,8 +665,13 @@ export function CommandDrawer({
                           <div className="flex items-center gap-2 min-w-0">
                             <PixelFlag country={occNation.seed} size="sm" />
                             <div className="min-w-0">
-                              <div className="text-xs font-semibold text-slate-100 truncate">
-                                {getCountryName(occNation)}
+                              <div className="text-xs font-semibold text-slate-100 truncate flex items-center gap-1.5">
+                                <span className="truncate">{getCountryName(occNation)}</span>
+                                {coveredByBarracks && (
+                                  <span className="text-[9px] font-mono-num px-1 py-0.5 bg-purple-950/80 border border-purple-500/60 text-purple-200 shrink-0">
+                                    Cuartel -50%
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-slate-400 font-mono-num">
                                 Fuerza {strength}/100 ·{' '}

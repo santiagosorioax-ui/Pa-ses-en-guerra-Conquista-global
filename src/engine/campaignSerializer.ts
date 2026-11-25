@@ -41,6 +41,7 @@ export interface SerializedCountry {
   ports: PortCoord[];
   defenses: DefenseCoord[];
   antiNukes?: DefenseCoord[];
+  barracks?: DefenseCoord[];
   aggressiveExpansion: number;
   aiDoctrine: AiDoctrine;
   bboxMinX: number;
@@ -224,6 +225,9 @@ function serializeCountries(sim: SimulationState): SerializedCountry[] {
     ...(c.antiNukes && c.antiNukes.length > 0
       ? { antiNukes: c.antiNukes.slice(0, 16).map((a) => ({ x: a.x, y: a.y, radius: a.radius })) }
       : {}),
+    ...(c.barracks && c.barracks.length > 0
+      ? { barracks: c.barracks.slice(0, 24).map((b) => ({ x: b.x, y: b.y, radius: b.radius })) }
+      : {}),
     aggressiveExpansion: c.aggressiveExpansion,
     aiDoctrine: c.aiDoctrine,
     bboxMinX: c.bboxMinX,
@@ -309,6 +313,7 @@ function hydrateCountries(
       ports: (sc.ports ?? []).map((p) => ({ ...p })),
       defenses: (sc.defenses ?? []).map((d) => ({ ...d })),
       antiNukes: (sc.antiNukes ?? []).map((a) => ({ ...a })),
+      barracks: (sc.barracks ?? []).map((b) => ({ ...b })),
       aggressiveExpansion: sc.aggressiveExpansion,
       aiDoctrine: sc.aiDoctrine,
       color: seed.color,

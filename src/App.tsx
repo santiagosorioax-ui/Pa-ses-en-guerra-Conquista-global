@@ -36,6 +36,9 @@ import {
 import {
   ANTI_NUKE_COST,
   ANTI_NUKE_RADIUS,
+  BARRACKS_ARMY_CAP_BONUS,
+  BARRACKS_COST,
+  BARRACKS_RADIUS,
   NUKE_RADIUS,
   createSimulation,
   getCountryName,
@@ -139,6 +142,7 @@ export default function App() {
   const toastTimerRef = useRef<number | null>(null);
   const [placingDefense, setPlacingDefense] = useState(false);
   const [placingAntiNuke, setPlacingAntiNuke] = useState(false);
+  const [placingBarracks, setPlacingBarracks] = useState(false);
   const [launchingNuke, setLaunchingNuke] = useState(false);
   const [defenseFeedback, setDefenseFeedback] = useState<{ text: string; ok: boolean } | null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -279,6 +283,7 @@ export default function App() {
       setMobileDrawerOpen(false);
       setPlacingDefense(false);
       setPlacingAntiNuke(false);
+      setPlacingBarracks(false);
       setLaunchingNuke(false);
       setSelectedId(sim.playerId);
 
@@ -1230,6 +1235,8 @@ export default function App() {
           setLaunchingNuke(false);
         } else if (placingAntiNuke) {
           setPlacingAntiNuke(false);
+        } else if (placingBarracks) {
+          setPlacingBarracks(false);
         } else if (placingDefense) {
           setPlacingDefense(false);
         } else if (searchOpen) {
@@ -1251,6 +1258,7 @@ export default function App() {
     achievementsOpen,
     launchingNuke,
     placingAntiNuke,
+    placingBarracks,
     placingDefense,
     showTutorial,
     dismissTutorial,
@@ -1666,6 +1674,7 @@ export default function App() {
     setEmpireHighlight(null);
     setPlacingDefense(false);
     setPlacingAntiNuke(false);
+    setPlacingBarracks(false);
     setLaunchingNuke(false);
     if (sim.isMultiplayer) {
       await handleLeaveOnlineRoom();
@@ -1747,6 +1756,15 @@ export default function App() {
               }
             }}
             onCancelPlaceAntiNuke={() => setPlacingAntiNuke(false)}
+            placingBarracks={placingBarracks}
+            onPlaceBarracks={async (mx, my) => {
+              const res = await handleExecuteAction({ type: 'build_barracks', x: mx, y: my });
+              setDefenseFeedback({ text: res.message, ok: res.ok });
+              if (res.ok) {
+                setPlacingBarracks(false);
+              }
+            }}
+            onCancelPlaceBarracks={() => setPlacingBarracks(false)}
             launchingNuke={launchingNuke}
             onLaunchNuke={async (mx, my) => {
               const res = await handleExecuteAction({ type: 'launch_nuke', x: mx, y: my });
@@ -1789,6 +1807,20 @@ export default function App() {
             </div>
           )}
 
+          {placingBarracks && (
+            <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(94vw,560px)] bg-purple-950/95 border border-purple-400 px-3 sm:px-4 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-purple-100">
+              <span>
+                Toca en tu país para colocar el Cuartel Militar (+{BARRACKS_ARMY_CAP_BONUS} cap. · radio {BARRACKS_RADIUS * 10} km · -50% rebeldía en esa zona · ${BARRACKS_COST.toLocaleString('es-ES')})
+              </span>
+              <button
+                onClick={() => setPlacingBarracks(false)}
+                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 shrink-0 cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+
           {launchingNuke && (
             <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(94vw,540px)] bg-orange-950/95 border border-orange-500 px-3 sm:px-4 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-orange-100">
               <span>
@@ -1805,7 +1837,7 @@ export default function App() {
             </div>
           )}
 
-          {empireHighlight && !placingDefense && !placingAntiNuke && !launchingNuke && (() => {
+          {empireHighlight && !placingDefense && !placingAntiNuke && !placingBarracks && !launchingNuke && (() => {
             const targetIso2s = empireHighlight.targetCountryIds
               .map((tid) => sim.countries[tid]?.seed.iso2)
               .filter((iso): iso is string => Boolean(iso));
@@ -1904,7 +1936,7 @@ export default function App() {
           )}
 
           {/* Live Autonomous AI Geopolitical Feed (top-left of map) */}
-          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || placingAntiNuke || launchingNuke || empireHighlight || mpSyncError)) && (
+          {sim.chronicle.length > 0 && !(isMobile && (activeHumanOffer || sim.pendingProposal || placingDefense || placingAntiNuke || placingBarracks || launchingNuke || empireHighlight || mpSyncError)) && (
             <div
               className={`absolute z-20 space-y-1.5 pointer-events-none ${
                 isMobile
@@ -1972,6 +2004,7 @@ export default function App() {
                 setDefenseFeedback(null);
                 setPlacingDefense(false);
                 setPlacingAntiNuke(false);
+                setPlacingBarracks(false);
                 setLaunchingNuke(true);
                 setSelectedId(sim.playerId);
                 if (isMobile) setMobileDrawerOpen(false);
@@ -2169,6 +2202,7 @@ export default function App() {
             onTogglePlaceDefense={() => {
               setDefenseFeedback(null);
               setPlacingAntiNuke(false);
+              setPlacingBarracks(false);
               setLaunchingNuke(false);
               setPlacingDefense((v) => !v);
               if (isMobile) {
@@ -2179,8 +2213,20 @@ export default function App() {
             onTogglePlaceAntiNuke={() => {
               setDefenseFeedback(null);
               setPlacingDefense(false);
+              setPlacingBarracks(false);
               setLaunchingNuke(false);
               setPlacingAntiNuke((v) => !v);
+              if (isMobile) {
+                setMobileDrawerOpen(false);
+              }
+            }}
+            placingBarracks={placingBarracks}
+            onTogglePlaceBarracks={() => {
+              setDefenseFeedback(null);
+              setPlacingDefense(false);
+              setPlacingAntiNuke(false);
+              setLaunchingNuke(false);
+              setPlacingBarracks((v) => !v);
               if (isMobile) {
                 setMobileDrawerOpen(false);
               }
@@ -2190,6 +2236,7 @@ export default function App() {
               setDefenseFeedback(null);
               setPlacingDefense(false);
               setPlacingAntiNuke(false);
+              setPlacingBarracks(false);
               setLaunchingNuke((v) => !v);
               if (isMobile) {
                 setMobileDrawerOpen(false);

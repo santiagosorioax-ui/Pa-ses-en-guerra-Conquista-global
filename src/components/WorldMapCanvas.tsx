@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MAP_H, MAP_W } from '../engine/mapRasterizer';
 import {
   ANTI_NUKE_RADIUS,
+  BARRACKS_RADIUS,
   DEFENSE_RADIUS,
   NUKE_FALLOUT_DAYS,
   NUKE_RADIUS,
@@ -37,6 +38,9 @@ interface WorldMapCanvasProps {
   placingAntiNuke: boolean;
   onPlaceAntiNuke: (mx: number, my: number) => void;
   onCancelPlaceAntiNuke: () => void;
+  placingBarracks: boolean;
+  onPlaceBarracks: (mx: number, my: number) => void;
+  onCancelPlaceBarracks: () => void;
   launchingNuke: boolean;
   onLaunchNuke: (mx: number, my: number) => void;
   onCancelLaunchNuke: () => void;
@@ -57,6 +61,9 @@ export function WorldMapCanvas({
   placingAntiNuke,
   onPlaceAntiNuke,
   onCancelPlaceAntiNuke,
+  placingBarracks,
+  onPlaceBarracks,
+  onCancelPlaceBarracks,
   launchingNuke,
   onLaunchNuke,
   onCancelLaunchNuke,
@@ -89,6 +96,8 @@ export function WorldMapCanvas({
   placingDefenseRef.current = placingDefense;
   const placingAntiNukeRef = useRef<boolean>(placingAntiNuke);
   placingAntiNukeRef.current = placingAntiNuke;
+  const placingBarracksRef = useRef<boolean>(placingBarracks);
+  placingBarracksRef.current = placingBarracks;
   const launchingNukeRef = useRef<boolean>(launchingNuke);
   launchingNukeRef.current = launchingNuke;
   const empireHighlightRef = useRef<EmpireHighlightConfig | null>(empireHighlight);
@@ -446,6 +455,74 @@ export function WorldMapCanvas({
         }
       }
 
+      // Draw Placed Cuarteles Militares (Barracks) & 50%-larger Anti-Rebellion Zones (radius 54 vs Anti-Nuke 36)
+      for (const c of sim.countries) {
+        if (!c.alive || !c.barracks || c.barracks.length === 0) continue;
+        const isPlayer = c.id === sim.playerId;
+        const showBarracks =
+          isPlayer ||
+          c.id === selectedId ||
+          c.id === hoveredIdRef.current ||
+          placingBarracksRef.current ||
+          cam.zoom >= 1.6;
+        if (!showBarracks) continue;
+
+        const showZone =
+          isPlayer ||
+          c.id === selectedId ||
+          c.id === hoveredIdRef.current ||
+          placingBarracksRef.current;
+
+        for (const bk of c.barracks) {
+          if (sim.ownerGrid[bk.y * MAP_W + bk.x] !== c.id) continue;
+          const bx = offsetX + (bk.x + 0.5) * scale;
+          const by = offsetY + (bk.y + 0.5) * scale;
+          const rPx = bk.radius * scale;
+          if (bx + rPx < -30 || bx - rPx > cw + 30 || by + rPx < -30 || by - rPx > ch + 30) {
+            continue;
+          }
+
+          if (showZone) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(bx, by, rPx, 0, Math.PI * 2);
+            ctx.fillStyle = isPlayer
+              ? 'rgba(168, 85, 247, 0.10)'
+              : 'rgba(192, 132, 252, 0.08)';
+            ctx.fill();
+            ctx.setLineDash([8, 4]);
+            ctx.lineWidth = 1.6;
+            ctx.strokeStyle = isPlayer
+              ? 'rgba(192, 132, 252, 0.85)'
+              : 'rgba(216, 180, 254, 0.55)';
+            ctx.stroke();
+
+            // Subtle inner garrison ring
+            ctx.setLineDash([3, 5]);
+            ctx.beginPath();
+            ctx.arc(bx, by, rPx * 0.65, 0, Math.PI * 2);
+            ctx.lineWidth = 0.85;
+            ctx.strokeStyle = isPlayer
+              ? 'rgba(192, 132, 252, 0.30)'
+              : 'rgba(216, 180, 254, 0.22)';
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // Military barracks fortress marker (distinct purple garrison emblem)
+          const sz = isPlayer ? Math.max(6, Math.round(scale * 1.15)) : 5;
+          const half = sz / 2;
+          ctx.save();
+          ctx.fillStyle = '#07101D';
+          ctx.fillRect(Math.round(bx - half) - 1, Math.round(by - half) - 1, sz + 2, sz + 2);
+          ctx.fillStyle = isPlayer ? '#A855F7' : '#C084FC';
+          ctx.fillRect(Math.round(bx - half), Math.round(by - half), sz, sz);
+          ctx.fillStyle = '#FAF5FF';
+          ctx.fillRect(Math.round(bx - 1), Math.round(by - 1), 2, 2);
+          ctx.restore();
+        }
+      }
+
       // Draw Active Nuclear Detonations & Radioactive Fallout Zones
       for (const c of sim.countries) {
         const strike = c.lastNukeStrike;
@@ -648,6 +725,54 @@ export function WorldMapCanvas({
           ctx.rotate(Math.PI / 4);
           ctx.fillStyle = valid ? '#22D3EE' : '#EF4444';
           ctx.fillRect(-3.5, -3.5, 7, 7);
+          ctx.restore();
+        }
+      }
+
+      // Draw Live Cuartel Militar Placement Preview under Cursor (BARRACKS_RADIUS = 54, 50% larger than Anti-Nuke = 36)
+      if (placingBarracksRef.current && hoverMapPosRef.current) {
+        const { mx, my } = hoverMapPosRef.current;
+        if (mx >= 0 && mx < MAP_W && my >= 0 && my < MAP_H) {
+          const valid = sim.ownerGrid[my * MAP_W + mx] === sim.playerId;
+          const px = offsetX + (mx + 0.5) * scale;
+          const py = offsetY + (my + 0.5) * scale;
+          const rPx = BARRACKS_RADIUS * scale;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(px, py, rPx, 0, Math.PI * 2);
+          ctx.fillStyle = valid
+            ? 'rgba(168, 85, 247, 0.20)'
+            : 'rgba(239, 68, 68, 0.22)';
+          ctx.fill();
+          ctx.setLineDash([8, 4]);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = valid ? '#C084FC' : '#F87171';
+          ctx.stroke();
+
+          // Highlight annexed territories inside this preview radius whose rebellion will be cut by 50%
+          if (valid) {
+            ctx.setLineDash([]);
+            for (const other of sim.countries) {
+              if (other.alive || other.annexedById !== sim.playerId) continue;
+              const origCapX = sim.mapData.capitalX[other.id];
+              const origCapY = sim.mapData.capitalY[other.id];
+              if (Math.hypot(mx - origCapX, my - origCapY) <= BARRACKS_RADIUS) {
+                const rx = offsetX + (origCapX + 0.5) * scale;
+                const ry = offsetY + (origCapY + 0.5) * scale;
+                ctx.beginPath();
+                ctx.arc(rx, ry, Math.max(5, scale * 1.4), 0, Math.PI * 2);
+                ctx.strokeStyle = '#E9D5FF';
+                ctx.lineWidth = 1.6;
+                ctx.stroke();
+              }
+            }
+          }
+
+          ctx.fillStyle = valid ? '#A855F7' : '#EF4444';
+          ctx.fillRect(Math.round(px - 3.5), Math.round(py - 3.5), 7, 7);
+          ctx.fillStyle = '#FAF5FF';
+          ctx.fillRect(Math.round(px - 1), Math.round(py - 1), 2, 2);
           ctx.restore();
         }
       }
@@ -966,6 +1091,10 @@ export function WorldMapCanvas({
         onCancelPlaceAntiNuke();
         return;
       }
+      if (placingBarracksRef.current) {
+        onCancelPlaceBarracks();
+        return;
+      }
       if (placingDefenseRef.current) {
         onCancelPlaceDefense();
         return;
@@ -979,6 +1108,8 @@ export function WorldMapCanvas({
           onLaunchNuke(pos.mx, pos.my);
         } else if (placingAntiNukeRef.current) {
           onPlaceAntiNuke(pos.mx, pos.my);
+        } else if (placingBarracksRef.current) {
+          onPlaceBarracks(pos.mx, pos.my);
         } else if (placingDefenseRef.current) {
           onPlaceDefense(pos.mx, pos.my);
         } else {
@@ -1040,13 +1171,16 @@ export function WorldMapCanvas({
         e.preventDefault();
         if (launchingNukeRef.current) onCancelLaunchNuke();
         if (placingAntiNukeRef.current) onCancelPlaceAntiNuke();
+        if (placingBarracksRef.current) onCancelPlaceBarracks();
         if (placingDefenseRef.current) onCancelPlaceDefense();
       }}
     >
       <canvas
         ref={canvasRef}
         className={`w-full h-full block pixelated touch-none ${
-          placingDefense || placingAntiNuke || launchingNuke ? 'cursor-cell' : 'cursor-crosshair'
+          placingDefense || placingAntiNuke || placingBarracks || launchingNuke
+            ? 'cursor-cell'
+            : 'cursor-crosshair'
         }`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

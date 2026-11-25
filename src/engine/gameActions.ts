@@ -2,6 +2,7 @@ import {
   ANTI_NUKE_COST,
   ARMY_RECRUIT_AMOUNT,
   ARMY_RECRUIT_COST,
+  BARRACKS_COST,
   CITY_INCOME,
   DEFENSE_COST,
   GIFT_MONEY_PER_REL,
@@ -17,6 +18,7 @@ import {
   TREATY_ALLIANCE,
   TREATY_WAR,
   buildAntiNukeAt,
+  buildBarracksAt,
   buildCity,
   buildDefenseAt,
   buildGoldMine,
@@ -58,6 +60,7 @@ export type GameActionPayload =
   | { type: 'build_port'; towardsId?: number }
   | { type: 'build_defense'; x: number; y: number }
   | { type: 'build_anti_nuke'; x: number; y: number }
+  | { type: 'build_barracks'; x: number; y: number }
   | { type: 'launch_nuke'; x: number; y: number }
   | { type: 'declare_war'; targetId: number }
   | { type: 'make_peace'; targetId: number }
@@ -204,6 +207,26 @@ export function validateGameActionLocally(
         return {
           ok: false,
           message: `Necesitas $${ANTI_NUKE_COST.toLocaleString('es-ES')} para construir un Antibombas.`,
+        };
+      }
+      return null;
+    }
+
+    case 'build_barracks': {
+      if (!c.alive) return { ok: false, message: 'País inactivo.' };
+      if (action.x < 0 || action.x >= MAP_W || action.y < 0 || action.y >= MAP_H) {
+        return { ok: false, message: 'Posición fuera del mapa.' };
+      }
+      if (sim.ownerGrid[action.y * MAP_W + action.x] !== actorCountryId) {
+        return { ok: false, message: 'Debes colocar el Cuartel Militar dentro de tu propio territorio.' };
+      }
+      if (c.barracks.some((b) => Math.hypot(b.x - action.x, b.y - action.y) < 8)) {
+        return { ok: false, message: 'Ya existe un Cuartel Militar muy cerca de ese punto.' };
+      }
+      if (c.money < BARRACKS_COST) {
+        return {
+          ok: false,
+          message: `Necesitas $${BARRACKS_COST.toLocaleString('es-ES')} para construir un Cuartel Militar.`,
         };
       }
       return null;
@@ -437,6 +460,10 @@ export function executeGameAction(
           err ??
           '¡Antibombas desplegado! Su radar interceptará bombas nucleares enemigas dentro de su radio.',
       };
+    }
+
+    case 'build_barracks': {
+      return buildBarracksAt(sim, actorCountryId, action.x, action.y);
     }
 
     case 'launch_nuke': {

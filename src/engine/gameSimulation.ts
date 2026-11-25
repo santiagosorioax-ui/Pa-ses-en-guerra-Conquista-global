@@ -84,6 +84,7 @@ export interface CountryState {
   ports: PortCoord[];
   defenses: DefenseCoord[];
   antiNukes: DefenseCoord[];
+  barracks: DefenseCoord[];
   aggressiveExpansion: number;
   aiDoctrine: AiDoctrine;
   color: [number, number, number];
@@ -234,6 +235,10 @@ export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
 export const ANTI_NUKE_COST = 10000;
 export const ANTI_NUKE_RADIUS = 36; // radar más grande que la defensa (360 km vs 240 km)
+export const BARRACKS_COST = 450;
+export const BARRACKS_ARMY_CAP_BONUS = 500; // +500 capacidad militar por cada Cuartel Militar
+export const BARRACKS_RADIUS = Math.round(ANTI_NUKE_RADIUS * 1.5); // 54 (540 km: 50% más grande que el Antibombas)
+export const BARRACKS_REBELLION_REDUCTION = 0.5; // -50% rebeldía solo en la zona cubierta por el cuartel
 export const NUKE_COST = 1200;
 export const NUKE_RADIUS = 19; // un poco menos radio que la defensa (24 -> 19)
 export const NUKE_COOLDOWN_DAYS = 90; // 3 meses de recarga entre lanzamientos
@@ -264,7 +269,11 @@ export function getCountryName(c: CountryState | undefined | null): string {
 
 export function getArmyCap(c: CountryState): number {
   return Math.round(
-    900 + c.cities * 120 + Math.sqrt(Math.max(1, c.pixels)) * 135 + (c.focusArmyCapBonus ?? 0)
+    900 +
+      c.cities * 120 +
+      (c.barracks?.length ?? 0) * BARRACKS_ARMY_CAP_BONUS +
+      Math.sqrt(Math.max(1, c.pixels)) * 135 +
+      (c.focusArmyCapBonus ?? 0)
   );
 }
 
@@ -548,6 +557,7 @@ export function createSimulation(
       ports: [],
       defenses: [],
       antiNukes: [],
+      barracks: [],
       aggressiveExpansion: 0,
       aiDoctrine: seed.military >= 65 && seed.id % 3 !== 0 ? 'expansionist' : 'diplomatic',
       color: mapData.countryColors[seed.id],
@@ -1426,9 +1436,11 @@ function executeCountryIndependenceRebellion(
     grid[idx] = countryId;
   }
 
-  // Remove occupier ports and defenses sitting on reclaimed rebel territory
+  // Remove occupier ports, defenses, anti-nukes and barracks sitting on reclaimed rebel territory
   occ.ports = occ.ports.filter((p) => !reclaimedSet.has(p.y * MAP_W + p.x));
   occ.defenses = occ.defenses.filter((d) => !reclaimedSet.has(d.y * MAP_W + d.x));
+  occ.antiNukes = occ.antiNukes.filter((a) => !reclaimedSet.has(a.y * MAP_W + a.x));
+  occ.barracks = occ.barracks.filter((b) => !reclaimedSet.has(b.y * MAP_W + b.x));
 
   // Recompute pixel counts & bounding boxes for both countries accurately
   c.pixels = 0;
@@ -1557,6 +1569,7 @@ function processAbsorbedCountryRebellions(sim: SimulationState) {
     const hasDefenseGarrison = occ.defenses.some(
       (d) => Math.hypot(d.x - origCapX, d.y - origCapY) <= d.radius + 8
     );
+    const hasBarracksZone = isCountryCoveredByBarracks(sim, occ, c.id);
 
     // Very weak absorbed countries rarely accumulate unrest unless the occupier is severely strained
     if (strength < 16 && occ.army > 320 && occWars < 2) {
@@ -1569,14 +1582,16 @@ function processAbsorbedCountryRebellions(sim: SimulationState) {
     const gripRatio = occ.army / expectedGarrison;
     const warStrain = occWars >= 2 ? 1.55 : occWars === 1 ? 1.2 : 0.88;
     const garrisonMod = hasDefenseGarrison ? 0.42 : 1.0;
+    const barracksMod = hasBarracksZone ? 1 - BARRACKS_REBELLION_REDUCTION : 1.0;
 
     let delta =
       (strengthFactor * 4.4 + (gripRatio < 1.0 ? (1.0 - gripRatio) * 3.8 : 0)) *
       warStrain *
-      garrisonMod;
+      garrisonMod *
+      barracksMod;
 
     // A massive, well-garrisoned empire keeps weaker conquered nations calmer
-    if (gripRatio >= 2.2 && hasDefenseGarrison && strength < 55) {
+    if (gripRatio >= 2.2 && (hasDefenseGarrison || hasBarracksZone) && strength < 55) {
       delta *= 0.25;
     }
 
@@ -1894,6 +1909,84 @@ export function buildAntiNukeAt(
   return null;
 }
 
+export function isCountryCoveredByBarracks(
+  sim: SimulationState,
+  occupier: CountryState,
+  annexedCountryId: number
+): boolean {
+  if (!occupier.alive || !occupier.barracks || occupier.barracks.length === 0) return false;
+  const origCapX = sim.mapData.capitalX[annexedCountryId];
+  const origCapY = sim.mapData.capitalY[annexedCountryId];
+  return occupier.barracks.some(
+    (b) =>
+      sim.ownerGrid[b.y * MAP_W + b.x] === occupier.id &&
+      Math.hypot(b.x - origCapX, b.y - origCapY) <= b.radius
+  );
+}
+
+export function buildBarracksAt(
+  sim: SimulationState,
+  countryId: number,
+  x: number,
+  y: number
+): { ok: boolean; message: string } {
+  const c = sim.countries[countryId];
+  if (!c || !c.alive) return { ok: false, message: 'País inactivo.' };
+  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) {
+    return { ok: false, message: 'Posición fuera del mapa.' };
+  }
+  if (sim.ownerGrid[y * MAP_W + x] !== countryId) {
+    return { ok: false, message: 'Debes colocar el Cuartel Militar dentro de tu propio territorio.' };
+  }
+  if (c.barracks.some((b) => Math.hypot(b.x - x, b.y - y) < 8)) {
+    return { ok: false, message: 'Ya existe un Cuartel Militar muy cerca de ese punto.' };
+  }
+  if (c.money < BARRACKS_COST) {
+    return {
+      ok: false,
+      message: `Necesitas $${BARRACKS_COST.toLocaleString('es-ES')} para construir un Cuartel Militar.`,
+    };
+  }
+
+  // Track which annexed territories were NOT yet covered by an existing barracks
+  const newlyCoveredRebels: CountryState[] = [];
+  for (const other of sim.countries) {
+    if (other.alive || other.annexedById !== countryId) continue;
+    const origCapX = sim.mapData.capitalX[other.id];
+    const origCapY = sim.mapData.capitalY[other.id];
+    const inNewRadius = Math.hypot(x - origCapX, y - origCapY) <= BARRACKS_RADIUS;
+    if (inNewRadius && !isCountryCoveredByBarracks(sim, c, other.id)) {
+      newlyCoveredRebels.push(other);
+    }
+  }
+
+  c.money -= BARRACKS_COST;
+  c.barracks.push({ x, y, radius: BARRACKS_RADIUS });
+
+  const pacifiedNames: string[] = [];
+  for (const reb of newlyCoveredRebels) {
+    if ((reb.rebelUnrest ?? 0) > 0) {
+      reb.rebelUnrest = Math.max(
+        0,
+        Math.round((reb.rebelUnrest ?? 0) * (1 - BARRACKS_REBELLION_REDUCTION))
+      );
+      pacifiedNames.push(getCountryName(reb));
+    }
+  }
+
+  if (countryId === sim.playerId) soundEngine.playBuildStructure('defense');
+
+  const zoneNote =
+    pacifiedNames.length > 0
+      ? ` Rebeldía -50% en ${pacifiedNames.slice(0, 3).join(', ')}${pacifiedNames.length > 3 ? ` y ${pacifiedNames.length - 3} más` : ''}.`
+      : ` Radio ${BARRACKS_RADIUS * 10} km (-50% rebeldía en su zona).`;
+
+  return {
+    ok: true,
+    message: `¡Cuartel Militar construido! +${BARRACKS_ARMY_CAP_BONUS} capacidad militar.${zoneNote}`,
+  };
+}
+
 export function isPixelIrradiated(sim: SimulationState, px: number, py: number): boolean {
   for (const c of sim.countries) {
     const s = c.lastNukeStrike;
@@ -2099,6 +2192,12 @@ export function launchNukeAt(
 
     target.ports = target.ports.filter(
       (p) => (p.x - x) ** 2 + (p.y - y) ** 2 > r2
+    );
+    target.antiNukes = target.antiNukes.filter(
+      (a) => (a.x - x) ** 2 + (a.y - y) ** 2 > r2
+    );
+    target.barracks = target.barracks.filter(
+      (b) => (b.x - x) ** 2 + (b.y - y) ** 2 > r2
     );
 
     // Severe army devastation scaled by coverage + capital strike
@@ -2778,6 +2877,8 @@ function processFrontlineBattles(sim: SimulationState) {
               if (py > att.bboxMaxY) att.bboxMaxY = py;
               def.ports = def.ports.filter((p) => p.x !== px || p.y !== py);
               def.defenses = def.defenses.filter((d) => d.x !== px || d.y !== py);
+              def.antiNukes = def.antiNukes.filter((a) => a.x !== px || a.y !== py);
+              def.barracks = def.barracks.filter((b) => b.x !== px || b.y !== py);
               captured++;
               sim.dirtyPixels = true;
               if (hitCapital) {
@@ -2950,9 +3051,11 @@ function processFrontlineBattles(sim: SimulationState) {
         if (py > winner.bboxMaxY) winner.bboxMaxY = py;
         sim.dirtyPixels = true;
 
-        // Clean any destroyed port or defense on captured pixel
+        // Clean any destroyed port, defense, anti-nuke, or barracks on captured pixel
         loser.ports = loser.ports.filter((p) => p.x !== px || p.y !== py);
         loser.defenses = loser.defenses.filter((d) => d.x !== px || d.y !== py);
+        loser.antiNukes = loser.antiNukes.filter((a) => a.x !== px || a.y !== py);
+        loser.barracks = loser.barracks.filter((b) => b.x !== px || b.y !== py);
 
         if (hitCapital) {
           applyCapitalCapturedPenalty(sim, winner, loser, px, py);
@@ -3025,6 +3128,7 @@ function processFrontlineBattles(sim: SimulationState) {
     l.ports = [];
     l.defenses = [];
     l.antiNukes = [];
+    l.barracks = [];
     l.annexedById = winner;
     l.rebelUnrest = 0;
 
