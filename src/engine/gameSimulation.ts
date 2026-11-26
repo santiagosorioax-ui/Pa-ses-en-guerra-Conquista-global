@@ -235,11 +235,11 @@ export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
 export const ANTI_NUKE_COST = 10000;
 export const ANTI_NUKE_RADIUS = 36; // radar más grande que la defensa (360 km vs 240 km)
-export const BARRACKS_COST = 450;
+export const BARRACKS_COST = 1000;
 export const BARRACKS_ARMY_CAP_BONUS = 500; // +500 capacidad militar por cada Cuartel Militar
 export const BARRACKS_RADIUS = Math.round(ANTI_NUKE_RADIUS * 1.5); // 54 (540 km: 50% más grande que el Antibombas)
 export const BARRACKS_REBELLION_REDUCTION = 0.5; // -50% rebeldía solo en la zona cubierta por el cuartel
-export const NUKE_COST = 1200;
+export const NUKE_COST = 30000;
 export const NUKE_RADIUS = 19; // un poco menos radio que la defensa (24 -> 19)
 export const NUKE_COOLDOWN_DAYS = 90; // 3 meses de recarga entre lanzamientos
 export const NUKE_FALLOUT_DAYS = 60; // 2 meses de zona irradiada visible
@@ -278,7 +278,7 @@ export function getArmyCap(c: CountryState): number {
 }
 
 export function getMoneyCap(c: CountryState): number {
-  return Math.round(12000 + c.cities * 1800 + Math.sqrt(Math.max(1, c.pixels)) * 900);
+  return Math.round(35000 + c.cities * 2200 + Math.sqrt(Math.max(1, c.pixels)) * 1200);
 }
 
 export function getGoldMineCost(c: CountryState): number {
