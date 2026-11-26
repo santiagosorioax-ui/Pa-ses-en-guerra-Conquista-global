@@ -1,14 +1,28 @@
-import { Globe, Loader2, LogIn, LogOut, Play, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
+import { Cloud, Globe, HardDrive, Loader2, LogIn, LogOut, Play, RotateCcw } from 'lucide-react';
+import { COUNTRIES_195 } from '../data/countries195';
 import { useFirebase } from '../contexts/FirebaseContext';
 import { PWAInstallButton } from './PWAInstallPrompt';
+import { PixelFlag } from './PixelFlag';
 import { soundEngine } from '../engine/soundEngine';
+import type { SavedCampaignSummary } from '../services/cloudSaves';
 
 export type DeviceMode = 'desktop' | 'mobile';
+
+export interface UnifiedSavedCampaign extends SavedCampaignSummary {
+  storageSource: 'both' | 'cloud' | 'local';
+  dirtyForCloud?: boolean;
+  defensesCount?: number;
+  barracksCount?: number;
+  antiNukesCount?: number;
+}
 
 interface DeviceModeScreenProps {
   onStartPlay: () => void;
   onPressOnline: () => void;
   onResetTutorial: () => void;
+  lastCampaign?: UnifiedSavedCampaign | null;
+  onResumeLastCampaign?: (campaign: UnifiedSavedCampaign) => Promise<void>;
 }
 
 function ChainLinkOverlay() {
@@ -156,8 +170,14 @@ export function DeviceModeScreen({
   onStartPlay,
   onPressOnline,
   onResetTutorial,
+  lastCampaign = null,
+  onResumeLastCampaign,
 }: DeviceModeScreenProps) {
   const { user, canAccessOnline, authBusy, signInWithGoogle, signOutUser } = useFirebase();
+  const [resumingLast, setResumingLast] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+
+  const lastSeed = lastCampaign ? COUNTRIES_195[lastCampaign.countryId] : null;
 
   return (
     <div className="w-screen h-screen bg-[#0B121E] text-slate-100 flex flex-col overflow-y-auto">
@@ -216,7 +236,7 @@ export function DeviceModeScreen({
       </header>
 
       <main className="flex-1 flex items-center justify-center p-4 sm:p-8">
-        <div className="w-full max-w-2xl space-y-6">
+        <div className="w-full max-w-2xl space-y-5">
           <div className="text-center space-y-2">
             <h2 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight">
               Conquista el mapa mundial
@@ -225,6 +245,87 @@ export function DeviceModeScreen({
               195 países soberanos, árboles genealógicos, imperios históricos, bombas nucleares, rebeliones y 100 logros.
             </p>
           </div>
+
+          {/* Continuar última partida jugada (funciona con y sin internet) */}
+          {lastCampaign && onResumeLastCampaign && (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                disabled={resumingLast}
+                onClick={async () => {
+                  setResumeError(null);
+                  setResumingLast(true);
+                  try {
+                    soundEngine.playTreaty();
+                    await onResumeLastCampaign(lastCampaign);
+                  } catch (err) {
+                    setResumeError(
+                      err instanceof Error
+                        ? err.message
+                        : 'No se pudo cargar la última partida guardada.'
+                    );
+                  } finally {
+                    setResumingLast(false);
+                  }
+                }}
+                className="w-full text-left bg-[#111B2B] hover:bg-[#17253B] border border-emerald-500/75 hover:border-emerald-400 px-4 py-3.5 transition-colors cursor-pointer disabled:opacity-60 flex items-center justify-between gap-3 shadow-lg"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {lastSeed ? (
+                    <PixelFlag country={lastSeed} size="md" />
+                  ) : (
+                    <div className="w-9 h-9 bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                      <Play className="w-4 h-4 fill-current" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs sm:text-sm font-extrabold text-emerald-300">
+                        Continuar última partida · {lastCampaign.countryName}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-mono-num px-1.5 py-0.5 bg-[#0B121E] border border-slate-700 text-slate-300">
+                        {lastCampaign.storageSource === 'local' ? (
+                          <>
+                            <HardDrive className="w-2.5 h-2.5 text-amber-400" />
+                            <span>Sin conexión</span>
+                          </>
+                        ) : lastCampaign.storageSource === 'both' ? (
+                          <>
+                            <Cloud className="w-2.5 h-2.5 text-sky-400" />
+                            <span>Nube + Local</span>
+                          </>
+                        ) : (
+                          <>
+                            <Cloud className="w-2.5 h-2.5 text-sky-400" />
+                            <span>Nube</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-300 font-mono-num truncate mt-0.5">
+                      {lastCampaign.dateLabel} · ${lastCampaign.money.toLocaleString('es-ES')} · Ej.{' '}
+                      {lastCampaign.army.toLocaleString('es-ES')}
+                      {typeof lastCampaign.defensesCount === 'number' &&
+                      (lastCampaign.defensesCount > 0 || (lastCampaign.barracksCount ?? 0) > 0)
+                        ? ` · Def ${lastCampaign.defensesCount} · Cuart ${lastCampaign.barracksCount ?? 0}`
+                        : ''}
+                    </div>
+                  </div>
+                </div>
+                <span className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shrink-0">
+                  {resumingLast ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                  )}
+                  <span>Reanudar</span>
+                </span>
+              </button>
+              {resumeError && (
+                <div className="text-[11px] text-red-400 px-1">{resumeError}</div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
             {/* Botón Principal: Jugar */}

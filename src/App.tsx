@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Crown, Handshake, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
 import { AchievementsModal } from './components/AchievementsModal';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
 import { CountrySearchModal } from './components/CountrySearchModal';
 import { CountrySelectScreen } from './components/CountrySelectScreen';
-import { DeviceModeScreen, type DeviceMode } from './components/DeviceModeScreen';
+import {
+  DeviceModeScreen,
+  type DeviceMode,
+  type UnifiedSavedCampaign,
+} from './components/DeviceModeScreen';
 import { EventModal } from './components/EventModal';
 import { GenealogyTreeModal } from './components/GenealogyTreeModal';
 import { MinimapBar } from './components/MinimapBar';
@@ -61,10 +65,18 @@ import {
 import { MAP_H, MAP_W, buildWorldMapData, type WorldMapData } from './engine/mapRasterizer';
 import { soundEngine } from './engine/soundEngine';
 import {
-  loadCampaignFromCloud,
+  deleteCampaignFromCloud,
+  loadCampaignSnapshotWithMetaFromCloud,
   saveCampaignToCloud,
-  type SavedCampaignSummary,
 } from './services/cloudSaves';
+import {
+  deleteLocalCampaign,
+  getLastPlayedLocalCampaign,
+  listLocalCampaigns,
+  loadLocalCampaignSnapshot,
+  saveCampaignLocally,
+  type LocalCampaignSummary,
+} from './services/localSaves';
 import {
   hostBroadcastWorldState,
   hostStartMultiplayerMatch,
@@ -83,7 +95,7 @@ import {
 type GameScreen = 'DEVICE_SELECT' | 'COUNTRY_SELECT' | 'ONLINE_LOBBY' | 'PLAYING';
 
 export default function App() {
-  const { user, canAccessOnline, authBusy, signInWithGoogle } = useFirebase();
+  const { user, canAccessOnline, authBusy, campaigns, signInWithGoogle } = useFirebase();
 
   const [screen, setScreen] = useState<GameScreen>('DEVICE_SELECT');
   const deviceMode: DeviceMode = 'mobile';
@@ -93,10 +105,14 @@ export default function App() {
   const simRef = useRef<SimulationState | null>(null);
   const cachedMapDataRef = useRef<WorldMapData | null>(null);
 
-  // Singleplayer automatic cloud save refs
+  // Singleplayer automatic local (offline) + cloud save state & refs
+  const [localCampaigns, setLocalCampaigns] = useState<LocalCampaignSummary[]>(() =>
+    listLocalCampaigns()
+  );
   const activeCampaignIdRef = useRef<string>(`camp_${Date.now()}`);
   const isSavingRef = useRef<boolean>(false);
   const pendingSaveRef = useRef<boolean>(false);
+  const isSyncingOfflineRef = useRef<boolean>(false);
   const autoSaveTimerRef = useRef<number | null>(null);
   const lastOutcomeRef = useRef<'none' | 'victory' | 'defeat'>('none');
 
@@ -334,11 +350,34 @@ export default function App() {
   );
   const isRemoteGuest = Boolean(isOnlineMatch && !isOnlineHost);
 
+  const refreshLocalCampaigns = useCallback(() => {
+    setLocalCampaigns(listLocalCampaigns());
+  }, []);
+
+  const saveLocalNow = useCallback(
+    (dirtyForCloud = true) => {
+      const sim = simRef.current;
+      if (!sim || sim.isMultiplayer) return;
+      saveCampaignLocally(sim, activeCampaignIdRef.current, {
+        ownerUid: user?.uid,
+        dirtyForCloud,
+      });
+      refreshLocalCampaigns();
+    },
+    [user?.uid, refreshLocalCampaigns]
+  );
+
   const performCloudSave = useCallback(
     async (uidOverride?: string) => {
-      const uid = uidOverride ?? user?.uid;
       const sim = simRef.current;
-      if (!uid || !sim || sim.isMultiplayer) return;
+      if (!sim || sim.isMultiplayer) return;
+
+      // Always write a complete synchronous local snapshot first (works 100% offline & never loses defenses/barracks)
+      saveLocalNow(true);
+
+      const uid = uidOverride ?? user?.uid;
+      if (!uid) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
       if (isSavingRef.current) {
         pendingSaveRef.current = true;
@@ -350,6 +389,7 @@ export default function App() {
       let failed = false;
       try {
         await saveCampaignToCloud(uid, activeCampaignIdRef.current, sim);
+        refreshLocalCampaigns();
       } catch (err) {
         failed = true;
         pendingSaveRef.current = false;
@@ -373,11 +413,18 @@ export default function App() {
         }
       }
     },
-    [user?.uid]
+    [user?.uid, saveLocalNow, refreshLocalCampaigns]
   );
 
   const scheduleAutoCloudSave = useCallback(() => {
-    if (!user?.uid || !simRef.current || simRef.current.isMultiplayer) return;
+    const sim = simRef.current;
+    if (!sim || sim.isMultiplayer) return;
+
+    // Immediate synchronous local save on every player action (defenses, barracks, anti-nukes, diplomacy, war)
+    saveLocalNow(true);
+
+    if (!user?.uid) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
     if (autoSaveTimerRef.current !== null) {
       window.clearTimeout(autoSaveTimerRef.current);
@@ -385,8 +432,8 @@ export default function App() {
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
       void performCloudSave(user.uid);
-    }, 6000);
-  }, [user?.uid, performCloudSave]);
+    }, 2500);
+  }, [user?.uid, saveLocalNow, performCloudSave]);
 
   const handlePlayerMutation = useCallback(() => {
     bumpRender();
@@ -1020,25 +1067,94 @@ export default function App() {
     }
     bumpRender();
     updateAchievements(undefined, sim);
+    saveLocalNow(true);
     if (user?.uid) {
       void performCloudSave(user.uid);
     }
   };
 
   const handleResumeCampaign = useCallback(
-    async (summary: SavedCampaignSummary) => {
-      if (!user?.uid) return;
+    async (summary: UnifiedSavedCampaign) => {
       setMpRoomCode(null);
       setMpRoom(null);
       setMpMembers([]);
-      const loadedSim = await loadCampaignFromCloud(user.uid, summary.campaignId);
-      if (!loadedSim) {
-        throw new Error('No se encontró el estado de la campaña.');
+
+      const localEntry = loadLocalCampaignSnapshot(summary.campaignId);
+      let cloudEntry: Awaited<ReturnType<typeof loadCampaignSnapshotWithMetaFromCloud>> = null;
+      const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+
+      if (user?.uid && summary.storageSource !== 'local' && isOnline) {
+        try {
+          cloudEntry = await loadCampaignSnapshotWithMetaFromCloud(user.uid, summary.campaignId);
+        } catch (err) {
+          // If offline or server unreachable, silently fall back to local snapshot when present
+          if (!localEntry) {
+            throw err;
+          }
+        }
       }
-      simRef.current = loadedSim;
-      lastOutcomeRef.current = loadedSim.outcome;
+
+      if (!localEntry && !cloudEntry) {
+        throw new Error(
+          'No se encontró el estado de la partida. Si estaba guardada solo en la nube, conéctate a internet.'
+        );
+      }
+
+      const countStructures = (s: SimulationState): number => {
+        let total = 0;
+        for (let i = 0; i < s.countries.length; i++) {
+          const c = s.countries[i];
+          total +=
+            c.defenses.length + c.barracks.length + c.antiNukes.length + c.ports.length;
+        }
+        return total;
+      };
+
+      let chosenSim: SimulationState;
+      let chosenFrom: 'local' | 'cloud';
+
+      if (localEntry && cloudEntry) {
+        const lSim = localEntry.sim;
+        const cSim = cloudEntry.sim;
+        if (lSim.totalDays !== cSim.totalDays) {
+          chosenFrom = lSim.totalDays > cSim.totalDays ? 'local' : 'cloud';
+        } else if (lSim.elapsedSeconds !== cSim.elapsedSeconds) {
+          chosenFrom = lSim.elapsedSeconds > cSim.elapsedSeconds ? 'local' : 'cloud';
+        } else {
+          const lStructs = countStructures(lSim);
+          const cStructs = countStructures(cSim);
+          if (lStructs !== cStructs) {
+            chosenFrom = lStructs > cStructs ? 'local' : 'cloud';
+          } else {
+            chosenFrom = localEntry.summary.updatedAtMs >= cloudEntry.updatedAtMs ? 'local' : 'cloud';
+          }
+        }
+        chosenSim = chosenFrom === 'local' ? lSim : cSim;
+      } else if (localEntry) {
+        chosenFrom = 'local';
+        chosenSim = localEntry.sim;
+      } else {
+        chosenFrom = 'cloud';
+        chosenSim = cloudEntry!.sim;
+      }
+
+      simRef.current = chosenSim;
+      lastOutcomeRef.current = chosenSim.outcome;
       activeCampaignIdRef.current = summary.campaignId;
-      setSelectedId(loadedSim.playerId);
+
+      // Always mirror the resumed snapshot locally so it is instantly available offline too
+      const keepDirty = chosenFrom === 'local' ? Boolean(localEntry?.summary.dirtyForCloud) : false;
+      saveCampaignLocally(chosenSim, summary.campaignId, {
+        ownerUid: user?.uid,
+        dirtyForCloud: keepDirty,
+      });
+      refreshLocalCampaigns();
+
+      if (keepDirty && user?.uid && isOnline) {
+        void performCloudSave(user.uid);
+      }
+
+      setSelectedId(chosenSim.playerId);
       setDrawerTab('manage');
       setMobileDrawerOpen(false);
       setMapMode('political');
@@ -1046,7 +1162,7 @@ export default function App() {
       lastActiveSpeedRef.current = 1;
       setShowTutorial(false);
       setScreen('PLAYING');
-      const c = loadedSim.countries[loadedSim.playerId];
+      const c = chosenSim.countries[chosenSim.playerId];
       setFocusRequest({
         x: c.capitalX,
         y: c.capitalY,
@@ -1054,9 +1170,20 @@ export default function App() {
         nonce: Date.now(),
       });
       bumpRender();
-      updateAchievements(undefined, loadedSim);
+      updateAchievements(undefined, chosenSim);
     },
-    [user?.uid, bumpRender, updateAchievements]
+    [user?.uid, bumpRender, updateAchievements, refreshLocalCampaigns, performCloudSave]
+  );
+
+  const handleDeleteCampaign = useCallback(
+    async (summary: UnifiedSavedCampaign) => {
+      deleteLocalCampaign(summary.campaignId);
+      refreshLocalCampaigns();
+      if (user?.uid && summary.storageSource !== 'local') {
+        await deleteCampaignFromCloud(user.uid, summary.campaignId);
+      }
+    },
+    [user?.uid, refreshLocalCampaigns]
   );
 
   const handleHostStartMatch = useCallback(async () => {
@@ -1179,11 +1306,14 @@ export default function App() {
       soundEngine.playClick();
       if (simRef.current?.isMultiplayer) {
         scheduleHostBroadcast(true);
-      } else if (s === 0 && user?.uid) {
-        void performCloudSave(user.uid);
+      } else if (s === 0) {
+        saveLocalNow(true);
+        if (user?.uid) {
+          void performCloudSave(user.uid);
+        }
       }
     },
-    [isRemoteGuest, user?.uid, performCloudSave, scheduleHostBroadcast]
+    [isRemoteGuest, user?.uid, saveLocalNow, performCloudSave, scheduleHostBroadcast]
   );
 
   // PC Keyboard Shortcuts
@@ -1284,8 +1414,11 @@ export default function App() {
         lastOutcomeRef.current = sim.outcome;
         if (sim.isMultiplayer) {
           scheduleHostBroadcast(true);
-        } else if (user?.uid) {
-          void performCloudSave(user.uid);
+        } else {
+          saveLocalNow(true);
+          if (user?.uid) {
+            void performCloudSave(user.uid);
+          }
         }
       } else if (sim.isMultiplayer) {
         if (sim.diplomaticOffers.length > prevOfferCount) {
@@ -1298,7 +1431,16 @@ export default function App() {
     }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [screen, speed, isRemoteGuest, bumpRender, user?.uid, performCloudSave, scheduleHostBroadcast]);
+  }, [
+    screen,
+    speed,
+    isRemoteGuest,
+    bumpRender,
+    user?.uid,
+    saveLocalNow,
+    performCloudSave,
+    scheduleHostBroadcast,
+  ]);
 
   // Per-second Economy Income Tick & Host Multiplayer Sync
   useEffect(() => {
@@ -1443,36 +1585,151 @@ export default function App() {
     });
   }, []);
 
-  // Automatic cloud save every 60s & on tab/window exit (singleplayer only)
+  // Automatic local (offline) + cloud save during gameplay & on tab/app exit (singleplayer)
   useEffect(() => {
-    if (screen !== 'PLAYING' || !user?.uid || simRef.current?.isMultiplayer) return;
+    if (screen !== 'PLAYING' || simRef.current?.isMultiplayer) return;
 
-    const autoTimer = window.setInterval(() => {
-      void performCloudSave(user.uid);
-    }, 60000);
+    const localTimer = window.setInterval(() => {
+      saveLocalNow(true);
+    }, 15000);
 
-    const onVisibilityOrHide = () => {
-      if (document.visibilityState === 'hidden') {
+    const cloudTimer = window.setInterval(() => {
+      if (user?.uid) {
+        void performCloudSave(user.uid);
+      }
+    }, 45000);
+
+    const persistOnLeave = () => {
+      // Synchronous localStorage snapshot guarantees zero loss even offline or on instant app close
+      saveLocalNow(true);
+      if (user?.uid) {
         void performCloudSave(user.uid);
       }
     };
-    const onPageHide = () => {
-      void performCloudSave(user.uid);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        persistOnLeave();
+      }
     };
 
-    document.addEventListener('visibilitychange', onVisibilityOrHide);
-    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', persistOnLeave);
+    window.addEventListener('beforeunload', persistOnLeave);
 
     return () => {
-      window.clearInterval(autoTimer);
+      window.clearInterval(localTimer);
+      window.clearInterval(cloudTimer);
       if (autoSaveTimerRef.current !== null) {
         window.clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
       }
-      document.removeEventListener('visibilitychange', onVisibilityOrHide);
-      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', persistOnLeave);
+      window.removeEventListener('beforeunload', persistOnLeave);
     };
-  }, [screen, user?.uid, performCloudSave]);
+  }, [screen, user?.uid, saveLocalNow, performCloudSave]);
+
+  // Background cloud catch-up: when signed in and back online, sync any dirty offline saves up to Firestore
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const syncDirtyLocalCampaigns = async () => {
+      if (isSyncingOfflineRef.current) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
+
+      const dirtyList = listLocalCampaigns().filter((item) => item.dirtyForCloud);
+      if (dirtyList.length === 0) return;
+
+      isSyncingOfflineRef.current = true;
+      try {
+        for (const item of dirtyList.slice(0, 2)) {
+          if (screen === 'PLAYING' && item.campaignId === activeCampaignIdRef.current) {
+            continue;
+          }
+          const loaded = loadLocalCampaignSnapshot(item.campaignId);
+          if (!loaded) continue;
+          await saveCampaignToCloud(user.uid, item.campaignId, loaded.sim);
+        }
+        refreshLocalCampaigns();
+      } catch (err) {
+        if (isQuotaExceededError(err) || isFirestoreQuotaCooldownActive()) {
+          quotaCooldownUntilRef.current = Date.now() + 5 * 60_000;
+        }
+      } finally {
+        isSyncingOfflineRef.current = false;
+      }
+    };
+
+    void syncDirtyLocalCampaigns();
+    const onOnline = () => {
+      void syncDirtyLocalCampaigns();
+    };
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+    };
+  }, [user?.uid, screen, localCampaigns.length, refreshLocalCampaigns]);
+
+  // Unified saved campaigns list (merges offline local snapshots + Firestore cloud campaigns)
+  const mergedCampaigns = useMemo<UnifiedSavedCampaign[]>(() => {
+    const map = new Map<string, UnifiedSavedCampaign>();
+
+    for (const cloud of campaigns) {
+      map.set(cloud.campaignId, {
+        ...cloud,
+        storageSource: 'cloud',
+      });
+    }
+
+    for (const local of localCampaigns) {
+      const existingCloud = map.get(local.campaignId);
+      if (!existingCloud) {
+        map.set(local.campaignId, {
+          ...local,
+          storageSource: 'local',
+          dirtyForCloud: local.dirtyForCloud,
+          defensesCount: local.defensesCount,
+          barracksCount: local.barracksCount,
+          antiNukesCount: local.antiNukesCount,
+        });
+      } else {
+        const localDateScore = local.year * 400 + local.month * 32 + local.day;
+        const cloudDateScore = existingCloud.year * 400 + existingCloud.month * 32 + existingCloud.day;
+        const localIsNewer =
+          localDateScore > cloudDateScore ||
+          (localDateScore === cloudDateScore && local.elapsedSeconds > existingCloud.elapsedSeconds) ||
+          (localDateScore === cloudDateScore &&
+            local.elapsedSeconds === existingCloud.elapsedSeconds &&
+            local.updatedAtMs >= existingCloud.updatedAtMs);
+
+        const base = localIsNewer ? local : existingCloud;
+        map.set(local.campaignId, {
+          ...base,
+          updatedAtMs: Math.max(local.updatedAtMs, existingCloud.updatedAtMs),
+          storageSource: 'both',
+          dirtyForCloud: local.dirtyForCloud,
+          defensesCount: local.defensesCount,
+          barracksCount: local.barracksCount,
+          antiNukesCount: local.antiNukesCount,
+        });
+      }
+    }
+
+    const list = Array.from(map.values()).sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+    const lastLocal = getLastPlayedLocalCampaign();
+    if (lastLocal) {
+      const idx = list.findIndex((c) => c.campaignId === lastLocal.campaignId);
+      if (idx > 0) {
+        const [item] = list.splice(idx, 1);
+        list.unshift(item);
+      }
+    }
+    return list;
+  }, [localCampaigns, campaigns]);
+
+  const lastCampaign = mergedCampaigns[0] ?? null;
 
   const renderOnlineDevBanner = () =>
     onlineDevNotice ? (
@@ -1518,6 +1775,8 @@ export default function App() {
           }}
           onPressOnline={handlePressOnline}
           onResetTutorial={handleResetTutorial}
+          lastCampaign={lastCampaign}
+          onResumeLastCampaign={handleResumeCampaign}
         />
         {menuTutorialOpen && (
           <TutorialOverlay
@@ -1612,7 +1871,9 @@ export default function App() {
           deviceMode={deviceMode}
           onChangeDeviceMode={() => {}}
           onStartCampaign={handleStartCampaign}
+          savedCampaigns={mergedCampaigns}
           onResumeCampaign={handleResumeCampaign}
+          onDeleteCampaign={handleDeleteCampaign}
           onOpenOnline={handlePressOnline}
           onOpenAchievements={() => setAchievementsOpen(true)}
           achievementsUnlockedCount={achievementsUnlockedCount}
@@ -1676,10 +1937,22 @@ export default function App() {
     setPlacingAntiNuke(false);
     setPlacingBarracks(false);
     setLaunchingNuke(false);
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
     if (sim.isMultiplayer) {
       await handleLeaveOnlineRoom();
-    } else if (user?.uid) {
-      void performCloudSave(user.uid);
+    } else {
+      // Save synchronously to local storage first (always succeeds offline)
+      saveLocalNow(true);
+      // Wait briefly for cloud sync before leaving so all defenses/barracks/territory commit cleanly
+      if (user?.uid && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+        await Promise.race([
+          performCloudSave(user.uid),
+          new Promise<void>((resolve) => window.setTimeout(resolve, 3500)),
+        ]);
+      }
     }
     setScreen('COUNTRY_SELECT');
   };

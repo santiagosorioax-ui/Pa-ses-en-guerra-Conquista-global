@@ -3,6 +3,7 @@ import {
   Cloud,
   Dices,
   Globe,
+  HardDrive,
   HelpCircle,
   List,
   Loader2,
@@ -22,8 +23,7 @@ import { computeInitialArmy, computeInitialMoney } from '../engine/gameSimulatio
 import { MAP_H, MAP_W, buildWorldMapData, lonToX, latToY } from '../engine/mapRasterizer';
 import { renderStaticPreviewToBuffer } from '../engine/pixelRenderer';
 import { soundEngine } from '../engine/soundEngine';
-import { deleteCampaignFromCloud, type SavedCampaignSummary } from '../services/cloudSaves';
-import type { DeviceMode } from './DeviceModeScreen';
+import type { DeviceMode, UnifiedSavedCampaign } from './DeviceModeScreen';
 import { PWAInstallButton } from './PWAInstallPrompt';
 import { PixelFlag } from './PixelFlag';
 
@@ -31,7 +31,9 @@ interface CountrySelectScreenProps {
   deviceMode: DeviceMode;
   onChangeDeviceMode: (mode: DeviceMode) => void;
   onStartCampaign: (countryId: number) => void;
-  onResumeCampaign: (summary: SavedCampaignSummary) => Promise<void>;
+  savedCampaigns: UnifiedSavedCampaign[];
+  onResumeCampaign: (summary: UnifiedSavedCampaign) => Promise<void>;
+  onDeleteCampaign: (summary: UnifiedSavedCampaign) => Promise<void>;
   onOpenOnline: () => void;
   onOpenAchievements: () => void;
   achievementsUnlockedCount: number;
@@ -51,7 +53,9 @@ export function CountrySelectScreen({
   deviceMode,
   onChangeDeviceMode,
   onStartCampaign,
+  savedCampaigns,
   onResumeCampaign,
+  onDeleteCampaign,
   onOpenOnline,
   onOpenAchievements,
   achievementsUnlockedCount,
@@ -63,7 +67,6 @@ export function CountrySelectScreen({
     authReady,
     authBusy,
     authError,
-    campaigns,
     campaignsLoading,
     signInWithGoogle,
     signOutUser,
@@ -319,155 +322,192 @@ export function CountrySelectScreen({
     camRef.current.y = Math.max(0, Math.min(MAP_H, wy - (sy - ch * 0.5) / newScale));
   };
 
+  const renderSavedCampaignsList = () => {
+    if (campaignsLoading && savedCampaigns.length === 0) {
+      return (
+        <div className="flex items-center gap-2 text-[11px] text-slate-400 py-1">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>Cargando partidas guardadas...</span>
+        </div>
+      );
+    }
+
+    if (savedCampaigns.length === 0) {
+      return (
+        <div className="text-[11px] text-slate-400">
+          Aún no tienes partidas guardadas. Al salir de cualquier partida se guardará automáticamente (incluso sin internet).
+        </div>
+      );
+    }
+
+    return (
+      <div className={`space-y-1.5 overflow-y-auto pr-0.5 ${deviceMode === 'mobile' ? 'max-h-[48vh]' : 'max-h-44'}`}>
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
+          <HardDrive className="w-3 h-3" />
+          <span>Continuar Partida ({savedCampaigns.length})</span>
+        </div>
+        {savedCampaigns.slice(0, 8).map((camp, idx) => {
+          const seed = COUNTRIES_195[camp.countryId];
+          const isBusy = resumingId === camp.campaignId || deletingId === camp.campaignId;
+          const savedTime = new Date(camp.updatedAtMs).toLocaleString('es-ES', {
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          return (
+            <div
+              key={camp.campaignId}
+              className={`bg-[#0B121E] border px-2.5 py-2 flex items-center justify-between gap-2 ${
+                idx === 0 ? 'border-emerald-500/60' : 'border-slate-800'
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {seed && <PixelFlag country={seed} size="sm" />}
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-slate-100 truncate flex items-center gap-1.5">
+                    <span className="truncate">{camp.countryName}</span>
+                    {idx === 0 && (
+                      <span className="text-[9px] font-mono-num px-1 py-0.5 bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 shrink-0">
+                        Última
+                      </span>
+                    )}
+                    {camp.outcome === 'victory' && (
+                      <span className="text-[10px] text-amber-400 shrink-0">(Victoria)</span>
+                    )}
+                    {camp.outcome === 'defeat' && (
+                      <span className="text-[10px] text-red-400 shrink-0">(Derrota)</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono-num truncate">
+                    {camp.dateLabel} · ${camp.money.toLocaleString('es-ES')} · Ej.{' '}
+                    {camp.army.toLocaleString('es-ES')} · {savedTime}
+                  </div>
+                  <div className="text-[9px] font-mono-num flex items-center gap-1.5 mt-0.5">
+                    {camp.storageSource === 'local' ? (
+                      <span className="text-amber-300 flex items-center gap-1">
+                        <HardDrive className="w-2.5 h-2.5" />
+                        Guardado local (sin internet)
+                      </span>
+                    ) : camp.storageSource === 'both' ? (
+                      <span className="text-emerald-300 flex items-center gap-1">
+                        <Cloud className="w-2.5 h-2.5" />
+                        Nube + Local{camp.dirtyForCloud ? ' (sincronizando...)' : ''}
+                      </span>
+                    ) : (
+                      <span className="text-sky-300 flex items-center gap-1">
+                        <Cloud className="w-2.5 h-2.5" />
+                        Guardado en la nube
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  disabled={isBusy}
+                  onClick={async () => {
+                    setCloudActionError(null);
+                    setResumingId(camp.campaignId);
+                    try {
+                      soundEngine.playTreaty();
+                      await onResumeCampaign(camp);
+                    } catch (err) {
+                      setCloudActionError(
+                        err instanceof Error
+                          ? err.message
+                          : 'No se pudo cargar la partida guardada.'
+                      );
+                    } finally {
+                      setResumingId(null);
+                    }
+                  }}
+                  className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                >
+                  {resumingId === camp.campaignId ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Play className="w-3 h-3 fill-current" />
+                  )}
+                  <span>Jugar</span>
+                </button>
+                <button
+                  disabled={isBusy}
+                  onClick={async () => {
+                    setCloudActionError(null);
+                    setDeletingId(camp.campaignId);
+                    try {
+                      await onDeleteCampaign(camp);
+                    } catch {
+                      setCloudActionError('No se pudo eliminar la partida.');
+                    } finally {
+                      setDeletingId(null);
+                    }
+                  }}
+                  title="Eliminar partida guardada"
+                  className="p-1.5 bg-slate-900 hover:bg-red-950/70 border border-slate-700 hover:border-red-500/60 text-slate-400 hover:text-red-300 cursor-pointer"
+                >
+                  {deletingId === camp.campaignId ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderCloudPanel = () => (
-    <div className="px-4 py-3 border-b border-slate-800 bg-[#0E1726]">
+    <div className="px-4 py-3 border-b border-slate-800 bg-[#0E1726] space-y-2.5">
       {!authReady ? (
         <div className="flex items-center gap-2 text-xs text-slate-400">
           <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
           <span>Conectando con la nube...</span>
         </div>
       ) : user ? (
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              {user.photoURL ? (
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName ?? 'Usuario'}
-                  className="w-7 h-7 border border-slate-700 object-cover shrink-0"
-                />
-              ) : (
-                <Cloud className="w-4 h-4 text-sky-400 shrink-0" />
-              )}
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-white truncate">
-                  {user.displayName || 'Comandante'}
-                </div>
-                <div className="text-[10px] text-emerald-400 truncate">
-                  Guardado automático en la nube activo
-                </div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            {user.photoURL ? (
+              <img
+                src={user.photoURL}
+                alt={user.displayName ?? 'Usuario'}
+                className="w-7 h-7 border border-slate-700 object-cover shrink-0"
+              />
+            ) : (
+              <Cloud className="w-4 h-4 text-sky-400 shrink-0" />
+            )}
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-white truncate">
+                {user.displayName || 'Comandante'}
+              </div>
+              <div className="text-[10px] text-emerald-400 truncate">
+                Guardado automático (Nube + Sin conexión)
               </div>
             </div>
-            <button
-              onClick={signOutUser}
-              disabled={authBusy}
-              className="px-2.5 py-1.5 text-[11px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center gap-1 cursor-pointer shrink-0"
-              title="Cerrar sesión"
-            >
-              <LogOut className="w-3 h-3" />
-              <span>Salir</span>
-            </button>
           </div>
-
-          {campaignsLoading ? (
-            <div className="flex items-center gap-2 text-[11px] text-slate-400 py-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              <span>Cargando partidas guardadas...</span>
-            </div>
-          ) : campaigns.length > 0 ? (
-            <div className={`space-y-1.5 overflow-y-auto pr-0.5 ${deviceMode === 'mobile' ? 'max-h-[45vh]' : 'max-h-40'}`}>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
-                <Cloud className="w-3 h-3" />
-                <span>Continuar Partida ({campaigns.length})</span>
-              </div>
-              {campaigns.slice(0, 6).map((camp) => {
-                const seed = COUNTRIES_195[camp.countryId];
-                const isBusy = resumingId === camp.campaignId || deletingId === camp.campaignId;
-                const savedTime = new Date(camp.updatedAtMs).toLocaleString('es-ES', {
-                  day: '2-digit',
-                  month: 'short',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                });
-                return (
-                  <div
-                    key={camp.campaignId}
-                    className="bg-[#0B121E] border border-slate-800 px-2.5 py-2 flex items-center justify-between gap-2"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {seed && <PixelFlag country={seed} size="sm" />}
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-slate-100 truncate">
-                          {camp.countryName}
-                          {camp.outcome === 'victory' && (
-                            <span className="ml-1.5 text-[10px] text-amber-400">(Victoria)</span>
-                          )}
-                          {camp.outcome === 'defeat' && (
-                            <span className="ml-1.5 text-[10px] text-red-400">(Derrota)</span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono-num truncate">
-                          {camp.dateLabel} · ${camp.money} · Ej. {camp.army} · {savedTime}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        disabled={isBusy}
-                        onClick={async () => {
-                          setCloudActionError(null);
-                          setResumingId(camp.campaignId);
-                          try {
-                            soundEngine.playTreaty();
-                            await onResumeCampaign(camp);
-                          } catch {
-                            setCloudActionError('No se pudo cargar la partida guardada.');
-                          } finally {
-                            setResumingId(null);
-                          }
-                        }}
-                        className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                      >
-                        {resumingId === camp.campaignId ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Play className="w-3 h-3 fill-current" />
-                        )}
-                        <span>Jugar</span>
-                      </button>
-                      <button
-                        disabled={isBusy}
-                        onClick={async () => {
-                          if (!user) return;
-                          setCloudActionError(null);
-                          setDeletingId(camp.campaignId);
-                          try {
-                            await deleteCampaignFromCloud(user.uid, camp.campaignId);
-                          } catch {
-                            setCloudActionError('No se pudo eliminar la partida.');
-                          } finally {
-                            setDeletingId(null);
-                          }
-                        }}
-                        title="Eliminar partida guardada"
-                        className="p-1.5 bg-slate-900 hover:bg-red-950/70 border border-slate-700 hover:border-red-500/60 text-slate-400 hover:text-red-300 cursor-pointer"
-                      >
-                        {deletingId === camp.campaignId ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-[11px] text-slate-400">
-              Aún no tienes partidas guardadas. Empieza una campaña y se guardará automáticamente.
-            </div>
-          )}
+          <button
+            onClick={signOutUser}
+            disabled={authBusy}
+            className="px-2.5 py-1.5 text-[11px] bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center gap-1 cursor-pointer shrink-0"
+            title="Cerrar sesión"
+          >
+            <LogOut className="w-3 h-3" />
+            <span>Salir</span>
+          </button>
         </div>
       ) : (
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs font-semibold text-slate-100 flex items-center gap-1.5">
               <Cloud className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-              <span>Guardado automático en la nube</span>
+              <span>Guardado local activo · Conecta la nube</span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Conecta Google y tu progreso se guardará solo al instante.
+              Tu última partida se guarda sin internet. Conecta Google para respaldarla también en la nube.
             </div>
           </div>
           <button
@@ -484,8 +524,11 @@ export function CountrySelectScreen({
           </button>
         </div>
       )}
+
+      {renderSavedCampaignsList()}
+
       {(authError || cloudActionError) && (
-        <div className="mt-2 text-[11px] text-red-400">
+        <div className="text-[11px] text-red-400">
           {cloudActionError || authError}
         </div>
       )}
@@ -610,7 +653,7 @@ export function CountrySelectScreen({
             }`}
           >
             <Cloud className="w-4 h-4" />
-            <span>Nube{campaigns.length > 0 ? ` (${campaigns.length})` : ''}</span>
+            <span>Guardadas{savedCampaigns.length > 0 ? ` (${savedCampaigns.length})` : ''}</span>
           </button>
         </div>
 

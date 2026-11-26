@@ -4,6 +4,7 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocFromServer,
   onSnapshot,
   query,
   serverTimestamp,
@@ -17,6 +18,7 @@ import {
   buildCampaignMetaPayload,
   buildCampaignSnapshotPayload,
   restoreSimulationFromSnapshot,
+  stripUndefinedForFirestore,
 } from '../engine/campaignSerializer';
 import type { SimulationState } from '../engine/gameSimulation';
 import {
@@ -27,6 +29,7 @@ import {
   isFirestoreQuotaCooldownActive,
   withTimeout,
 } from '../firebase';
+import { markLocalCampaignSyncedToCloud } from './localSaves';
 
 export interface SavedCampaignSummary {
   campaignId: string;
@@ -178,8 +181,8 @@ export async function saveCampaignToCloud(
     return { saved: false, skippedDefeated: true };
   }
 
-  const metaPayload = buildCampaignMetaPayload(uid, campaignId, sim);
-  const snapPayload = buildCampaignSnapshotPayload(uid, campaignId, sim);
+  const metaPayload = stripUndefinedForFirestore(buildCampaignMetaPayload(uid, campaignId, sim));
+  const snapPayload = stripUndefinedForFirestore(buildCampaignSnapshotPayload(uid, campaignId, sim));
 
   const batch = writeBatch(db);
 
@@ -243,6 +246,7 @@ export async function saveCampaignToCloud(
 
   try {
     await withTimeout(batch.commit(), 9000);
+    markLocalCampaignSyncedToCloud(campaignId, uid);
     return { saved: true };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, snapPath, false);
@@ -250,21 +254,57 @@ export async function saveCampaignToCloud(
   }
 }
 
-export async function loadCampaignFromCloud(
+export interface LoadedCloudCampaign {
+  sim: SimulationState;
+  updatedAtMs: number;
+  totalDays: number;
+  elapsedSeconds: number;
+}
+
+export async function loadCampaignSnapshotWithMetaFromCloud(
   uid: string,
   campaignId: string
-): Promise<SimulationState | null> {
+): Promise<LoadedCloudCampaign | null> {
   const snapPath = `users/${uid}/campaigns/${campaignId}/data/state`;
   const snapRef = doc(db, 'users', uid, 'campaigns', campaignId, 'data', 'state');
 
   try {
-    const docSnap = await withTimeout(getDoc(snapRef), 9000);
-    if (!docSnap.exists()) return null;
-    return restoreSimulationFromSnapshot(docSnap.data());
+    let docSnap = null;
+    const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+    if (isOnline) {
+      try {
+        docSnap = await withTimeout(getDocFromServer(snapRef), 8000);
+      } catch {
+        // Fallback to local Firestore cache if server fetch times out or drops offline
+        docSnap = await withTimeout(getDoc(snapRef), 4500);
+      }
+    } else {
+      docSnap = await withTimeout(getDoc(snapRef), 4500);
+    }
+
+    if (!docSnap || !docSnap.exists()) return null;
+    const raw = docSnap.data();
+    const ts = raw.updatedAt as Timestamp | undefined;
+    const updatedAtMs = ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
+    const sim = restoreSimulationFromSnapshot(raw);
+    return {
+      sim,
+      updatedAtMs,
+      totalDays: sim.totalDays,
+      elapsedSeconds: sim.elapsedSeconds,
+    };
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, snapPath, false);
     throw new Error(formatFirestoreUserError(error, 'No se pudo cargar la partida guardada.'));
   }
+}
+
+export async function loadCampaignFromCloud(
+  uid: string,
+  campaignId: string
+): Promise<SimulationState | null> {
+  const loaded = await loadCampaignSnapshotWithMetaFromCloud(uid, campaignId);
+  return loaded ? loaded.sim : null;
 }
 
 export async function deleteCampaignFromCloud(

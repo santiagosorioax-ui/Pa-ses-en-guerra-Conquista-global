@@ -1,8 +1,12 @@
 import { Bytes } from 'firebase/firestore';
 import { COUNTRIES_195 } from '../data/countries195';
 import {
+  ANTI_NUKE_RADIUS,
+  BARRACKS_RADIUS,
+  DEFENSE_RADIUS,
   N_COUNTRIES,
   formatFullDate,
+  getCountryName,
   stabilizeSimulationStats,
   type AiDoctrine,
   type ChronicleEntry,
@@ -187,7 +191,7 @@ export function buildCampaignMetaPayload(
     ownerId: uid,
     campaignId,
     countryId: sim.playerId,
-    countryName: p.seed.name.slice(0, 80),
+    countryName: getCountryName(p).slice(0, 80),
     countryIso2: p.seed.iso2,
     dateLabel: formatFullDate(sim.day, sim.month, sim.year),
     day: sim.day,
@@ -220,13 +224,13 @@ function serializeCountries(sim: SimulationState): SerializedCountry[] {
     cityPurchases: c.cityPurchases,
     goldMinesBuiltThisMonth: c.goldMinesBuiltThisMonth,
     citiesBuiltThisMonth: c.citiesBuiltThisMonth,
-    ports: c.ports.slice(0, 32).map((p) => ({ x: p.x, y: p.y, nx: p.nx, ny: p.ny })),
-    defenses: c.defenses.slice(0, 32).map((d) => ({ x: d.x, y: d.y, radius: d.radius })),
+    ports: c.ports.slice(0, 120).map((p) => ({ x: p.x, y: p.y, nx: p.nx, ny: p.ny })),
+    defenses: c.defenses.slice(0, 200).map((d) => ({ x: d.x, y: d.y, radius: d.radius })),
     ...(c.antiNukes && c.antiNukes.length > 0
-      ? { antiNukes: c.antiNukes.slice(0, 16).map((a) => ({ x: a.x, y: a.y, radius: a.radius })) }
+      ? { antiNukes: c.antiNukes.slice(0, 80).map((a) => ({ x: a.x, y: a.y, radius: a.radius })) }
       : {}),
     ...(c.barracks && c.barracks.length > 0
-      ? { barracks: c.barracks.slice(0, 24).map((b) => ({ x: b.x, y: b.y, radius: b.radius })) }
+      ? { barracks: c.barracks.slice(0, 120).map((b) => ({ x: b.x, y: b.y, radius: b.radius })) }
       : {}),
     aggressiveExpansion: c.aggressiveExpansion,
     aiDoctrine: c.aiDoctrine,
@@ -237,7 +241,7 @@ function serializeCountries(sim: SimulationState): SerializedCountry[] {
     annexedById: c.annexedById ?? null,
     ...(c.customName ? { customName: c.customName.slice(0, 80) } : {}),
     ...(c.completedFocusIds && c.completedFocusIds.length > 0
-      ? { completedFocusIds: c.completedFocusIds.slice(0, 12) }
+      ? { completedFocusIds: c.completedFocusIds.slice(0, 32) }
       : {}),
     ...(c.focusIncomeBonus ? { focusIncomeBonus: Math.min(20, Math.round(c.focusIncomeBonus)) } : {}),
     ...(c.focusArmyCapBonus ? { focusArmyCapBonus: Math.min(1200, Math.round(c.focusArmyCapBonus)) } : {}),
@@ -310,10 +314,27 @@ function hydrateCountries(
       cityPurchases: sc.cityPurchases,
       goldMinesBuiltThisMonth: sc.goldMinesBuiltThisMonth,
       citiesBuiltThisMonth: sc.citiesBuiltThisMonth,
-      ports: (sc.ports ?? []).map((p) => ({ ...p })),
-      defenses: (sc.defenses ?? []).map((d) => ({ ...d })),
-      antiNukes: (sc.antiNukes ?? []).map((a) => ({ ...a })),
-      barracks: (sc.barracks ?? []).map((b) => ({ ...b })),
+      ports: (sc.ports ?? []).map((p) => ({
+        x: Number(p.x) || 0,
+        y: Number(p.y) || 0,
+        nx: Number(p.nx) || 0,
+        ny: Number(p.ny) || 0,
+      })),
+      defenses: (sc.defenses ?? []).map((d) => ({
+        x: Number(d.x) || 0,
+        y: Number(d.y) || 0,
+        radius: Number(d.radius) || DEFENSE_RADIUS,
+      })),
+      antiNukes: (sc.antiNukes ?? []).map((a) => ({
+        x: Number(a.x) || 0,
+        y: Number(a.y) || 0,
+        radius: Number(a.radius) || ANTI_NUKE_RADIUS,
+      })),
+      barracks: (sc.barracks ?? []).map((b) => ({
+        x: Number(b.x) || 0,
+        y: Number(b.y) || 0,
+        radius: Number(b.radius) || BARRACKS_RADIUS,
+      })),
       aggressiveExpansion: sc.aggressiveExpansion,
       aiDoctrine: sc.aiDoctrine,
       color: seed.color,
