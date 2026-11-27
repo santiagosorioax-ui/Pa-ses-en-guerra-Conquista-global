@@ -240,6 +240,7 @@ export const BARRACKS_ARMY_CAP_BONUS = 500; // +500 capacidad militar por cada C
 export const BARRACKS_RADIUS = Math.round(ANTI_NUKE_RADIUS * 1.5); // 54 (540 km: 50% más grande que el Antibombas)
 export const BARRACKS_REBELLION_REDUCTION = 0.5; // -50% rebeldía solo en la zona cubierta por el cuartel
 export const NUKE_COST = 30000;
+export const AI_NUKE_COST = 10000;
 export const NUKE_RADIUS = 19; // un poco menos radio que la defensa (24 -> 19)
 export const NUKE_COOLDOWN_DAYS = 90; // 3 meses de recarga entre lanzamientos
 export const NUKE_FALLOUT_DAYS = 60; // 2 meses de zona irradiada visible
@@ -251,6 +252,11 @@ export const SUPPRESS_REBELLION_REDUCTION = 45;
 
 export function isHumanCountry(sim: SimulationState, countryId: number): boolean {
   return Boolean(sim.humanPlayers[countryId]);
+}
+
+export function getNukeCost(sim: SimulationState, countryId: number): number {
+  const isPlayer = countryId === sim.playerId || isHumanCountry(sim, countryId);
+  return isPlayer ? NUKE_COST : AI_NUKE_COST;
 }
 
 export function computeInitialMoney(seedGdp: number, seedMilitary: number): number {
@@ -2020,10 +2026,11 @@ export function launchNukeAt(
       message: `Misil nuclear en recarga (${att.nukeCooldownDays} días restantes).`,
     };
   }
-  if (att.money < NUKE_COST) {
+  const nukeCost = getNukeCost(sim, attackerId);
+  if (att.money < nukeCost) {
     return {
       ok: false,
-      message: `Necesitas $${NUKE_COST.toLocaleString('es-ES')} para lanzar una Bomba Nuclear.`,
+      message: `Necesitas $${nukeCost.toLocaleString('es-ES')} para lanzar una Bomba Nuclear.`,
     };
   }
 
@@ -2089,7 +2096,7 @@ export function launchNukeAt(
 
   if (interceptor) {
     const def = sim.countries[interceptor.defenderId];
-    att.money = Math.max(0, att.money - NUKE_COST);
+    att.money = Math.max(0, att.money - nukeCost);
     att.nukeCooldownDays = NUKE_COOLDOWN_DAYS;
     att.aggressiveExpansion = Math.min(100, att.aggressiveExpansion + 8);
     sim.globalTension = Math.min(100, sim.globalTension + 5);
@@ -2157,7 +2164,7 @@ export function launchNukeAt(
     };
   }
 
-  att.money = Math.max(0, att.money - NUKE_COST);
+  att.money = Math.max(0, att.money - nukeCost);
   att.nukeCooldownDays = NUKE_COOLDOWN_DAYS;
   att.lastNukeStrike = {
     id: sim.nextIdCounter++,
@@ -3286,7 +3293,7 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
     // 1a. Autonomous AI Nuclear Strike decision when at war and nuclear-capable
     if (
       (c.nukeCooldownDays ?? 0) <= 0 &&
-      c.money >= NUKE_COST &&
+      c.money >= getNukeCost(sim, c.id) &&
       sim.totalDays >= 150
     ) {
       const targetEnemyId = enemies[Math.floor(Math.random() * enemies.length)];
