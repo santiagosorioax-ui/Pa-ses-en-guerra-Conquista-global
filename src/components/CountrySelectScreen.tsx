@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeft,
   Cloud,
   Dices,
+  Flame,
   Globe,
   HardDrive,
   HelpCircle,
@@ -19,7 +21,11 @@ import {
 } from 'lucide-react';
 import { COUNTRIES_195, type Continent, type CountrySeed } from '../data/countries195';
 import { useFirebase } from '../contexts/FirebaseContext';
-import { computeInitialArmy, computeInitialMoney } from '../engine/gameSimulation';
+import {
+  computeInitialArmy,
+  computeInitialMoney,
+  type GameDifficulty,
+} from '../engine/gameSimulation';
 import { MAP_H, MAP_W, buildWorldMapData, lonToX, latToY } from '../engine/mapRasterizer';
 import { renderStaticPreviewToBuffer } from '../engine/pixelRenderer';
 import { soundEngine } from '../engine/soundEngine';
@@ -29,6 +35,8 @@ import { PixelFlag } from './PixelFlag';
 
 interface CountrySelectScreenProps {
   deviceMode: DeviceMode;
+  difficulty: GameDifficulty;
+  onBackToMenu?: () => void;
   onChangeDeviceMode: (mode: DeviceMode) => void;
   onStartCampaign: (countryId: number) => void;
   savedCampaigns: UnifiedSavedCampaign[];
@@ -51,6 +59,8 @@ const CONTINENTS: Array<'Todos' | Continent> = [
 
 export function CountrySelectScreen({
   deviceMode,
+  difficulty,
+  onBackToMenu,
   onChangeDeviceMode,
   onStartCampaign,
   savedCampaigns,
@@ -61,6 +71,7 @@ export function CountrySelectScreen({
   achievementsUnlockedCount,
   onResetTutorial,
 }: CountrySelectScreenProps) {
+  const isHard = difficulty === 'hard';
   const {
     user,
     canAccessOnline,
@@ -367,6 +378,11 @@ export function CountrySelectScreen({
                 <div className="min-w-0">
                   <div className="text-xs font-semibold text-slate-100 truncate flex items-center gap-1.5">
                     <span className="truncate">{camp.countryName}</span>
+                    {camp.difficulty === 'hard' && (
+                      <span className="text-[9px] font-mono-num font-bold px-1 py-0.5 bg-red-950/90 border border-red-500/70 text-red-300 uppercase shrink-0">
+                        Difícil
+                      </span>
+                    )}
                     {idx === 0 && (
                       <span className="text-[9px] font-mono-num px-1 py-0.5 bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 shrink-0">
                         Última
@@ -541,9 +557,31 @@ export function CountrySelectScreen({
       <div className="w-screen h-screen flex flex-col bg-[#0B121E] text-slate-100 overflow-hidden">
         {/* Mobile Top Header */}
         <header className="h-12 px-3 border-b border-slate-800 bg-[#111B2B] flex items-center justify-between gap-2 shrink-0">
-          <h1 className="font-pixel text-sm tracking-wide text-amber-400 truncate">
-            PAÍSES EN GUERRA
-          </h1>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {onBackToMenu && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  onBackToMenu();
+                }}
+                title="Volver al menú"
+                aria-label="Volver al menú"
+                className="w-7 h-7 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center shrink-0 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <h1 className="font-pixel text-xs sm:text-sm tracking-wide text-amber-400 truncate">
+              PAÍSES EN GUERRA
+            </h1>
+            {isHard && (
+              <span className="px-1.5 py-0.5 bg-red-950/90 border border-red-500/80 text-[9px] font-mono-num font-extrabold text-red-300 uppercase flex items-center gap-0.5 shrink-0">
+                <Flame className="w-2.5 h-2.5" />
+                <span>Difícil</span>
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => {
@@ -782,8 +820,12 @@ export function CountrySelectScreen({
                         </div>
                       </div>
                       <div className="text-right shrink-0 ml-2 font-mono-num text-[11px]">
-                        <div className="text-amber-300">${computeInitialMoney(c.gdp, c.military)}</div>
-                        <div className="text-rose-300">Ej. {computeInitialArmy(c.military)}</div>
+                        <div className="text-amber-300">
+                          ${computeInitialMoney(c.gdp, c.military, difficulty).toLocaleString('es-ES')}
+                        </div>
+                        <div className="text-rose-300">
+                          Ej. {computeInitialArmy(c.military, difficulty).toLocaleString('es-ES')}
+                        </div>
                       </div>
                     </button>
                   );
@@ -805,9 +847,18 @@ export function CountrySelectScreen({
             <div className="flex items-center gap-2.5 min-w-0">
               <PixelFlag country={selectedCountry} size="md" />
               <div className="min-w-0">
-                <div className="text-sm font-bold text-white truncate">{selectedCountry.name}</div>
+                <div className="text-sm font-bold text-white truncate flex items-center gap-1.5">
+                  <span className="truncate">{selectedCountry.name}</span>
+                  {isHard && (
+                    <span className="px-1.5 py-0.5 bg-red-950/90 border border-red-500/80 text-[9px] font-mono-num font-bold text-red-300 uppercase shrink-0">
+                      Modo Difícil
+                    </span>
+                  )}
+                </div>
                 <div className="text-[11px] text-slate-400 truncate">
-                  {selectedCountry.capital} · ${computeInitialMoney(selectedCountry.gdp, selectedCountry.military)} · Ej. {computeInitialArmy(selectedCountry.military)} · {mapData.initialPixelCounts[selectedCountry.id]} px
+                  {selectedCountry.capital} · $
+                  {computeInitialMoney(selectedCountry.gdp, selectedCountry.military, difficulty).toLocaleString('es-ES')} · Ej.{' '}
+                  {computeInitialArmy(selectedCountry.military, difficulty).toLocaleString('es-ES')} · {mapData.initialPixelCounts[selectedCountry.id]} px
                 </div>
               </div>
             </div>
@@ -818,10 +869,14 @@ export function CountrySelectScreen({
               soundEngine.playTreaty();
               onStartCampaign(selectedId);
             }}
-            className="w-full min-h-[44px] py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className={`w-full min-h-[44px] py-2.5 px-4 font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+              isHard
+                ? 'bg-red-600 hover:bg-red-500 text-white'
+                : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+            }`}
           >
             <Play className="w-4 h-4 fill-current" />
-            <span>Comenzar Campaña</span>
+            <span>{isHard ? 'Comenzar en Modo Difícil' : 'Comenzar Campaña'}</span>
           </button>
         </div>
       </div>
@@ -834,10 +889,30 @@ export function CountrySelectScreen({
       {/* Left Interactive Pixel Map Picker */}
       <div className="flex-1 flex flex-col min-w-0 relative">
         <div className="h-14 px-5 flex items-center justify-between border-b border-slate-800 bg-[#111B2B]">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {onBackToMenu && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundEngine.playClick();
+                  onBackToMenu();
+                }}
+                title="Volver al menú"
+                className="px-2 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Menú</span>
+              </button>
+            )}
             <h1 className="font-pixel text-lg tracking-wide text-amber-400 whitespace-nowrap shrink-0">
               PAÍSES EN GUERRA
             </h1>
+            {isHard && (
+              <span className="px-2 py-0.5 bg-red-950/90 border border-red-500/80 text-[10px] font-mono-num font-extrabold text-red-300 uppercase flex items-center gap-1 shrink-0">
+                <Flame className="w-3 h-3" />
+                <span>Modo Difícil</span>
+              </span>
+            )}
             <span className="text-xs text-slate-400 whitespace-nowrap">
               195 países soberanos · Mapa táctico global en 2D
             </span>
@@ -1005,8 +1080,12 @@ export function CountrySelectScreen({
                   </div>
                 </div>
                 <div className="text-right shrink-0 ml-2 font-mono-num text-[11px]">
-                  <div className="text-amber-300">${computeInitialMoney(c.gdp, c.military)}</div>
-                  <div className="text-rose-300">Ej. {computeInitialArmy(c.military)}</div>
+                  <div className="text-amber-300">
+                    ${computeInitialMoney(c.gdp, c.military, difficulty).toLocaleString('es-ES')}
+                  </div>
+                  <div className="text-rose-300">
+                    Ej. {computeInitialArmy(c.military, difficulty).toLocaleString('es-ES')}
+                  </div>
                 </div>
               </button>
             );
@@ -1029,13 +1108,13 @@ export function CountrySelectScreen({
             <div>
               <div className="text-[10px] text-slate-400">Dinero Inicial</div>
               <div className="text-xs font-semibold text-amber-300">
-                ${computeInitialMoney(selectedCountry.gdp, selectedCountry.military)}
+                ${computeInitialMoney(selectedCountry.gdp, selectedCountry.military, difficulty).toLocaleString('es-ES')}
               </div>
             </div>
             <div>
               <div className="text-[10px] text-slate-400">Ejército Inicial</div>
               <div className="text-xs font-semibold text-rose-400">
-                {computeInitialArmy(selectedCountry.military)}
+                {computeInitialArmy(selectedCountry.military, difficulty).toLocaleString('es-ES')}
               </div>
             </div>
             <div>
@@ -1051,10 +1130,14 @@ export function CountrySelectScreen({
               soundEngine.playTreaty();
               onStartCampaign(selectedId);
             }}
-            className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className={`w-full py-2.5 px-4 font-bold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+              isHard
+                ? 'bg-red-600 hover:bg-red-500 text-white'
+                : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+            }`}
           >
             <Play className="w-4 h-4 fill-current" />
-            <span>Comenzar Campaña</span>
+            <span>{isHard ? 'Comenzar en Modo Difícil' : 'Comenzar Campaña'}</span>
           </button>
         </div>
       </aside>

@@ -169,8 +169,11 @@ export interface HumanDiplomaticOffer {
   type: 'alliance' | 'peace' | 'alliance_help';
 }
 
+export type GameDifficulty = 'normal' | 'hard';
+
 export interface SimulationState {
   playerId: number;
+  difficulty: GameDifficulty;
   isMultiplayer: boolean;
   winnerCountryId: number | null;
   humanPlayers: Record<number, HumanPlayerSlot>;
@@ -213,17 +216,32 @@ const MONTH_NAMES = [
 export const GOLD_MINE_COST = 120;
 export const GOLD_MINE_PRICE_STEP = 30;
 export const GOLD_MINE_INCOME = 2; // +$2 cada segundo
+export const HARD_GOLD_MINE_COST = 200;
+export const HARD_GOLD_MINE_PRICE_STEP = 50;
+export const HARD_GOLD_MINE_INCOME = 50; // +$50 cada segundo en Modo Difícil
 export const CITY_COST = 180;
 export const CITY_PRICE_STEP = 45;
 export const CITY_INCOME = 3; // +$3 cada segundo (+120 capacidad militar)
+export const HARD_CITY_COST = 500;
+export const HARD_CITY_PRICE_STEP = 100;
+export const HARD_CITY_INCOME = 100; // +$100 cada segundo en Modo Difícil
+export const HARD_CITY_ARMY_CAP_BONUS = 450;
 export const PORT_COST = 150;
 export const ARMY_RECRUIT_COST = 100;
 export const ARMY_RECRUIT_AMOUNT = 25;
+export const HARD_ARMY_RECRUIT_COST = 100;
+export const HARD_ARMY_RECRUIT_AMOUNT = 50;
+export const HARD_AI_ARMY_PER_SECOND = 50;
+export const HARD_PLAYER_ARMY_PER_SECOND = 25;
 export const GIFT_MONEY_PER_REL = 100;
+export const HARD_GIFT_MONEY_PER_REL = 200;
 export const ALLIANCE_REL_THRESHOLD = 70; // escala 1..100
+export const HARD_ALLIANCE_REL_THRESHOLD = 82;
 export const MAX_WAR_DAYS = 3 * 12 * 30; // 3 años máximos por guerra (1080 días)
 export const MIN_INITIAL_ARMY = 350;
 export const MAX_INITIAL_ARMY = 1400;
+export const HARD_MIN_INITIAL_ARMY = 5000;
+export const HARD_MAX_INITIAL_ARMY = 20000;
 export const MONTHLY_INCOME_GROWTH = 1; // +$1/seg acumulado cada año (máx. +10)
 export const MAX_MONTHLY_INCOME_BONUS = 10;
 export const MAX_GOLD_MINES_PER_MONTH = 1;
@@ -234,8 +252,10 @@ export const DEFENSE_COST = 120;
 export const DEFENSE_RADIUS = 24; // radio de alcance en el mapa
 export const DEFENSE_BONUS_PCT = 10; // +10% defensa del país por cada defensa
 export const ANTI_NUKE_COST = 10000;
+export const HARD_ANTI_NUKE_COST = 20000;
 export const ANTI_NUKE_RADIUS = 36; // radar más grande que la defensa (360 km vs 240 km)
 export const BARRACKS_COST = 1000;
+export const HARD_BARRACKS_COST = 5000;
 export const BARRACKS_ARMY_CAP_BONUS = 500; // +500 capacidad militar por cada Cuartel Militar
 export const BARRACKS_RADIUS = Math.round(ANTI_NUKE_RADIUS * 1.5); // 54 (540 km: 50% más grande que el Antibombas)
 export const BARRACKS_REBELLION_REDUCTION = 0.5; // -50% rebeldía solo en la zona cubierta por el cuartel
@@ -259,12 +279,61 @@ export function getNukeCost(sim: SimulationState, countryId: number): number {
   return isPlayer ? NUKE_COST : AI_NUKE_COST;
 }
 
-export function computeInitialMoney(seedGdp: number, seedMilitary: number): number {
+export function getAntiNukeCost(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_ANTI_NUKE_COST : ANTI_NUKE_COST;
+}
+
+export function getBarracksCost(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_BARRACKS_COST : BARRACKS_COST;
+}
+
+export function getGoldMineIncome(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_GOLD_MINE_INCOME : GOLD_MINE_INCOME;
+}
+
+export function getCityIncome(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_CITY_INCOME : CITY_INCOME;
+}
+
+export function getCityArmyCapBonus(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_CITY_ARMY_CAP_BONUS : 120;
+}
+
+export function getArmyRecruitCost(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_ARMY_RECRUIT_COST : ARMY_RECRUIT_COST;
+}
+
+export function getArmyRecruitAmount(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_ARMY_RECRUIT_AMOUNT : ARMY_RECRUIT_AMOUNT;
+}
+
+export function getAllianceRelThreshold(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_ALLIANCE_REL_THRESHOLD : ALLIANCE_REL_THRESHOLD;
+}
+
+export function getGiftMoneyPerRel(difficulty: GameDifficulty = 'normal'): number {
+  return difficulty === 'hard' ? HARD_GIFT_MONEY_PER_REL : GIFT_MONEY_PER_REL;
+}
+
+export function computeInitialMoney(
+  seedGdp: number,
+  seedMilitary: number,
+  difficulty: GameDifficulty = 'normal'
+): number {
+  if (difficulty === 'hard') {
+    return Math.round(900 + Math.sqrt(Math.max(0, seedGdp)) * 22 + seedMilitary * 7);
+  }
   return Math.round(100 + Math.sqrt(Math.max(0, seedGdp)) * 3.0 + seedMilitary * 0.65);
 }
 
-export function computeInitialArmy(seedMilitary: number): number {
+export function computeInitialArmy(
+  seedMilitary: number,
+  difficulty: GameDifficulty = 'normal'
+): number {
   const t = Math.max(0, Math.min(1, (seedMilitary - 1) / (240 - 1)));
+  if (difficulty === 'hard') {
+    return Math.round(HARD_MIN_INITIAL_ARMY + t * (HARD_MAX_INITIAL_ARMY - HARD_MIN_INITIAL_ARMY));
+  }
   return Math.round(MIN_INITIAL_ARMY + t * (MAX_INITIAL_ARMY - MIN_INITIAL_ARMY));
 }
 
@@ -273,7 +342,16 @@ export function getCountryName(c: CountryState | undefined | null): string {
   return c.customName && c.customName.trim().length > 0 ? c.customName : c.seed.name;
 }
 
-export function getArmyCap(c: CountryState): number {
+export function getArmyCap(c: CountryState, difficulty: GameDifficulty = 'normal'): number {
+  if (difficulty === 'hard') {
+    return Math.round(
+      18000 +
+        c.cities * HARD_CITY_ARMY_CAP_BONUS +
+        (c.barracks?.length ?? 0) * BARRACKS_ARMY_CAP_BONUS +
+        Math.sqrt(Math.max(1, c.pixels)) * 480 +
+        (c.focusArmyCapBonus ?? 0) * 3
+    );
+  }
   return Math.round(
     900 +
       c.cities * 120 +
@@ -283,15 +361,24 @@ export function getArmyCap(c: CountryState): number {
   );
 }
 
-export function getMoneyCap(c: CountryState): number {
+export function getMoneyCap(c: CountryState, difficulty: GameDifficulty = 'normal'): number {
+  if (difficulty === 'hard') {
+    return Math.round(160000 + c.cities * 8000 + Math.sqrt(Math.max(1, c.pixels)) * 3500);
+  }
   return Math.round(35000 + c.cities * 2200 + Math.sqrt(Math.max(1, c.pixels)) * 1200);
 }
 
-export function getGoldMineCost(c: CountryState): number {
+export function getGoldMineCost(c: CountryState, difficulty: GameDifficulty = 'normal'): number {
+  if (difficulty === 'hard') {
+    return HARD_GOLD_MINE_COST + c.goldMinePurchases * HARD_GOLD_MINE_PRICE_STEP;
+  }
   return GOLD_MINE_COST + c.goldMinePurchases * GOLD_MINE_PRICE_STEP;
 }
 
-export function getCityCost(c: CountryState): number {
+export function getCityCost(c: CountryState, difficulty: GameDifficulty = 'normal'): number {
+  if (difficulty === 'hard') {
+    return HARD_CITY_COST + c.cityPurchases * HARD_CITY_PRICE_STEP;
+  }
   return CITY_COST + c.cityPurchases * CITY_PRICE_STEP;
 }
 
@@ -520,6 +607,7 @@ export function canReachToAttack(
 }
 
 export interface CreateSimulationOptions {
+  difficulty?: GameDifficulty;
   isMultiplayer?: boolean;
   humanSlots?: Array<{
     uid: string;
@@ -533,13 +621,16 @@ export function createSimulation(
   playerId: number,
   options?: CreateSimulationOptions
 ): SimulationState {
+  const difficulty: GameDifficulty = options?.isMultiplayer ? 'normal' : (options?.difficulty ?? 'normal');
+  const isHard = difficulty === 'hard';
   const mapData = buildWorldMapData();
   const ownerGrid = new Int16Array(mapData.ownerGrid);
 
   const countries: CountryState[] = COUNTRIES_195.map((seed) => {
     const px = mapData.initialPixelCounts[seed.id];
-    const startMoney = computeInitialMoney(seed.gdp, seed.military);
-    const startArmy = computeInitialArmy(seed.military);
+    const baseMoney = computeInitialMoney(seed.gdp, seed.military, difficulty);
+    const startMoney = isHard && seed.id !== playerId ? Math.round(baseMoney * 1.25) : baseMoney;
+    const startArmy = computeInitialArmy(seed.military, difficulty);
 
     return {
       id: seed.id,
@@ -565,7 +656,13 @@ export function createSimulation(
       antiNukes: [],
       barracks: [],
       aggressiveExpansion: 0,
-      aiDoctrine: seed.military >= 65 && seed.id % 3 !== 0 ? 'expansionist' : 'diplomatic',
+      aiDoctrine: isHard
+        ? seed.id % 5 === 0
+          ? 'diplomatic'
+          : 'expansionist'
+        : seed.military >= 65 && seed.id % 3 !== 0
+          ? 'expansionist'
+          : 'diplomatic',
       color: mapData.countryColors[seed.id],
       bboxMinX: MAP_W - 1,
       bboxMaxX: 0,
@@ -600,72 +697,77 @@ export function createSimulation(
   const relations = new Uint8Array(N_COUNTRIES * N_COUNTRIES);
   const treaties = new Uint8Array(N_COUNTRIES * N_COUNTRIES);
   const truceMonths = new Int16Array(N_COUNTRIES * N_COUNTRIES);
-
-  const toRel100 = (rawScore: number) =>
-    Math.max(1, Math.min(100, Math.round(50 + rawScore * 0.48)));
-
-  const blocs = COUNTRIES_195.map((c) => getCountryBloc(c.iso2));
-  for (let i = 0; i < N_COUNTRIES; i++) {
-    for (let j = i + 1; j < N_COUNTRIES; j++) {
-      const ci = COUNTRIES_195[i];
-      const cj = COUNTRIES_195[j];
-      let baseRel = BLOC_AFFINITY[blocs[i]][blocs[j]];
-      if (ci.continent === cj.continent) baseRel += 8;
-      if (mapData.landNeighbors[i].has(j) && baseRel < 22) baseRel -= 10;
-      const noise = (((i * 31 + j * 17) % 25) - 12);
-      const val = toRel100(Math.max(-75, Math.min(75, baseRel + noise)));
-      relations[idxPair(i, j)] = val;
-      relations[idxPair(j, i)] = val;
-    }
-  }
-
   const iso2ToId = new Map<string, number>(COUNTRIES_195.map((c) => [c.iso2, c.id]));
-  for (const [isoA, isoB, score] of BILATERAL_PRESETS) {
-    const a = iso2ToId.get(isoA);
-    const b = iso2ToId.get(isoB);
-    if (a !== undefined && b !== undefined) {
-      const val = toRel100(score);
-      relations[idxPair(a, b)] = val;
-      relations[idxPair(b, a)] = val;
-    }
-  }
 
-  // Ensure every country starts with both friendly partners and rivals (1..100 scale)
-  for (let i = 0; i < N_COUNTRIES; i++) {
-    let goodCount = 0;
-    let badCount = 0;
-    for (let j = 0; j < N_COUNTRIES; j++) {
-      if (i === j) continue;
-      const r = relations[idxPair(i, j)];
-      if (r >= 68) goodCount++;
-      if (r <= 32) badCount++;
-    }
-    if (goodCount < 3) {
-      for (let k = 1; k <= 3 - goodCount; k++) {
-        const partner = (i + k * 11) % N_COUNTRIES;
-        if (partner !== i) {
-          const val = Math.max(relations[idxPair(i, partner)], 70 + k * 4);
-          relations[idxPair(i, partner)] = val;
-          relations[idxPair(partner, i)] = val;
-        }
+  if (isHard) {
+    // Modo Difícil: todos los países comienzan con relaciones completamente neutrales (50/100)
+    relations.fill(50);
+  } else {
+    const toRel100 = (rawScore: number) =>
+      Math.max(1, Math.min(100, Math.round(50 + rawScore * 0.48)));
+
+    const blocs = COUNTRIES_195.map((c) => getCountryBloc(c.iso2));
+    for (let i = 0; i < N_COUNTRIES; i++) {
+      for (let j = i + 1; j < N_COUNTRIES; j++) {
+        const ci = COUNTRIES_195[i];
+        const cj = COUNTRIES_195[j];
+        let baseRel = BLOC_AFFINITY[blocs[i]][blocs[j]];
+        if (ci.continent === cj.continent) baseRel += 8;
+        if (mapData.landNeighbors[i].has(j) && baseRel < 22) baseRel -= 10;
+        const noise = (((i * 31 + j * 17) % 25) - 12);
+        const val = toRel100(Math.max(-75, Math.min(75, baseRel + noise)));
+        relations[idxPair(i, j)] = val;
+        relations[idxPair(j, i)] = val;
       }
     }
-    if (badCount < 2) {
-      const neighbors = Array.from(mapData.landNeighbors[i]).filter(
-        (nid) => relations[idxPair(i, nid)] < 60
-      );
-      const rivalPool = [...neighbors];
-      for (let step = 1; rivalPool.length < 2 && step < N_COUNTRIES; step++) {
-        const cand = (i + step * 29) % N_COUNTRIES;
-        if (cand !== i && !rivalPool.includes(cand) && relations[idxPair(i, cand)] < 58) {
-          rivalPool.push(cand);
+
+    for (const [isoA, isoB, score] of BILATERAL_PRESETS) {
+      const a = iso2ToId.get(isoA);
+      const b = iso2ToId.get(isoB);
+      if (a !== undefined && b !== undefined) {
+        const val = toRel100(score);
+        relations[idxPair(a, b)] = val;
+        relations[idxPair(b, a)] = val;
+      }
+    }
+
+    // Ensure every country starts with both friendly partners and rivals (1..100 scale)
+    for (let i = 0; i < N_COUNTRIES; i++) {
+      let goodCount = 0;
+      let badCount = 0;
+      for (let j = 0; j < N_COUNTRIES; j++) {
+        if (i === j) continue;
+        const r = relations[idxPair(i, j)];
+        if (r >= 68) goodCount++;
+        if (r <= 32) badCount++;
+      }
+      if (goodCount < 3) {
+        for (let k = 1; k <= 3 - goodCount; k++) {
+          const partner = (i + k * 11) % N_COUNTRIES;
+          if (partner !== i) {
+            const val = Math.max(relations[idxPair(i, partner)], 70 + k * 4);
+            relations[idxPair(i, partner)] = val;
+            relations[idxPair(partner, i)] = val;
+          }
         }
       }
-      for (let k = 0; k < Math.min(2 - badCount, rivalPool.length); k++) {
-        const rival = rivalPool[k];
-        const val = Math.min(relations[idxPair(i, rival)], 30 - k * 5);
-        relations[idxPair(i, rival)] = val;
-        relations[idxPair(rival, i)] = val;
+      if (badCount < 2) {
+        const neighbors = Array.from(mapData.landNeighbors[i]).filter(
+          (nid) => relations[idxPair(i, nid)] < 60
+        );
+        const rivalPool = [...neighbors];
+        for (let step = 1; rivalPool.length < 2 && step < N_COUNTRIES; step++) {
+          const cand = (i + step * 29) % N_COUNTRIES;
+          if (cand !== i && !rivalPool.includes(cand) && relations[idxPair(i, cand)] < 58) {
+            rivalPool.push(cand);
+          }
+        }
+        for (let k = 0; k < Math.min(2 - badCount, rivalPool.length); k++) {
+          const rival = rivalPool[k];
+          const val = Math.min(relations[idxPair(i, rival)], 30 - k * 5);
+          relations[idxPair(i, rival)] = val;
+          relations[idxPair(rival, i)] = val;
+        }
       }
     }
   }
@@ -688,6 +790,7 @@ export function createSimulation(
 
   const sim: SimulationState = {
     playerId,
+    difficulty,
     isMultiplayer: Boolean(options?.isMultiplayer),
     winnerCountryId: null,
     humanPlayers,
@@ -697,8 +800,8 @@ export function createSimulation(
     year: 2026,
     totalDays: 0,
     elapsedSeconds: 0,
-    globalStability: 76,
-    globalTension: 24,
+    globalStability: isHard ? 66 : 76,
+    globalTension: isHard ? 38 : 24,
     countries,
     ownerGrid,
     mapData,
@@ -722,21 +825,23 @@ export function createSimulation(
     lastAiWarMonth: -1,
   };
 
-  // Seed a few initial realistic alliances
-  const seedAlliance = (isoA: string, isoB: string, relBoost: number) => {
-    const a = iso2ToId.get(isoA);
-    const b = iso2ToId.get(isoB);
-    if (a !== undefined && b !== undefined) {
-      setTreatyFlag(sim, a, b, TREATY_ALLIANCE, true);
-      addRelation(sim, a, b, relBoost);
-    }
-  };
-  seedAlliance('US', 'GB', 15);
-  seedAlliance('US', 'CA', 15);
-  seedAlliance('FR', 'DE', 15);
-  seedAlliance('ES', 'PT', 15);
-  seedAlliance('AU', 'NZ', 15);
-  seedAlliance('SA', 'AE', 15);
+  // Seed a few initial realistic alliances only in Normal Mode
+  if (!isHard) {
+    const seedAlliance = (isoA: string, isoB: string, relBoost: number) => {
+      const a = iso2ToId.get(isoA);
+      const b = iso2ToId.get(isoB);
+      if (a !== undefined && b !== undefined) {
+        setTreatyFlag(sim, a, b, TREATY_ALLIANCE, true);
+        addRelation(sim, a, b, relBoost);
+      }
+    };
+    seedAlliance('US', 'GB', 15);
+    seedAlliance('US', 'CA', 15);
+    seedAlliance('FR', 'DE', 15);
+    seedAlliance('ES', 'PT', 15);
+    seedAlliance('AU', 'NZ', 15);
+    seedAlliance('SA', 'AE', 15);
+  }
 
   // Give major maritime powers 1 starting port so naval warfare can happen organically
   for (const iso of ['US', 'GB', 'FR', 'ES', 'JP', 'CN', 'BR', 'AU']) {
@@ -765,7 +870,9 @@ export function createSimulation(
     'event',
     sim.isMultiplayer
       ? `¡Partida Online iniciada! Conquista los 195 países para ganar.`
-      : `Campaña iniciada al mando de ${getCountryName(countries[playerId])}.`,
+      : isHard
+        ? `¡MODO DIFÍCIL iniciado al mando de ${getCountryName(countries[playerId])}! Relaciones neutrales y potencias letales.`
+        : `Campaña iniciada al mando de ${getCountryName(countries[playerId])}.`,
     playerId
   );
 
@@ -953,7 +1060,50 @@ export function proposeAlliance(
   }
 
   const rel = getRelation(sim, fromId, toId);
-  if (rel >= ALLIANCE_REL_THRESHOLD) {
+  const threshold = getAllianceRelThreshold(sim.difficulty);
+
+  // En Modo Difícil, la IA evalúa estratégicamente si le conviene la alianza
+  if (sim.difficulty === 'hard' && fromId === sim.playerId) {
+    const toAllies = getAllies(sim, toId);
+    const fromEnemies = getEnemies(sim, fromId);
+    if (rel < threshold) {
+      soundEngine.playClick();
+      return {
+        accepted: false,
+        reason: `${getCountryName(to)} rechaza la alianza (relación ${rel}/100, requiere ${threshold}/100 en Modo Difícil).`,
+      };
+    }
+    if (from.aggressiveExpansion >= 32 && rel < 94) {
+      soundEngine.playClick();
+      return {
+        accepted: false,
+        reason: `${getCountryName(to)} desconfía de tu alta agresividad (${Math.round(from.aggressiveExpansion)}) y rechaza aliarse contigo.`,
+      };
+    }
+    if (from.army < to.army * 0.42 && rel < 92) {
+      soundEngine.playClick();
+      return {
+        accepted: false,
+        reason: `${getCountryName(to)} considera insuficiente tu ejército para una alianza estratégica.`,
+      };
+    }
+    if (fromEnemies.length >= 2 && rel < 95) {
+      soundEngine.playClick();
+      return {
+        accepted: false,
+        reason: `${getCountryName(to)} evita aliarse mientras luchas en ${fromEnemies.length} frentes.`,
+      };
+    }
+    if (toAllies.length >= 4 && rel < 92) {
+      soundEngine.playClick();
+      return {
+        accepted: false,
+        reason: `${getCountryName(to)} ya cuenta con suficientes aliados estratégicos.`,
+      };
+    }
+  }
+
+  if (rel >= threshold) {
     setTreatyFlag(sim, fromId, toId, TREATY_ALLIANCE, true);
     addRelation(sim, fromId, toId, 10);
     pushChronicle(
@@ -972,7 +1122,7 @@ export function proposeAlliance(
   if (fromId === sim.playerId) soundEngine.playClick();
   return {
     accepted: false,
-    reason: `${getCountryName(to)} rechaza la alianza (relación ${rel}/100, requiere ${ALLIANCE_REL_THRESHOLD}/100).`,
+    reason: `${getCountryName(to)} rechaza la alianza (relación ${rel}/100, requiere ${threshold}/100).`,
   };
 }
 
@@ -996,16 +1146,17 @@ export function sendDiplomaticGift(
   }
 
   const actualPoints = Math.max(1, Math.min(relPoints, 100 - currentRel));
-  const cost = actualPoints * GIFT_MONEY_PER_REL;
+  const unitCost = getGiftMoneyPerRel(sim.difficulty);
+  const cost = actualPoints * unitCost;
   if (from.money < cost) {
     return {
       ok: false,
-      error: `Necesitas $${cost} de dinero para subir +${actualPoints} de relación.`,
+      error: `Necesitas $${cost.toLocaleString('es-ES')} de dinero para subir +${actualPoints} de relación.`,
     };
   }
 
   from.money -= cost;
-  to.money = Math.min(getMoneyCap(to), to.money + cost);
+  to.money = Math.min(getMoneyCap(to, sim.difficulty), to.money + cost);
   addRelation(sim, fromId, toId, actualPoints);
   if (fromId === sim.playerId) soundEngine.playClick();
   return { ok: true, gained: actualPoints };
@@ -1107,11 +1258,11 @@ export function requestAllyHelp(
   const decisionScore =
     relWithPlayer -
     Math.max(0, maxEnemyRel - 45) * 0.9 -
-    allyCurrentWars * 14 +
-    (armyRatio >= 0.45 ? 10 : -15) +
+    allyCurrentWars * (sim.difficulty === 'hard' ? 18 : 14) +
+    (armyRatio >= (sim.difficulty === 'hard' ? 0.65 : 0.45) ? 10 : -18) +
     (ally.aiDoctrine === 'diplomatic' ? 5 : 0);
 
-  if (decisionScore < 62) {
+  if (decisionScore < (sim.difficulty === 'hard' ? 72 : 62)) {
     addRelation(sim, playerId, allyId, -2);
     soundEngine.playClick();
     return {
@@ -1179,6 +1330,29 @@ export function requestHumanPeace(
       reason: `Propuesta de paz enviada a ${getCountryName(sim.countries[toId])}.`,
     };
   }
+  // En Modo Difícil, la IA negocia la paz de forma inteligente y la rechaza si lleva ventaja
+  if (sim.difficulty === 'hard' && !sim.isMultiplayer && fromId === sim.playerId) {
+    const player = sim.countries[fromId];
+    const ai = sim.countries[toId];
+    const war = sim.wars.find(
+      (w) => (w.a === fromId && w.b === toId) || (w.a === toId && w.b === fromId)
+    );
+    const warDays = war ? sim.totalDays - war.startTotalDays : 0;
+    const aiEnemies = getEnemies(sim, toId).length;
+    const aiLosingTerritory = ai.pixels < ai.initialPixels * 0.78 || ai.capitalLostPenaltyDone;
+    const playerMuchStronger = player.army >= ai.army * 1.18;
+    const aiOverstretched = aiEnemies >= 2 && ai.army < player.army * 1.3;
+    const warExhausted = warDays >= 210 && ai.army <= player.army * 1.25;
+
+    if (!aiLosingTerritory && !playerMuchStronger && !aiOverstretched && !warExhausted) {
+      soundEngine.playClick();
+      return {
+        ok: false,
+        reason: `${getCountryName(ai)} rechaza tu oferta de paz: tiene ventaja militar y decide continuar la ofensiva.`,
+      };
+    }
+  }
+
   makePeace(sim, fromId, toId);
   return { ok: true, reason: `Paz firmada con ${getCountryName(sim.countries[toId])}.` };
 }
@@ -1583,18 +1757,24 @@ function processAbsorbedCountryRebellions(sim: SimulationState) {
       continue;
     }
 
+    const isHard = sim.difficulty === 'hard';
     const strengthFactor = Math.max(0.04, (strength - 10) / 90);
-    const expectedGarrison = Math.max(300, computeInitialArmy(c.seed.military) * 1.15);
+    const expectedGarrison = Math.max(
+      isHard ? 2500 : 300,
+      computeInitialArmy(c.seed.military, sim.difficulty) * (isHard ? 0.85 : 1.15)
+    );
     const gripRatio = occ.army / expectedGarrison;
     const warStrain = occWars >= 2 ? 1.55 : occWars === 1 ? 1.2 : 0.88;
     const garrisonMod = hasDefenseGarrison ? 0.42 : 1.0;
     const barracksMod = hasBarracksZone ? 1 - BARRACKS_REBELLION_REDUCTION : 1.0;
+    const hardPlayerUnrestMod = isHard && occId === sim.playerId ? 1.35 : 1.0;
 
     let delta =
       (strengthFactor * 4.4 + (gripRatio < 1.0 ? (1.0 - gripRatio) * 3.8 : 0)) *
       warStrain *
       garrisonMod *
-      barracksMod;
+      barracksMod *
+      hardPlayerUnrestMod;
 
     // A massive, well-garrisoned empire keeps weaker conquered nations calmer
     if (gripRatio >= 2.2 && (hasDefenseGarrison || hasBarracksZone) && strength < 55) {
@@ -1605,16 +1785,18 @@ function processAbsorbedCountryRebellions(sim: SimulationState) {
 
     if (c.rebelUnrest >= 100 && !rebelTriggeredThisPulse) {
       // Chance scaled by national strength so powerful absorbed countries erupt decisively
-      const eruptionChance = Math.min(0.92, 0.28 + (strength / 100) * 0.65);
+      const eruptionChance = Math.min(0.92, (isHard ? 0.36 : 0.28) + (strength / 100) * 0.65);
       if (Math.random() < eruptionChance) {
         const baseRebelArmy = Math.round(
-          computeInitialArmy(c.seed.military) * (0.42 + (strength / 100) * 0.48)
+          computeInitialArmy(c.seed.military, sim.difficulty) * (0.42 + (strength / 100) * 0.48)
         );
         const rebelArmy = Math.max(
-          110,
+          isHard ? 1200 : 110,
           Math.min(Math.round(occ.army * 0.62), baseRebelArmy)
         );
-        const rebelMoney = Math.round(computeInitialMoney(c.seed.gdp, c.seed.military) * 0.75);
+        const rebelMoney = Math.round(
+          computeInitialMoney(c.seed.gdp, c.seed.military, sim.difficulty) * 0.75
+        );
         const ok = executeCountryIndependenceRebellion(
           sim,
           c.id,
@@ -1709,7 +1891,7 @@ export function buildGoldMine(sim: SimulationState, countryId: number): string |
   if (c.goldMinesBuiltThisMonth >= MAX_GOLD_MINES_PER_MONTH) {
     return `Solo puedes construir ${MAX_GOLD_MINES_PER_MONTH} Mina de Oro por mes.`;
   }
-  const cost = getGoldMineCost(c);
+  const cost = getGoldMineCost(c, sim.difficulty);
   if (c.money < cost) return `Necesitas $${cost.toLocaleString('es-ES')} de dinero.`;
   c.money -= cost;
   c.goldMines++;
@@ -1728,7 +1910,7 @@ export function buildCity(sim: SimulationState, countryId: number): string | nul
   if (c.citiesBuiltThisMonth >= MAX_CITIES_PER_MONTH) {
     return `Solo puedes construir ${MAX_CITIES_PER_MONTH} Ciudades por mes.`;
   }
-  const cost = getCityCost(c);
+  const cost = getCityCost(c, sim.difficulty);
   if (c.money < cost) return `Necesitas $${cost.toLocaleString('es-ES')} de dinero.`;
   c.money -= cost;
   c.cities++;
@@ -1788,26 +1970,33 @@ export function buildPort(
 
 export function recruitSoldiers(sim: SimulationState, countryId: number): string | null {
   const c = sim.countries[countryId];
-  const armyCap = getArmyCap(c);
+  const armyCap = getArmyCap(c, sim.difficulty);
+  const recruitCost = getArmyRecruitCost(sim.difficulty);
+  const recruitAmount = getArmyRecruitAmount(sim.difficulty);
   if (c.army >= armyCap) {
-    return `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`;
+    return `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades, Cuarteles o conquista territorio para ampliarla.`;
   }
-  if (c.money < ARMY_RECRUIT_COST) {
-    return `Necesitas $${ARMY_RECRUIT_COST} para reclutar ${ARMY_RECRUIT_AMOUNT} soldados.`;
+  if (c.money < recruitCost) {
+    return `Necesitas $${recruitCost} para reclutar ${recruitAmount} soldados.`;
   }
-  c.money -= ARMY_RECRUIT_COST;
-  c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
+  c.money -= recruitCost;
+  c.army = Math.min(armyCap, c.army + recruitAmount);
   updateAllEconomies(sim, false);
   if (countryId === sim.playerId) soundEngine.playRecruit();
   return null;
 }
 
-export function getMaxRecruitableSoldiers(c: CountryState): number {
+export function getMaxRecruitableSoldiers(
+  c: CountryState,
+  difficulty: GameDifficulty = 'normal'
+): number {
   if (!c.alive) return 0;
-  const armyCap = getArmyCap(c);
+  const armyCap = getArmyCap(c, difficulty);
   const remainingCap = Math.max(0, armyCap - c.army);
   if (remainingCap <= 0) return 0;
-  const affordable = Math.floor((c.money * ARMY_RECRUIT_AMOUNT) / ARMY_RECRUIT_COST);
+  const recruitCost = getArmyRecruitCost(difficulty);
+  const recruitAmount = getArmyRecruitAmount(difficulty);
+  const affordable = Math.floor((c.money * recruitAmount) / recruitCost);
   return Math.max(0, Math.min(Math.floor(remainingCap), affordable));
 }
 
@@ -1819,18 +2008,20 @@ export function recruitSoldiersMax(
   if (!c || !c.alive) {
     return { ok: false, message: 'País inactivo.', soldiersAdded: 0, moneySpent: 0 };
   }
-  const armyCap = getArmyCap(c);
+  const armyCap = getArmyCap(c, sim.difficulty);
   const remainingCap = Math.max(0, armyCap - c.army);
   if (remainingCap < 1) {
     return {
       ok: false,
-      message: `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`,
+      message: `Capacidad militar máxima alcanzada (${armyCap.toLocaleString('es-ES')}). Construye Ciudades, Cuarteles o conquista territorio para ampliarla.`,
       soldiersAdded: 0,
       moneySpent: 0,
     };
   }
-  const minCostPerSoldier = Math.ceil(ARMY_RECRUIT_COST / ARMY_RECRUIT_AMOUNT);
-  const affordableSoldiers = Math.floor((c.money * ARMY_RECRUIT_AMOUNT) / ARMY_RECRUIT_COST);
+  const recruitCost = getArmyRecruitCost(sim.difficulty);
+  const recruitAmount = getArmyRecruitAmount(sim.difficulty);
+  const minCostPerSoldier = Math.ceil(recruitCost / recruitAmount);
+  const affordableSoldiers = Math.floor((c.money * recruitAmount) / recruitCost);
   if (affordableSoldiers < 1) {
     return {
       ok: false,
@@ -1841,7 +2032,7 @@ export function recruitSoldiersMax(
   }
 
   const soldiersAdded = Math.min(Math.floor(remainingCap), affordableSoldiers);
-  const exactCost = (soldiersAdded * ARMY_RECRUIT_COST) / ARMY_RECRUIT_AMOUNT;
+  const exactCost = (soldiersAdded * recruitCost) / recruitAmount;
   const hitsCap = soldiersAdded < affordableSoldiers;
   // Spend all available money if not capped by military capacity, otherwise spend exact cost for reaching cap
   const moneySpent = hitsCap ? Math.min(c.money, exactCost) : c.money;
@@ -1905,11 +2096,12 @@ export function buildAntiNukeAt(
   if (c.antiNukes.some((a) => Math.hypot(a.x - x, a.y - y) < 8)) {
     return 'Ya existe un Antibombas muy cerca de ese punto.';
   }
-  if (c.money < ANTI_NUKE_COST) {
-    return `Necesitas $${ANTI_NUKE_COST.toLocaleString('es-ES')} para construir un Antibombas.`;
+  const antiNukeCost = getAntiNukeCost(sim.difficulty);
+  if (c.money < antiNukeCost) {
+    return `Necesitas $${antiNukeCost.toLocaleString('es-ES')} para construir un Antibombas.`;
   }
 
-  c.money -= ANTI_NUKE_COST;
+  c.money -= antiNukeCost;
   c.antiNukes.push({ x, y, radius: ANTI_NUKE_RADIUS });
   if (countryId === sim.playerId) soundEngine.playBuildStructure('defense');
   return null;
@@ -1947,10 +2139,11 @@ export function buildBarracksAt(
   if (c.barracks.some((b) => Math.hypot(b.x - x, b.y - y) < 8)) {
     return { ok: false, message: 'Ya existe un Cuartel Militar muy cerca de ese punto.' };
   }
-  if (c.money < BARRACKS_COST) {
+  const barracksCost = getBarracksCost(sim.difficulty);
+  if (c.money < barracksCost) {
     return {
       ok: false,
-      message: `Necesitas $${BARRACKS_COST.toLocaleString('es-ES')} para construir un Cuartel Militar.`,
+      message: `Necesitas $${barracksCost.toLocaleString('es-ES')} para construir un Cuartel Militar.`,
     };
   }
 
@@ -1966,7 +2159,7 @@ export function buildBarracksAt(
     }
   }
 
-  c.money -= BARRACKS_COST;
+  c.money -= barracksCost;
   c.barracks.push({ x, y, radius: BARRACKS_RADIUS });
 
   const pacifiedNames: string[] = [];
@@ -2371,8 +2564,8 @@ export function stabilizeSimulationStats(sim: SimulationState) {
       c.netIncome = 0;
       continue;
     }
-    const armyCap = getArmyCap(c);
-    const moneyCap = getMoneyCap(c);
+    const armyCap = getArmyCap(c, sim.difficulty);
+    const moneyCap = getMoneyCap(c, sim.difficulty);
     if (c.army > armyCap) c.army = armyCap;
     if (c.money > moneyCap) c.money = moneyCap;
   }
@@ -2684,13 +2877,15 @@ export function completeFocusNode(
 }
 
 function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
+  const mineIncome = getGoldMineIncome(sim.difficulty);
+  const cityIncome = getCityIncome(sim.difficulty);
   for (const c of sim.countries) {
     if (!c.alive) {
       c.netIncome = 0;
       continue;
     }
 
-    const armyCap = getArmyCap(c);
+    const armyCap = getArmyCap(c, sim.difficulty);
 
     if (applyMonthlyGrowth) {
       // Crecimiento logístico del ejército: frena suavemente al acercarse a la capacidad militar
@@ -2718,9 +2913,12 @@ function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
       }
     }
 
-    const baseTerritoryIncome = Math.max(3, Math.round(Math.sqrt(Math.max(1, c.pixels)) * 0.45));
-    const minesIncome = c.goldMines * GOLD_MINE_INCOME;
-    const citiesIncome = c.cities * CITY_INCOME;
+    const baseTerritoryIncome = Math.max(
+      sim.difficulty === 'hard' ? 12 : 3,
+      Math.round(Math.sqrt(Math.max(1, c.pixels)) * (sim.difficulty === 'hard' ? 1.5 : 0.45))
+    );
+    const minesIncome = c.goldMines * mineIncome;
+    const citiesIncome = c.cities * cityIncome;
     const cappedBonus = Math.min(MAX_MONTHLY_INCOME_BONUS, Math.max(0, c.monthlyIncomeBonus));
     const focusBonus = Math.min(20, Math.max(0, c.focusIncomeBonus ?? 0));
 
@@ -2743,10 +2941,19 @@ export function stepSimulationSecond(sim: SimulationState) {
     }
   }
   updateAllEconomies(sim, false);
+  const isHard = sim.difficulty === 'hard';
   for (const c of sim.countries) {
     if (!c.alive) continue;
-    const moneyCap = getMoneyCap(c);
+    const moneyCap = getMoneyCap(c, sim.difficulty);
     c.money = Math.max(0, Math.min(moneyCap, Math.round(c.money + c.netIncome)));
+    if (isHard) {
+      const armyCap = getArmyCap(c, 'hard');
+      const isPlayer = c.id === sim.playerId || isHumanCountry(sim, c.id);
+      const gain = isPlayer ? HARD_PLAYER_ARMY_PER_SECOND : HARD_AI_ARMY_PER_SECOND;
+      if (c.army < armyCap) {
+        c.army = Math.min(armyCap, c.army + gain);
+      }
+    }
   }
   if (sim.countries[sim.playerId]?.alive && sim.countries[sim.playerId].netIncome > 0) {
     soundEngine.playMoneyEarned(true);
@@ -3002,8 +3209,11 @@ function processFrontlineBattles(sim: SimulationState) {
       continue;
     }
 
-    const effA = a.army * (1 + getCountryDefensePct(a) * 0.004);
-    const effB = b.army * (1 + getCountryDefensePct(b) * 0.004);
+    const isHard = sim.difficulty === 'hard';
+    const hardBonusA = isHard && aId !== sim.playerId && bId === sim.playerId ? 1.18 : 1.0;
+    const hardBonusB = isHard && bId !== sim.playerId && aId === sim.playerId ? 1.18 : 1.0;
+    const effA = a.army * (1 + getCountryDefensePct(a) * 0.004) * hardBonusA;
+    const effB = b.army * (1 + getCountryDefensePct(b) * 0.004) * hardBonusB;
     const powA = Math.pow(Math.max(1, effA), 1.25);
     const powB = Math.pow(Math.max(1, effB), 1.25);
     const probA = powA / Math.max(1, powA + powB);
@@ -3281,22 +3491,78 @@ function pickAiNukeTarget(sim: SimulationState, enemy: CountryState): { x: numbe
   return fallback;
 }
 
+function pickStrategicBuildSpot(
+  sim: SimulationState,
+  c: CountryState,
+  existing: DefenseCoord[],
+  minSpacing: number,
+  preferBorder: boolean
+): { x: number; y: number } | null {
+  const { ownerGrid } = sim;
+  const isClear = (x: number, y: number) =>
+    ownerGrid[y * MAP_W + x] === c.id &&
+    existing.every((e) => Math.hypot(e.x - x, e.y - y) >= minSpacing);
+
+  // First structure always anchors near capital if valid
+  if (existing.length === 0 && isClear(c.capitalX, c.capitalY)) {
+    return { x: c.capitalX, y: c.capitalY };
+  }
+
+  const w = Math.max(1, c.bboxMaxX - c.bboxMinX + 1);
+  const h = Math.max(1, c.bboxMaxY - c.bboxMinY + 1);
+  let fallback: { x: number; y: number } | null = null;
+
+  for (let tries = 0; tries < 28; tries++) {
+    const rx = Math.max(1, Math.min(MAP_W - 2, c.bboxMinX + Math.floor(Math.random() * w)));
+    const ry = Math.max(1, Math.min(MAP_H - 2, c.bboxMinY + Math.floor(Math.random() * h)));
+    if (!isClear(rx, ry)) continue;
+    if (!preferBorder) return { x: rx, y: ry };
+
+    const idx = ry * MAP_W + rx;
+    const l = ownerGrid[idx - 1];
+    const r = ownerGrid[idx + 1];
+    const u = ownerGrid[idx - MAP_W];
+    const d = ownerGrid[idx + MAP_W];
+    const touchesForeign =
+      (l >= 0 && l !== c.id) ||
+      (r >= 0 && r !== c.id) ||
+      (u >= 0 && u !== c.id) ||
+      (d >= 0 && d !== c.id);
+    if (touchesForeign) return { x: rx, y: ry };
+    if (!fallback) fallback = { x: rx, y: ry };
+  }
+
+  return fallback;
+}
+
 function runAiAgentDecision(sim: SimulationState, c: CountryState) {
   if (!c.alive || c.id === sim.playerId) return;
 
+  const isHard = sim.difficulty === 'hard';
   const enemies = getEnemies(sim, c.id);
   const atWar = enemies.length > 0;
+  const armyCap = getArmyCap(c, sim.difficulty);
+  const recruitCost = getArmyRecruitCost(sim.difficulty);
+  const recruitAmount = getArmyRecruitAmount(sim.difficulty);
+  const antiNukeCost = getAntiNukeCost(sim.difficulty);
+  const barracksCost = getBarracksCost(sim.difficulty);
 
-  // 1. Improve army and build economy over time (respecting supply & monthly build limits)
-  const armyCap = getArmyCap(c);
+  // 1. Nuclear strike & military / economic infrastructure
   if (atWar) {
     // 1a. Autonomous AI Nuclear Strike decision when at war and nuclear-capable
+    const minNukeDay = isHard ? 35 : 150;
     if (
       (c.nukeCooldownDays ?? 0) <= 0 &&
       c.money >= getNukeCost(sim, c.id) &&
-      sim.totalDays >= 150
+      sim.totalDays >= minNukeDay
     ) {
-      const targetEnemyId = enemies[Math.floor(Math.random() * enemies.length)];
+      // Hard Mode AI prioritizes strongest or capital-holding enemy
+      let targetEnemyId = enemies[Math.floor(Math.random() * enemies.length)];
+      if (isHard && enemies.length > 1) {
+        targetEnemyId = [...enemies].sort(
+          (a, b) => sim.countries[b].army - sim.countries[a].army
+        )[0];
+      }
       const enemy = sim.countries[targetEnemyId];
       const war = sim.wars.find(
         (w) =>
@@ -3306,16 +3572,21 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       const warDuration = war ? sim.totalDays - war.startTotalDays : 0;
       const underPressure =
         enemy && (enemy.army >= c.army * 0.85 || c.pixels < c.initialPixels * 0.8);
-      const strikeChance = underPressure
-        ? 0.13
-        : c.aiDoctrine === 'expansionist'
-          ? 0.075
-          : 0.04;
+      const strikeChance = isHard
+        ? underPressure
+          ? 0.36
+          : 0.24
+        : underPressure
+          ? 0.13
+          : c.aiDoctrine === 'expansionist'
+            ? 0.075
+            : 0.04;
 
       if (
         enemy &&
         enemy.alive &&
-        (warDuration >= 25 || underPressure) &&
+        !hasTreaty(sim, c.id, enemy.id, TREATY_ALLIANCE) &&
+        (warDuration >= (isHard ? 8 : 25) || underPressure) &&
         Math.random() < strikeChance
       ) {
         const coords = pickAiNukeTarget(sim, enemy);
@@ -3328,20 +3599,25 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       }
     }
 
+    const maxRecruits = isHard ? 10 : 3;
     let recruits = 0;
-    while (recruits < 3 && c.army < armyCap && c.money >= ARMY_RECRUIT_COST) {
-      c.money -= ARMY_RECRUIT_COST;
-      c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
+    while (recruits < maxRecruits && c.army < armyCap && c.money >= recruitCost) {
+      c.money -= recruitCost;
+      c.army = Math.min(armyCap, c.army + recruitAmount);
       recruits++;
     }
-  } else {
-    const cityCost = getCityCost(c);
-    const mineCost = getGoldMineCost(c);
+  }
+
+  // Economy & Fortifications (Hard Mode AI also develops & fortifies during war!)
+  if (!atWar || isHard) {
+    const cityCost = getCityCost(c, sim.difficulty);
+    const mineCost = getGoldMineCost(c, sim.difficulty);
+
     if (
       c.cities < MAX_CITIES_TOTAL &&
       c.citiesBuiltThisMonth < MAX_CITIES_PER_MONTH &&
       c.money >= cityCost &&
-      Math.random() < 0.32
+      Math.random() < (isHard ? 0.62 : 0.32)
     ) {
       c.money -= cityCost;
       c.cities++;
@@ -3351,30 +3627,81 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       c.goldMines < MAX_GOLD_MINES_TOTAL &&
       c.goldMinesBuiltThisMonth < MAX_GOLD_MINES_PER_MONTH &&
       c.money >= mineCost &&
-      Math.random() < 0.42
+      Math.random() < (isHard ? 0.68 : 0.42)
     ) {
       c.money -= mineCost;
       c.goldMines++;
       c.goldMinePurchases++;
       c.goldMinesBuiltThisMonth++;
     }
-    const targetPeaceArmy = Math.round(armyCap * 0.78);
-    if (c.army < targetPeaceArmy && c.money >= ARMY_RECRUIT_COST && Math.random() < 0.6) {
-      c.money -= ARMY_RECRUIT_COST;
-      c.army = Math.min(armyCap, c.army + ARMY_RECRUIT_AMOUNT);
+
+    if (!atWar) {
+      const targetPeaceArmy = Math.round(armyCap * (isHard ? 0.92 : 0.78));
+      const peaceClicks = isHard ? 4 : 1;
+      for (let k = 0; k < peaceClicks; k++) {
+        if (
+          c.army < targetPeaceArmy &&
+          c.money >= recruitCost &&
+          Math.random() < (isHard ? 0.8 : 0.6)
+        ) {
+          c.money -= recruitCost;
+          c.army = Math.min(armyCap, c.army + recruitAmount);
+        }
+      }
     }
-    if (c.defenses.length < 3 && c.money >= DEFENSE_COST && Math.random() < 0.14) {
-      buildDefenseAt(sim, c.id, c.capitalX, c.capitalY);
-    }
+
+    // Defenses (spread strategically across borders & capital)
+    const maxDefenses = isHard ? Math.min(16, Math.max(5, Math.ceil(Math.sqrt(c.pixels) * 0.45))) : 3;
     if (
-      c.antiNukes.length < 2 &&
-      c.money >= ANTI_NUKE_COST + 400 &&
-      Math.random() < 0.15
+      c.defenses.length < maxDefenses &&
+      c.money >= DEFENSE_COST &&
+      Math.random() < (isHard ? 0.42 : 0.14)
     ) {
-      buildAntiNukeAt(sim, c.id, c.capitalX, c.capitalY);
+      const spot = pickStrategicBuildSpot(sim, c, c.defenses, 10, true);
+      if (spot) {
+        buildDefenseAt(sim, c.id, spot.x, spot.y);
+      }
     }
+
+    // Anti-Nukes (multiple spread radars in Hard Mode)
+    const maxAntiNukes = isHard ? 5 : 2;
+    if (
+      c.antiNukes.length < maxAntiNukes &&
+      c.money >= antiNukeCost + (isHard ? 1000 : 400) &&
+      Math.random() < (isHard ? 0.38 : 0.15)
+    ) {
+      const spot = pickStrategicBuildSpot(sim, c, c.antiNukes, 18, false);
+      if (spot) {
+        buildAntiNukeAt(sim, c.id, spot.x, spot.y);
+      }
+    }
+
+    // Cuarteles Militares (Barracks) for army cap & rebellion control in Hard Mode
+    const maxBarracks = isHard ? 10 : 2;
+    if (
+      c.barracks.length < maxBarracks &&
+      c.money >= barracksCost + (isHard ? 800 : 600) &&
+      Math.random() < (isHard ? 0.34 : 0.08)
+    ) {
+      const spot = pickStrategicBuildSpot(sim, c, c.barracks, 16, false);
+      if (spot) {
+        buildBarracksAt(sim, c.id, spot.x, spot.y);
+      }
+    }
+
+    // Ports in Hard Mode for naval power projection
+    if (
+      isHard &&
+      c.ports.length < 3 &&
+      c.money >= PORT_COST + 600 &&
+      hasCoast(sim, c.id) &&
+      Math.random() < 0.22
+    ) {
+      buildPort(sim, c.id);
+    }
+
     // AI nations gradually advance their own historical genealogical tree
-    if (Math.random() < 0.08) {
+    if (Math.random() < (isHard ? 0.18 : 0.08)) {
       const aiTree = getCountryGenealogyTree(c.seed);
       const nextAvailable = aiTree.nodes.find(
         (n) => evaluateFocusNodeStatus(sim, c.id, n).canComplete
@@ -3385,7 +3712,7 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
     }
   }
 
-  // 2. Peace evaluation when losing badly
+  // 2. Smart Peace evaluation when losing badly or fighting multiple fronts
   if (atWar) {
     for (const eid of enemies) {
       const war = sim.wars.find(
@@ -3394,8 +3721,11 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       if (!war) continue;
       const duration = sim.totalDays - war.startTotalDays;
       const enemy = sim.countries[eid];
-      const losingBadly = c.pixels < c.initialPixels * 0.6 || c.army < enemy.army * 0.45;
-      if (duration > 130 && losingBadly && Math.random() < 0.35) {
+      const losingBadly = c.pixels < c.initialPixels * 0.62 || c.army < enemy.army * 0.48;
+      const multiFrontStrain = isHard && enemies.length >= 2 && c.army < enemy.army * 0.95;
+      const minPeaceDays = isHard ? 75 : 130;
+
+      if (duration > minPeaceDays && (losingBadly || multiFrontStrain) && Math.random() < (isHard ? 0.45 : 0.35)) {
         if (sim.isMultiplayer && isHumanCountry(sim, eid)) {
           const exists = sim.diplomaticOffers.some(
             (o) => o.fromCountryId === c.id && o.toCountryId === eid && o.type === 'peace'
@@ -3418,27 +3748,77 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
     }
   }
 
-  // 3. Autonomous Alliances & Wars (max 1 AI war per month)
+  // 3. Autonomous Alliances & Wars (never attacking allies)
   const candidates = getAiCandidates(sim, c);
   if (candidates.length === 0) return;
 
-  const targetId = candidates[Math.floor(Math.random() * candidates.length)];
+  // Hard Mode AI intelligently selects the best tactical target (vulnerable neighbor, player hegemon, or strong ally candidate)
+  let targetId = candidates[Math.floor(Math.random() * candidates.length)];
+  if (isHard && candidates.length > 1) {
+    const player = sim.countries[sim.playerId];
+    const playerThreatening =
+      player?.alive &&
+      (player.aggressiveExpansion >= 18 || player.pixels > player.initialPixels * 1.6);
+
+    const scored = candidates
+      .filter((cid) => sim.countries[cid]?.alive && !hasTreaty(sim, c.id, cid, TREATY_WAR))
+      .map((cid) => {
+        const t = sim.countries[cid];
+        const isNb = sim.mapData.landNeighbors[c.id].has(cid);
+        const targetWars = getEnemies(sim, cid).length;
+        let score = Math.random() * 15;
+        if (isNb) score += 25;
+        if (c.army > t.army * 1.05) score += 20;
+        if (targetWars > 0) score += 18; // opportunistic strike on busy nation
+        if (cid === sim.playerId && playerThreatening && !hasTreaty(sim, c.id, cid, TREATY_ALLIANCE)) {
+          score += 24;
+        }
+        return { cid, score };
+      })
+      .sort((a, b) => b.score - a.score);
+    if (scored.length > 0) {
+      targetId = scored[0].cid;
+    }
+  }
+
   const target = sim.countries[targetId];
   if (!target.alive || hasTreaty(sim, c.id, targetId, TREATY_WAR)) return;
 
   const rel = getRelation(sim, c.id, targetId);
   const isLandNeighbor = sim.mapData.landNeighbors[c.id].has(targetId);
+  const isAllied = hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE);
 
-  if (rel >= 50 && !hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE)) {
-    if (Math.random() < 0.6) addRelation(sim, c.id, targetId, c.aiDoctrine === 'diplomatic' ? 5 : 3);
-  } else if (isLandNeighbor && c.aiDoctrine === 'expansionist' && c.army > target.army * 1.1) {
-    if (Math.random() < 0.55) addRelation(sim, c.id, targetId, -6);
+  if (isHard) {
+    // Hard Mode: diplomatic nations build strategic blocs, while expansionist powers actively create friction with non-allied neighbors
+    if (!isAllied) {
+      if (targetId === sim.playerId && (target.aggressiveExpansion >= 15 || target.pixels > target.initialPixels * 1.5)) {
+        addRelation(sim, c.id, targetId, -7);
+      } else if (isLandNeighbor && c.army >= target.army * 0.92 && Math.random() < 0.72) {
+        addRelation(sim, c.id, targetId, -8);
+      } else if (rel >= 52 && c.aiDoctrine === 'diplomatic' && Math.random() < 0.55) {
+        addRelation(sim, c.id, targetId, 6);
+      } else if (!isLandNeighbor && Math.random() < 0.45) {
+        addRelation(sim, c.id, targetId, c.army > target.army ? -5 : 5);
+      }
+    }
+  } else {
+    if (rel >= 50 && !isAllied) {
+      if (Math.random() < 0.6) addRelation(sim, c.id, targetId, c.aiDoctrine === 'diplomatic' ? 5 : 3);
+    } else if (isLandNeighbor && c.aiDoctrine === 'expansionist' && c.army > target.army * 1.1) {
+      if (Math.random() < 0.55) addRelation(sim, c.id, targetId, -6);
+    }
   }
 
   const newRel = getRelation(sim, c.id, targetId);
+  const allianceThreshold = getAllianceRelThreshold(sim.difficulty);
 
   // Form Strategic Alliances
-  if (newRel >= ALLIANCE_REL_THRESHOLD && !hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE) && getAllies(sim, c.id).length < 4 && Math.random() < 0.4) {
+  if (
+    newRel >= allianceThreshold &&
+    !hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE) &&
+    getAllies(sim, c.id).length < 4 &&
+    Math.random() < (isHard ? 0.35 : 0.4)
+  ) {
     if (sim.isMultiplayer && isHumanCountry(sim, targetId)) {
       if (Math.random() < 0.25) {
         const exists = sim.diplomaticOffers.some(
@@ -3454,7 +3834,7 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
       return;
     }
     if (targetId === sim.playerId) {
-      if (!sim.pendingProposal && Math.random() < 0.25) {
+      if (!sim.pendingProposal && Math.random() < (isHard ? 0.16 : 0.25)) {
         sim.pendingProposal = { id: sim.nextIdCounter++, fromId: c.id, type: 'alliance' };
       }
       return;
@@ -3463,9 +3843,42 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
     return;
   }
 
-  // Declare at most 1 AI war per month
+  // Declare War (strictly excluding allies!)
   const currentMonthKey = sim.year * 12 + sim.month;
   const ratio = c.army / Math.max(1, target.army);
+  const canReachNaval =
+    isHard && !isLandNeighbor && c.ports.length > 0 && canReachToAttack(sim, c.id, targetId).ok;
+
+  if (isHard) {
+    const canAttackHard =
+      sim.wars.length < 26 &&
+      enemies.length < 2 &&
+      (isLandNeighbor || canReachNaval) &&
+      sim.truceMonths[idxPair(c.id, targetId)] <= 0 &&
+      !hasTreaty(sim, c.id, targetId, TREATY_ALLIANCE);
+
+    const targetIsBusy = getEnemies(sim, targetId).length > 0;
+    const hardWantsWar =
+      newRel <= 52 ||
+      target.aggressiveExpansion >= 14 ||
+      targetIsBusy ||
+      (targetId === sim.playerId && target.pixels > target.initialPixels * 1.4);
+
+    if (
+      canAttackHard &&
+      hardWantsWar &&
+      ratio >= (targetIsBusy ? 0.85 : 0.96) &&
+      Math.random() < 0.52
+    ) {
+      const res = declareWar(sim, c.id, targetId);
+      if (res.ok) {
+        sim.lastAiWarMonth = currentMonthKey;
+      }
+    }
+    return;
+  }
+
+  // Normal Mode: Declare at most 1 AI war per month
   const canAttack =
     sim.lastAiWarMonth < currentMonthKey &&
     sim.wars.length < 10 &&
@@ -3483,7 +3896,7 @@ function runAiAgentDecision(sim: SimulationState, c: CountryState) {
 }
 
 function runAiPulse(sim: SimulationState) {
-  const batchSize = 48;
+  const batchSize = sim.difficulty === 'hard' ? 75 : 48;
   let processed = 0;
   let scanned = 0;
   while (processed < batchSize && scanned < N_COUNTRIES) {
@@ -3522,14 +3935,16 @@ function triggerHistoricalEvent(sim: SimulationState) {
 export function resolveEventChoice(sim: SimulationState, choice: EventChoice) {
   const p = sim.countries[sim.playerId];
   const e = choice.effects;
-  const armyCap = getArmyCap(p);
-  const moneyCap = getMoneyCap(p);
+  const armyCap = getArmyCap(p, sim.difficulty);
+  const moneyCap = getMoneyCap(p, sim.difficulty);
   if (e.moneyDelta) {
-    p.money = Math.max(0, Math.min(moneyCap, Math.round(p.money + e.moneyDelta)));
+    const scaledMoneyDelta = sim.difficulty === 'hard' ? Math.round(e.moneyDelta * 5) : e.moneyDelta;
+    p.money = Math.max(0, Math.min(moneyCap, Math.round(p.money + scaledMoneyDelta)));
   }
   if (e.armyDeltaPct) {
     const rawDelta = Math.round(p.army * e.armyDeltaPct);
-    const boundedDelta = e.armyDeltaPct > 0 ? Math.min(350, rawDelta) : rawDelta;
+    const maxGain = sim.difficulty === 'hard' ? 2500 : 350;
+    const boundedDelta = e.armyDeltaPct > 0 ? Math.min(maxGain, rawDelta) : rawDelta;
     p.army = Math.max(10, Math.min(armyCap, Math.round(p.army + boundedDelta)));
   }
   if (e.globalTensionDelta) {
@@ -3562,7 +3977,7 @@ export function stepSimulationDay(sim: SimulationState) {
 
   processFrontlineBattles(sim);
 
-  if (sim.totalDays % 2 === 0) {
+  if (sim.difficulty === 'hard' || sim.totalDays % 2 === 0) {
     runAiPulse(sim);
   }
 

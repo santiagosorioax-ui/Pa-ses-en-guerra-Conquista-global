@@ -12,6 +12,7 @@ import {
   type ChronicleEntry,
   type CountryState,
   type DefenseCoord,
+  type GameDifficulty,
   type HumanDiplomaticOffer,
   type HumanPlayerSlot,
   type NavalInvasion,
@@ -509,9 +510,14 @@ export function restoreSimulationFromSnapshot(
   recomputeLandNeighborsFromGrid(mapData, ownerGrid);
 
   const countries = hydrateCountries(raw.countries as SerializedCountry[], mapData);
+  const difficulty: GameDifficulty =
+    raw.difficulty === 'hard' || String(raw.campaignId ?? '').startsWith('hard_')
+      ? 'hard'
+      : 'normal';
 
   const restored: SimulationState = {
     playerId: Number(raw.playerId),
+    difficulty,
     isMultiplayer: false,
     winnerCountryId: null,
     humanPlayers: {},
@@ -667,6 +673,7 @@ export function restoreRoomWorldState(
 
   return {
     playerId: myCountryId,
+    difficulty: 'normal',
     isMultiplayer: true,
     winnerCountryId:
       raw.winnerCountryId === null || raw.winnerCountryId === undefined

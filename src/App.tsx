@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crown, Handshake, Map as MapIcon, ScrollText, Swords, TrendingUp, Trophy, X } from 'lucide-react';
+import { Crown, Handshake, Map as MapIcon, ScrollText, Skull, Swords, TrendingUp, Trophy, X } from 'lucide-react';
 import { AchievementsModal } from './components/AchievementsModal';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
@@ -38,13 +38,13 @@ import {
   type GameActionResult,
 } from './engine/gameActions';
 import {
-  ANTI_NUKE_COST,
   ANTI_NUKE_RADIUS,
   BARRACKS_ARMY_CAP_BONUS,
-  BARRACKS_COST,
   BARRACKS_RADIUS,
   NUKE_RADIUS,
   createSimulation,
+  getAntiNukeCost,
+  getBarracksCost,
   getCountryName,
   getCountryRebellionStrength,
   getEmpirePreviewBounds,
@@ -53,6 +53,7 @@ import {
   respondToPendingProposal,
   stepSimulationDay,
   stepSimulationSecond,
+  type GameDifficulty,
   type MapMode,
   type SimulationState,
 } from './engine/gameSimulation';
@@ -78,6 +79,11 @@ import {
   type LocalCampaignSummary,
 } from './services/localSaves';
 import {
+  loadHardModeUnlockProgress,
+  recordSingleMatchCaptures,
+  type HardModeUnlockProgress,
+} from './services/hardModeUnlock';
+import {
   hostBroadcastWorldState,
   hostStartMultiplayerMatch,
   leaveMultiplayerRoom,
@@ -98,6 +104,7 @@ export default function App() {
   const { user, canAccessOnline, authBusy, campaigns, signInWithGoogle } = useFirebase();
 
   const [screen, setScreen] = useState<GameScreen>('DEVICE_SELECT');
+  const [selectedDifficulty, setSelectedDifficulty] = useState<GameDifficulty>('normal');
   const deviceMode: DeviceMode = 'mobile';
   const [onlineDevNotice, setOnlineDevNotice] = useState(false);
   const onlineNoticeTimerRef = useRef<number | null>(null);
@@ -156,6 +163,11 @@ export default function App() {
     extraCount: number;
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const [hardModeProgress, setHardModeProgress] = useState<HardModeUnlockProgress>(() =>
+    loadHardModeUnlockProgress(null, achievementProfileRef.current)
+  );
+  const [hardModeUnlockToast, setHardModeUnlockToast] = useState(false);
+  const hardModeToastTimerRef = useRef<number | null>(null);
   const [placingDefense, setPlacingDefense] = useState(false);
   const [placingAntiNuke, setPlacingAntiNuke] = useState(false);
   const [placingBarracks, setPlacingBarracks] = useState(false);
@@ -182,11 +194,12 @@ export default function App() {
     setRenderTick((t) => t + 1);
   }, []);
 
-  // Load user-specific achievements when Firebase user changes
+  // Load user-specific achievements & hard-mode unlock progress when Firebase user changes
   useEffect(() => {
     const loaded = loadAchievementProfile(user?.uid);
     achievementProfileRef.current = loaded;
     setAchievementProfile(loaded);
+    setHardModeProgress(loadHardModeUnlockProgress(user?.uid, loaded));
   }, [user?.uid]);
 
   useEffect(() => {
@@ -197,6 +210,9 @@ export default function App() {
     return () => {
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
+      }
+      if (hardModeToastTimerRef.current !== null) {
+        window.clearTimeout(hardModeToastTimerRef.current);
       }
       if (onlineNoticeTimerRef.current !== null) {
         window.clearTimeout(onlineNoticeTimerRef.current);
@@ -1040,10 +1056,10 @@ export default function App() {
     setMpRoomCode(null);
     setMpRoom(null);
     setMpMembers([]);
-    const sim = createSimulation(countryId);
+    const sim = createSimulation(countryId, { difficulty: selectedDifficulty });
     simRef.current = sim;
     lastOutcomeRef.current = 'none';
-    activeCampaignIdRef.current = `camp_${Date.now()}`;
+    activeCampaignIdRef.current = `${selectedDifficulty === 'hard' ? 'hard' : 'camp'}_${Date.now()}`;
     setSelectedId(countryId);
     setDrawerTab('manage');
     setMobileDrawerOpen(false);
@@ -1141,6 +1157,7 @@ export default function App() {
       simRef.current = chosenSim;
       lastOutcomeRef.current = chosenSim.outcome;
       activeCampaignIdRef.current = summary.campaignId;
+      setSelectedDifficulty(chosenSim.difficulty);
 
       // Always mirror the resumed snapshot locally so it is instantly available offline too
       const keepDirty = chosenFrom === 'local' ? Boolean(localEntry?.summary.dirtyForCloud) : false;
@@ -1532,6 +1549,39 @@ export default function App() {
             setAchievementProfile(updatedProfile);
           }
         }
+
+        // Track countries captured in this single match for Modo Difícil unlock (50 countries)
+        let capturedInMatch = 0;
+        for (let i = 0; i < sim.countries.length; i++) {
+          const c = sim.countries[i];
+          if (!c.alive && c.annexedById === sim.playerId && c.id !== sim.playerId) {
+            capturedInMatch++;
+          }
+        }
+        if (capturedInMatch > 0) {
+          const { progress, justUnlocked } = recordSingleMatchCaptures(
+            capturedInMatch,
+            user?.uid,
+            updatedProfile
+          );
+          setHardModeProgress((prev) =>
+            prev.unlocked !== progress.unlocked ||
+            prev.bestCapturedInMatch !== progress.bestCapturedInMatch
+              ? progress
+              : prev
+          );
+          if (justUnlocked) {
+            soundEngine.playAllianceFormed();
+            setHardModeUnlockToast(true);
+            if (hardModeToastTimerRef.current !== null) {
+              window.clearTimeout(hardModeToastTimerRef.current);
+            }
+            hardModeToastTimerRef.current = window.setTimeout(() => {
+              hardModeToastTimerRef.current = null;
+              setHardModeUnlockToast(false);
+            }, 6500);
+          }
+        }
       } else {
         achievementProfileRef.current = nextProfile;
       }
@@ -1680,11 +1730,13 @@ export default function App() {
       map.set(cloud.campaignId, {
         ...cloud,
         storageSource: 'cloud',
+        difficulty: cloud.campaignId.startsWith('hard_') ? 'hard' : 'normal',
       });
     }
 
     for (const local of localCampaigns) {
       const existingCloud = map.get(local.campaignId);
+      const difficulty: GameDifficulty = local.campaignId.startsWith('hard_') ? 'hard' : 'normal';
       if (!existingCloud) {
         map.set(local.campaignId, {
           ...local,
@@ -1693,6 +1745,7 @@ export default function App() {
           defensesCount: local.defensesCount,
           barracksCount: local.barracksCount,
           antiNukesCount: local.antiNukesCount,
+          difficulty,
         });
       } else {
         const localDateScore = local.year * 400 + local.month * 32 + local.day;
@@ -1713,6 +1766,7 @@ export default function App() {
           defensesCount: local.defensesCount,
           barracksCount: local.barracksCount,
           antiNukesCount: local.antiNukesCount,
+          difficulty,
         });
       }
     }
@@ -1770,13 +1824,15 @@ export default function App() {
       <>
         {renderOnlineDevBanner()}
         <DeviceModeScreen
-          onStartPlay={() => {
+          onStartPlay={(difficulty) => {
+            setSelectedDifficulty(difficulty);
             setScreen('COUNTRY_SELECT');
           }}
           onPressOnline={handlePressOnline}
           onResetTutorial={handleResetTutorial}
           lastCampaign={lastCampaign}
           onResumeLastCampaign={handleResumeCampaign}
+          hardModeProgress={hardModeProgress}
         />
         {menuTutorialOpen && (
           <TutorialOverlay
@@ -1869,6 +1925,8 @@ export default function App() {
         {renderOnlineDevBanner()}
         <CountrySelectScreen
           deviceMode={deviceMode}
+          difficulty={selectedDifficulty}
+          onBackToMenu={() => setScreen('DEVICE_SELECT')}
           onChangeDeviceMode={() => {}}
           onStartCampaign={handleStartCampaign}
           savedCampaigns={mergedCampaigns}
@@ -2069,7 +2127,7 @@ export default function App() {
           {placingAntiNuke && (
             <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(94vw,540px)] bg-cyan-950/95 border border-cyan-400 px-3 sm:px-4 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-cyan-100">
               <span>
-                Toca en tu país para colocar el Antibombas (radar {ANTI_NUKE_RADIUS * 10} km · ${ANTI_NUKE_COST.toLocaleString('es-ES')})
+                Toca en tu país para colocar el Antibombas (radar {ANTI_NUKE_RADIUS * 10} km · ${getAntiNukeCost(sim.difficulty).toLocaleString('es-ES')})
               </span>
               <button
                 onClick={() => setPlacingAntiNuke(false)}
@@ -2083,7 +2141,7 @@ export default function App() {
           {placingBarracks && (
             <div className="absolute top-2.5 sm:top-3 left-1/2 -translate-x-1/2 z-30 w-[min(94vw,560px)] bg-purple-950/95 border border-purple-400 px-3 sm:px-4 py-2 shadow-2xl flex items-center justify-between gap-2.5 text-xs text-purple-100">
               <span>
-                Toca en tu país para colocar el Cuartel Militar (+{BARRACKS_ARMY_CAP_BONUS} cap. · radio {BARRACKS_RADIUS * 10} km · -50% rebeldía en esa zona · ${BARRACKS_COST.toLocaleString('es-ES')})
+                Toca en tu país para colocar el Cuartel Militar (+{BARRACKS_ARMY_CAP_BONUS} cap. · radio {BARRACKS_RADIUS * 10} km · -50% rebeldía en esa zona · ${getBarracksCost(sim.difficulty).toLocaleString('es-ES')})
               </span>
               <button
                 onClick={() => setPlacingBarracks(false)}
@@ -2650,6 +2708,39 @@ export default function App() {
       />
 
       {renderAchievementToast()}
+
+      {hardModeUnlockToast && (
+        <div
+          className={`fixed z-[75] ${
+            deviceMode === 'mobile'
+              ? 'top-16 left-2 right-2'
+              : 'top-16 right-4 w-[360px]'
+          } bg-[#1A0E16]/98 border-2 border-red-500 shadow-2xl p-3 flex items-start gap-2.5`}
+        >
+          <div className="w-8 h-8 bg-red-500/20 border border-red-500/60 flex items-center justify-center shrink-0 mt-0.5">
+            <Skull className="w-4 h-4 text-red-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-mono-num uppercase tracking-wide text-red-400 font-bold">
+              ¡Cadenas Rotas · 50 Países Capturados!
+            </div>
+            <div className="text-xs font-extrabold text-white mt-0.5">
+              ¡Modo Difícil Desbloqueado!
+            </div>
+            <div className="text-[11px] text-red-100/90 leading-snug mt-0.5">
+              Ya puedes seleccionarlo al pulsar «Jugar» en el menú principal.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setHardModeUnlockToast(false)}
+            aria-label="Cerrar notificación"
+            className="p-1 text-slate-400 hover:text-white cursor-pointer shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       <PWAInstallBanner liftAboveBottomNav={isMobile} />
       <OfflineIndicator liftAboveBottomNav={isMobile} />

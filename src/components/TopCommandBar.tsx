@@ -162,6 +162,11 @@ export function TopCommandBar({
                 Sala {roomCode}
               </span>
             )}
+            {sim.difficulty === 'hard' && (
+              <span className="px-1.5 py-0.5 bg-red-950/90 border border-red-500/80 text-[9px] font-extrabold text-red-300 uppercase shrink-0">
+                Difícil
+              </span>
+            )}
             <span className="flex items-center gap-1 text-emerald-300 font-bold">
               <Coins className="w-3 h-3 text-amber-400 shrink-0" />
               ${Math.round(player.money).toLocaleString('es-ES')}
@@ -285,6 +290,11 @@ export function TopCommandBar({
         {roomCode && (
           <div className="px-2 py-1 bg-emerald-950/70 border border-emerald-600/60 text-xs font-mono-num text-emerald-300 whitespace-nowrap">
             Sala {roomCode}
+          </div>
+        )}
+        {sim.difficulty === 'hard' && (
+          <div className="px-2 py-1 bg-red-950/90 border border-red-500/80 text-[11px] font-mono-num font-extrabold text-red-300 uppercase whitespace-nowrap">
+            Difícil
           </div>
         )}
         <div className="px-2.5 py-1 bg-[#0B121E] border border-slate-800 text-xs font-mono-num text-slate-200 whitespace-nowrap">

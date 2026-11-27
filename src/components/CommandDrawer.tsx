@@ -20,22 +20,16 @@ import {
 import { getCountryGenealogyTree } from '../data/countryTrees';
 import type { DeviceMode } from './DeviceModeScreen';
 import {
-  ANTI_NUKE_COST,
   ANTI_NUKE_RADIUS,
-  ARMY_RECRUIT_AMOUNT,
-  ARMY_RECRUIT_COST,
   BARRACKS_ARMY_CAP_BONUS,
-  BARRACKS_COST,
   BARRACKS_RADIUS,
-  CITY_INCOME,
   DEFENSE_COST,
   DEFENSE_RADIUS,
-  GOLD_MINE_INCOME,
+  HARD_PLAYER_ARMY_PER_SECOND,
   MAX_CITIES_PER_MONTH,
   MAX_CITIES_TOTAL,
   MAX_GOLD_MINES_PER_MONTH,
   MAX_GOLD_MINES_TOTAL,
-  NUKE_COST,
   NUKE_RADIUS,
   PORT_COST,
   SUPPRESS_REBELLION_COST,
@@ -43,15 +37,23 @@ import {
   TREATY_WAR,
   evaluateFocusNodeStatus,
   getAllies,
+  getAntiNukeCost,
   getArmyCap,
+  getArmyRecruitAmount,
+  getArmyRecruitCost,
+  getBarracksCost,
+  getCityArmyCapBonus,
   getCityCost,
+  getCityIncome,
   getCountryDefensePct,
   getCountryName,
   getCountryRebellionStrength,
   getEnemies,
   getGoldMineCost,
+  getGoldMineIncome,
   getMaxRecruitableSoldiers,
   getMoneyCap,
+  getNukeCost,
   getOccupiedNationsBy,
   getRelation,
   getTopRelations,
@@ -136,9 +138,17 @@ export function CommandDrawer({
   const playerAllies = getAllies(sim, player.id);
   const occupiedNations = getOccupiedNationsBy(sim, player.id);
   const canBuildPort = hasCoast(sim, player.id);
-  const armyCap = getArmyCap(player);
-  const moneyCap = getMoneyCap(player);
-  const maxRecruitableSoldiers = getMaxRecruitableSoldiers(player);
+  const armyCap = getArmyCap(player, sim.difficulty);
+  const moneyCap = getMoneyCap(player, sim.difficulty);
+  const maxRecruitableSoldiers = getMaxRecruitableSoldiers(player, sim.difficulty);
+  const recruitCost = getArmyRecruitCost(sim.difficulty);
+  const recruitAmount = getArmyRecruitAmount(sim.difficulty);
+  const goldMineIncome = getGoldMineIncome(sim.difficulty);
+  const cityIncome = getCityIncome(sim.difficulty);
+  const cityArmyCapBonus = getCityArmyCapBonus(sim.difficulty);
+  const antiNukeCost = getAntiNukeCost(sim.difficulty);
+  const barracksCost = getBarracksCost(sim.difficulty);
+  const nukeCost = getNukeCost(sim, player.id);
   const playerTree = getCountryGenealogyTree(player.seed);
   const completedFocusCount = (player.completedFocusIds ?? []).length;
   const readyFocusCount = player.alive
@@ -255,6 +265,9 @@ export function CommandDrawer({
                 </div>
                 <div className="text-[11px] text-slate-300 truncate">
                   Cap. {armyCap.toLocaleString('es-ES')}
+                  {sim.difficulty === 'hard' && (
+                    <span className="text-rose-300"> · +{HARD_PLAYER_ARMY_PER_SECOND}/s</span>
+                  )}
                 </div>
                 <div className="text-[10px] text-emerald-400 truncate">
                   Defensa país +{getCountryDefensePct(player)}%
@@ -309,10 +322,10 @@ export function CommandDrawer({
                 >
                   <span className="flex items-center gap-1.5 min-w-0">
                     <Swords className="w-4 h-4 shrink-0" />
-                    <span className="truncate">Ejército (+{ARMY_RECRUIT_AMOUNT})</span>
+                    <span className="truncate">Ejército (+{recruitAmount})</span>
                   </span>
                   <span className="font-mono-num text-xs bg-rose-800/80 px-2 py-0.5 shrink-0">
-                    ${ARMY_RECRUIT_COST}
+                    ${recruitCost}
                   </span>
                 </button>
 
@@ -363,12 +376,12 @@ export function CommandDrawer({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      Genera +${GOLD_MINE_INCOME} dinero / seg
+                      Genera +${goldMineIncome} dinero / seg
                     </div>
                   </div>
                 </div>
                 <span className="font-mono-num text-xs text-amber-300 font-semibold shrink-0">
-                  ${getGoldMineCost(player).toLocaleString('es-ES')}
+                  ${getGoldMineCost(player, sim.difficulty).toLocaleString('es-ES')}
                 </span>
               </button>
 
@@ -392,12 +405,12 @@ export function CommandDrawer({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      +${CITY_INCOME}/seg y +120 cap. militar
+                      +${cityIncome}/seg y +{cityArmyCapBonus} cap. militar
                     </div>
                   </div>
                 </div>
                 <span className="font-mono-num text-xs text-amber-300 font-semibold shrink-0">
-                  ${getCityCost(player).toLocaleString('es-ES')}
+                  ${getCityCost(player, sim.difficulty).toLocaleString('es-ES')}
                 </span>
               </button>
 
@@ -492,7 +505,7 @@ export function CommandDrawer({
                   </div>
                 </div>
                 <span className="font-mono-num text-xs text-cyan-300 font-semibold shrink-0 ml-2">
-                  {placingAntiNuke ? 'Cancelar' : `$${ANTI_NUKE_COST.toLocaleString('es-ES')}`}
+                  {placingAntiNuke ? 'Cancelar' : `$${antiNukeCost.toLocaleString('es-ES')}`}
                 </span>
               </button>
 
@@ -524,7 +537,7 @@ export function CommandDrawer({
                   </div>
                 </div>
                 <span className="font-mono-num text-xs text-purple-300 font-semibold shrink-0 ml-2">
-                  {placingBarracks ? 'Cancelar' : `$${BARRACKS_COST.toLocaleString('es-ES')}`}
+                  {placingBarracks ? 'Cancelar' : `$${barracksCost.toLocaleString('es-ES')}`}
                 </span>
               </button>
 
@@ -562,7 +575,7 @@ export function CommandDrawer({
                     ? 'Cancelar'
                     : (player.nukeCooldownDays ?? 0) > 0
                       ? `${player.nukeCooldownDays}d`
-                      : `$${NUKE_COST.toLocaleString('es-ES')}`}
+                      : `$${nukeCost.toLocaleString('es-ES')}`}
                 </span>
               </button>
             </div>

@@ -1,17 +1,9 @@
 import {
-  ANTI_NUKE_COST,
-  ARMY_RECRUIT_AMOUNT,
-  ARMY_RECRUIT_COST,
-  BARRACKS_COST,
-  CITY_INCOME,
   DEFENSE_COST,
-  GIFT_MONEY_PER_REL,
-  GOLD_MINE_INCOME,
   MAX_CITIES_PER_MONTH,
   MAX_CITIES_TOTAL,
   MAX_GOLD_MINES_PER_MONTH,
   MAX_GOLD_MINES_TOTAL,
-  NUKE_COST,
   PORT_COST,
   REBEL_RECRUIT_AMOUNT,
   REBEL_RECRUIT_COST,
@@ -27,11 +19,19 @@ import {
   completeFocusNode,
   declareWar,
   evaluateFocusNodeStatus,
+  getAntiNukeCost,
   getArmyCap,
+  getArmyRecruitAmount,
+  getArmyRecruitCost,
+  getBarracksCost,
   getCityCost,
+  getCityIncome,
   getCountryName,
   getEnemies,
+  getGiftMoneyPerRel,
   getGoldMineCost,
+  getGoldMineIncome,
+  getNukeCost,
   getRebellionStatus,
   getRelation,
   hasCoast,
@@ -99,17 +99,19 @@ export function validateGameActionLocally(
   switch (action.type) {
     case 'recruit_soldiers': {
       if (!c.alive) return { ok: false, message: 'País inactivo.' };
-      const cap = getArmyCap(c);
+      const cap = getArmyCap(c, sim.difficulty);
+      const recruitCost = getArmyRecruitCost(sim.difficulty);
+      const recruitAmount = getArmyRecruitAmount(sim.difficulty);
       if (c.army >= cap) {
         return {
           ok: false,
           message: `Capacidad militar máxima alcanzada (${cap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`,
         };
       }
-      if (c.money < ARMY_RECRUIT_COST) {
+      if (c.money < recruitCost) {
         return {
           ok: false,
-          message: `Necesitas $${ARMY_RECRUIT_COST} para reclutar ${ARMY_RECRUIT_AMOUNT} soldados.`,
+          message: `Necesitas $${recruitCost} para reclutar ${recruitAmount} soldados.`,
         };
       }
       return null;
@@ -117,18 +119,20 @@ export function validateGameActionLocally(
 
     case 'recruit_soldiers_max': {
       if (!c.alive) return { ok: false, message: 'País inactivo.' };
-      const cap = getArmyCap(c);
+      const cap = getArmyCap(c, sim.difficulty);
+      const recruitCost = getArmyRecruitCost(sim.difficulty);
+      const recruitAmount = getArmyRecruitAmount(sim.difficulty);
       if (cap - c.army < 1) {
         return {
           ok: false,
           message: `Capacidad militar máxima alcanzada (${cap.toLocaleString('es-ES')}). Construye Ciudades o conquista territorio para ampliarla.`,
         };
       }
-      const affordable = Math.floor((c.money * ARMY_RECRUIT_AMOUNT) / ARMY_RECRUIT_COST);
+      const affordable = Math.floor((c.money * recruitAmount) / recruitCost);
       if (affordable < 1) {
         return {
           ok: false,
-          message: `Necesitas al menos $${Math.ceil(ARMY_RECRUIT_COST / ARMY_RECRUIT_AMOUNT)} para reclutar soldados.`,
+          message: `Necesitas al menos $${Math.ceil(recruitCost / recruitAmount)} para reclutar soldados.`,
         };
       }
       return null;
@@ -142,7 +146,7 @@ export function validateGameActionLocally(
       if (c.goldMinesBuiltThisMonth >= MAX_GOLD_MINES_PER_MONTH) {
         return { ok: false, message: `Solo puedes construir ${MAX_GOLD_MINES_PER_MONTH} Mina de Oro por mes.` };
       }
-      const cost = getGoldMineCost(c);
+      const cost = getGoldMineCost(c, sim.difficulty);
       if (c.money < cost) {
         return { ok: false, message: `Necesitas $${cost.toLocaleString('es-ES')} de dinero.` };
       }
@@ -157,7 +161,7 @@ export function validateGameActionLocally(
       if (c.citiesBuiltThisMonth >= MAX_CITIES_PER_MONTH) {
         return { ok: false, message: `Solo puedes construir ${MAX_CITIES_PER_MONTH} Ciudades por mes.` };
       }
-      const cost = getCityCost(c);
+      const cost = getCityCost(c, sim.difficulty);
       if (c.money < cost) {
         return { ok: false, message: `Necesitas $${cost.toLocaleString('es-ES')} de dinero.` };
       }
@@ -203,10 +207,11 @@ export function validateGameActionLocally(
       if (c.antiNukes.some((a) => Math.hypot(a.x - action.x, a.y - action.y) < 8)) {
         return { ok: false, message: 'Ya existe un Antibombas muy cerca de ese punto.' };
       }
-      if (c.money < ANTI_NUKE_COST) {
+      const antiNukeCost = getAntiNukeCost(sim.difficulty);
+      if (c.money < antiNukeCost) {
         return {
           ok: false,
-          message: `Necesitas $${ANTI_NUKE_COST.toLocaleString('es-ES')} para construir un Antibombas.`,
+          message: `Necesitas $${antiNukeCost.toLocaleString('es-ES')} para construir un Antibombas.`,
         };
       }
       return null;
@@ -223,10 +228,11 @@ export function validateGameActionLocally(
       if (c.barracks.some((b) => Math.hypot(b.x - action.x, b.y - action.y) < 8)) {
         return { ok: false, message: 'Ya existe un Cuartel Militar muy cerca de ese punto.' };
       }
-      if (c.money < BARRACKS_COST) {
+      const barracksCost = getBarracksCost(sim.difficulty);
+      if (c.money < barracksCost) {
         return {
           ok: false,
-          message: `Necesitas $${BARRACKS_COST.toLocaleString('es-ES')} para construir un Cuartel Militar.`,
+          message: `Necesitas $${barracksCost.toLocaleString('es-ES')} para construir un Cuartel Militar.`,
         };
       }
       return null;
@@ -245,10 +251,11 @@ export function validateGameActionLocally(
           message: `Misil nuclear en recarga (${c.nukeCooldownDays} días restantes).`,
         };
       }
-      if (c.money < NUKE_COST) {
+      const nukeCost = getNukeCost(sim, actorCountryId);
+      if (c.money < nukeCost) {
         return {
           ok: false,
-          message: `Necesitas $${NUKE_COST.toLocaleString('es-ES')} para lanzar una Bomba Nuclear.`,
+          message: `Necesitas $${nukeCost.toLocaleString('es-ES')} para lanzar una Bomba Nuclear.`,
         };
       }
       const targetId = sim.ownerGrid[action.y * MAP_W + action.x];
@@ -326,11 +333,11 @@ export function validateGameActionLocally(
         return { ok: false, message: `Tu relación con ${getCountryName(target)} ya está al máximo (100/100).` };
       }
       const actualPoints = Math.max(1, Math.min(action.points, 100 - rel));
-      const cost = actualPoints * GIFT_MONEY_PER_REL;
+      const cost = actualPoints * getGiftMoneyPerRel(sim.difficulty);
       if (c.money < cost) {
         return {
           ok: false,
-          message: `Necesitas $${cost} de dinero para subir +${actualPoints} de relación.`,
+          message: `Necesitas $${cost.toLocaleString('es-ES')} de dinero para subir +${actualPoints} de relación.`,
         };
       }
       return null;
@@ -400,9 +407,10 @@ export function executeGameAction(
   switch (action.type) {
     case 'recruit_soldiers': {
       const err = recruitSoldiers(sim, actorCountryId);
+      const amount = getArmyRecruitAmount(sim.difficulty);
       return {
         ok: !err,
-        message: err ?? `¡+${ARMY_RECRUIT_AMOUNT} soldados reclutados para tu Ejército!`,
+        message: err ?? `¡+${amount} soldados reclutados para tu Ejército!`,
       };
     }
 
@@ -416,17 +424,19 @@ export function executeGameAction(
 
     case 'build_gold_mine': {
       const err = buildGoldMine(sim, actorCountryId);
+      const mineIncome = getGoldMineIncome(sim.difficulty);
       return {
         ok: !err,
-        message: err ?? `Mina de Oro construida (+$${GOLD_MINE_INCOME}/seg).`,
+        message: err ?? `Mina de Oro construida (+$${mineIncome}/seg).`,
       };
     }
 
     case 'build_city': {
       const err = buildCity(sim, actorCountryId);
+      const cityIncome = getCityIncome(sim.difficulty);
       return {
         ok: !err,
-        message: err ?? `Ciudad construida (+$${CITY_INCOME}/seg).`,
+        message: err ?? `Ciudad construida (+$${cityIncome}/seg).`,
       };
     }
 
@@ -521,9 +531,10 @@ export function executeGameAction(
       }
       const gained = res.gained ?? action.points;
       const newRel = getRelation(sim, actorCountryId, action.targetId);
+      const giftCost = gained * getGiftMoneyPerRel(sim.difficulty);
       return {
         ok: true,
-        message: `Enviaste $${gained * GIFT_MONEY_PER_REL} a ${targetName}. La relación subió +${gained} (${newRel}/100).`,
+        message: `Enviaste $${giftCost.toLocaleString('es-ES')} a ${targetName}. La relación subió +${gained} (${newRel}/100).`,
       };
     }
 

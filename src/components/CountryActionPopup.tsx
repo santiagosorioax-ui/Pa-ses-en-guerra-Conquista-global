@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react';
 import { Anchor, Coins, GitFork, Handshake, Radiation, Shield, Swords, UserCheck, X } from 'lucide-react';
 import { getCountryGenealogyTree } from '../data/countryTrees';
 import {
-  ALLIANCE_REL_THRESHOLD,
-  GIFT_MONEY_PER_REL,
-  NUKE_COST,
   PORT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
   canReachToAttack,
+  getAllianceRelThreshold,
   getCountryName,
   getEnemies,
+  getGiftMoneyPerRel,
+  getNukeCost,
   getRelation,
   hasCoast,
   hasTreaty,
@@ -63,6 +63,9 @@ export function CountryActionPopup({
   const targetName = getCountryName(target);
   const targetTree = getCountryGenealogyTree(target.seed);
   const targetFocusCount = (target.completedFocusIds ?? []).length;
+  const allianceRelThreshold = getAllianceRelThreshold(sim.difficulty);
+  const giftMoneyPerRel = getGiftMoneyPerRel(sim.difficulty);
+  const nukeCost = getNukeCost(sim, player.id);
 
   const runAction = async (payload: GameActionPayload) => {
     setBusy(true);
@@ -221,21 +224,21 @@ export function CountryActionPopup({
               <span className="text-slate-400 shrink-0">Relación (1-100)</span>
               <span
                 className={`font-mono-num font-bold truncate ${
-                  rel >= ALLIANCE_REL_THRESHOLD
+                  rel >= allianceRelThreshold
                     ? 'text-emerald-400'
                     : rel <= 35
                       ? 'text-red-400'
                       : 'text-slate-200'
                 }`}
               >
-                {rel}/100 ({humanOwner ? 'Acuerdo mutuo' : `Alianza ≥ ${ALLIANCE_REL_THRESHOLD}`})
+                {rel}/100 ({humanOwner ? 'Acuerdo mutuo' : `Alianza ≥ ${allianceRelThreshold}`})
               </span>
             </div>
 
             {!atWar && (
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
                 <span className="text-[11px] text-slate-400">
-                  Enviar dinero ($100 = +1):
+                  Enviar dinero (${giftMoneyPerRel} = +1):
                 </span>
                 <div className="flex items-center gap-1.5 font-mono-num">
                   <button
@@ -245,7 +248,7 @@ export function CountryActionPopup({
                       isMobile ? 'px-2.5 py-1.5 min-h-[34px]' : 'px-2 py-1'
                     }`}
                   >
-                    ${GIFT_MONEY_PER_REL} (+1)
+                    ${giftMoneyPerRel} (+1)
                   </button>
                   <button
                     onClick={() => handleSendMoney(5)}
@@ -254,7 +257,7 @@ export function CountryActionPopup({
                       isMobile ? 'px-2.5 py-1.5 min-h-[34px]' : 'px-2 py-1'
                     }`}
                   >
-                    ${GIFT_MONEY_PER_REL * 5} (+5)
+                    ${(giftMoneyPerRel * 5).toLocaleString('es-ES')} (+5)
                   </button>
                 </div>
               </div>
@@ -418,7 +421,7 @@ export function CountryActionPopup({
                 </span>
               </span>
               <span className="font-mono-num text-[11px] text-orange-300 shrink-0">
-                ${NUKE_COST.toLocaleString('es-ES')}
+                ${nukeCost.toLocaleString('es-ES')}
               </span>
             </button>
           )}
