@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Lock, Search, Trophy, X } from 'lucide-react';
 import {
-  ACHIEVEMENTS_100,
+  ACHIEVEMENTS_1000,
   ACHIEVEMENT_CATEGORIES,
+  createAchievementEvalContext,
   getAchievementProgress,
   type AchievementCategory,
   type AchievementProfile,
@@ -17,6 +18,8 @@ interface AchievementsModalProps {
 
 type StatusFilter = 'all' | 'unlocked' | 'locked';
 
+const PAGE_SIZE = 60;
+
 const CATEGORY_LABEL_MAP = new Map<AchievementCategory, string>(
   ACHIEVEMENT_CATEGORIES.map((c) => [c.id, c.label])
 );
@@ -25,20 +28,29 @@ export function AchievementsModal({ profile, sim, onClose }: AchievementsModalPr
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<'all' | AchievementCategory>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
 
-  const totalCount = ACHIEVEMENTS_100.length;
+  // Reset pagination whenever filters or search change
+  useEffect(() => {
+    setVisibleLimit(PAGE_SIZE);
+  }, [search, category, statusFilter]);
+
+  const totalCount = ACHIEVEMENTS_1000.length;
   const unlockedCount = useMemo(
-    () => ACHIEVEMENTS_100.filter((a) => Boolean(profile.unlocked[a.id])).length,
+    () => ACHIEVEMENTS_1000.filter((a) => Boolean(profile.unlocked[a.id])).length,
     [profile.unlocked]
   );
   const overallPct = Math.round((unlockedCount / totalCount) * 100);
+
+  // Single O(N_countries) precomputation shared across all rendered achievement cards
+  const evalCtx = useMemo(() => createAchievementEvalContext(profile, sim), [profile, sim]);
 
   const categoryCounts = useMemo(() => {
     const map = new Map<AchievementCategory, { unlocked: number; total: number }>();
     for (const c of ACHIEVEMENT_CATEGORIES) {
       map.set(c.id, { unlocked: 0, total: 0 });
     }
-    for (const a of ACHIEVEMENTS_100) {
+    for (const a of ACHIEVEMENTS_1000) {
       const entry = map.get(a.category)!;
       entry.total++;
       if (profile.unlocked[a.id]) entry.unlocked++;
@@ -47,20 +59,32 @@ export function AchievementsModal({ profile, sim, onClose }: AchievementsModalPr
   }, [profile.unlocked]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return ACHIEVEMENTS_100.filter((a) => {
+    const rawQ = search.trim().toLowerCase();
+    const numQuery = rawQ.startsWith('#') ? rawQ.slice(1).trim() : rawQ;
+    const isPureNum = /^\d+$/.test(numQuery);
+
+    return ACHIEVEMENTS_1000.filter((a) => {
       const isDone = Boolean(profile.unlocked[a.id]);
       if (category !== 'all' && a.category !== category) return false;
       if (statusFilter === 'unlocked' && !isDone) return false;
       if (statusFilter === 'locked' && isDone) return false;
-      if (!q) return true;
+      if (!rawQ) return true;
+      if (isPureNum && String(a.number) === numQuery) return true;
       return (
-        a.title.toLowerCase().includes(q) ||
-        a.description.toLowerCase().includes(q) ||
-        (CATEGORY_LABEL_MAP.get(a.category) ?? '').toLowerCase().includes(q)
+        a.title.toLowerCase().includes(rawQ) ||
+        a.description.toLowerCase().includes(rawQ) ||
+        (CATEGORY_LABEL_MAP.get(a.category) ?? '').toLowerCase().includes(rawQ) ||
+        `#${a.number}`.includes(rawQ) ||
+        `#${String(a.number).padStart(3, '0')}`.includes(rawQ)
       );
     });
   }, [search, category, statusFilter, profile.unlocked]);
+
+  const visibleItems = useMemo(
+    () => filtered.slice(0, visibleLimit),
+    [filtered, visibleLimit]
+  );
+  const remainingCount = Math.max(0, filtered.length - visibleItems.length);
 
   return (
     <div
@@ -81,7 +105,7 @@ export function AchievementsModal({ profile, sim, onClose }: AchievementsModalPr
                   Logros de Países en Guerra
                 </h2>
                 <span className="text-xs font-mono-num text-amber-300 font-bold">
-                  {unlockedCount}/{totalCount} ({overallPct}%)
+                  {unlockedCount.toLocaleString('es-ES')}/{totalCount.toLocaleString('es-ES')} ({overallPct}%)
                 </span>
               </div>
               <div className="mt-1.5 w-48 sm:w-64 h-1.5 bg-[#0B121E] border border-slate-800 overflow-hidden">
@@ -113,17 +137,20 @@ export function AchievementsModal({ profile, sim, onClose }: AchievementsModalPr
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar entre los 100 logros..."
+                placeholder="Buscar entre los 1.000 logros (nombre, país o #número)..."
                 className="w-full bg-[#111B2B] border border-slate-700 pl-8 pr-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            <div className="flex items-center border border-slate-800 bg-[#111B2B] shrink-0">
+            <div className="flex items-center border border-slate-800 bg-[#111B2B] shrink-0 overflow-x-auto">
               {(
                 [
-                  { id: 'all', label: `Todos (${totalCount})` },
-                  { id: 'unlocked', label: `Completados (${unlockedCount})` },
-                  { id: 'locked', label: `Pendientes (${totalCount - unlockedCount})` },
+                  { id: 'all', label: `Todos (${totalCount.toLocaleString('es-ES')})` },
+                  { id: 'unlocked', label: `Completados (${unlockedCount.toLocaleString('es-ES')})` },
+                  {
+                    id: 'locked',
+                    label: `Pendientes (${(totalCount - unlockedCount).toLocaleString('es-ES')})`,
+                  },
                 ] as const
               ).map((tab) => (
                 <button
@@ -142,18 +169,18 @@ export function AchievementsModal({ profile, sim, onClose }: AchievementsModalPr
             </div>
           </div>
 
-          {/* 10 Category Filter Tabs */}
+          {/* 12 Category Filter Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             <button
               type="button"
               onClick={() => setCategory('all')}
-              className={`px-2.5 py-1 text-[11px] border whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+              className={`px-2.5 py-1 text-[11px] border whitespace-nowrap shrink-0 cursor-pointer font-mono-num transition-colors ${
                 category === 'all'
                   ? 'bg-amber-500/20 border-amber-400 text-amber-200 font-semibold'
                   : 'bg-[#111B2B] border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              Todas ({unlockedCount}/{totalCount})
+              <span className="font-sans">Todas</span> {unlockedCount.toLocaleString('es-ES')}/{totalCount.toLocaleString('es-ES')}
             </button>
             {ACHIEVEMENT_CATEGORIES.map((cat) => {
               const counts = categoryCounts.get(cat.id)!;
@@ -183,83 +210,106 @@ export function AchievementsModal({ profile, sim, onClose }: AchievementsModalPr
               No se encontraron logros con ese filtro.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-              {filtered.map((ach) => {
-                const unlockedAt = profile.unlocked[ach.id];
-                const isDone = Boolean(unlockedAt);
-                const prog = getAchievementProgress(ach, profile, sim);
-                const pct =
-                  prog.target > 0
-                    ? Math.min(100, Math.round((prog.current / prog.target) * 100))
-                    : 0;
-                const catLabel = CATEGORY_LABEL_MAP.get(ach.category) ?? ach.category;
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {visibleItems.map((ach) => {
+                  const unlockedAt = profile.unlocked[ach.id];
+                  const isDone = Boolean(unlockedAt);
+                  const prog = getAchievementProgress(ach, profile, sim, evalCtx);
+                  const pct =
+                    prog.target > 0
+                      ? Math.min(100, Math.round((prog.current / prog.target) * 100))
+                      : 0;
+                  const catLabel = CATEGORY_LABEL_MAP.get(ach.category) ?? ach.category;
 
-                return (
-                  <div
-                    key={ach.id}
-                    className={`p-3 border flex flex-col justify-between gap-2 ${
-                      isDone
-                        ? 'bg-emerald-950/20 border-emerald-700/60'
-                        : 'bg-[#0B121E] border-slate-800'
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-2 text-[10px] font-mono-num">
-                        <span className="text-slate-400">
-                          #{String(ach.number).padStart(2, '0')} · {catLabel}
-                        </span>
-                        <span
-                          className={`flex items-center gap-1 font-semibold ${
-                            isDone ? 'text-emerald-400' : 'text-slate-500'
+                  return (
+                    <div
+                      key={ach.id}
+                      className={`p-3 border flex flex-col justify-between gap-2 ${
+                        isDone
+                          ? 'bg-emerald-950/20 border-emerald-700/60'
+                          : 'bg-[#0B121E] border-slate-800'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-mono-num">
+                          <span className="text-slate-400">
+                            #{String(ach.number).padStart(3, '0')} · {catLabel}
+                          </span>
+                          <span
+                            className={`flex items-center gap-1 font-semibold ${
+                              isDone ? 'text-emerald-400' : 'text-slate-500'
+                            }`}
+                          >
+                            {isDone ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3 shrink-0" />
+                                <span>Desbloqueado</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-3 h-3 shrink-0" />
+                                <span>Pendiente</span>
+                              </>
+                            )}
+                          </span>
+                        </div>
+
+                        <div
+                          className={`text-xs font-bold leading-snug ${
+                            isDone ? 'text-amber-200' : 'text-slate-100'
                           }`}
                         >
-                          {isDone ? (
-                            <>
-                              <CheckCircle2 className="w-3 h-3 shrink-0" />
-                              <span>Desbloqueado</span>
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="w-3 h-3 shrink-0" />
-                              <span>Pendiente</span>
-                            </>
-                          )}
-                        </span>
+                          {ach.title}
+                        </div>
+                        <div className="text-[11px] text-slate-400 leading-relaxed">
+                          {ach.description}
+                        </div>
                       </div>
 
-                      <div
-                        className={`text-xs font-bold leading-snug ${
-                          isDone ? 'text-amber-200' : 'text-slate-100'
-                        }`}
-                      >
-                        {ach.title}
-                      </div>
-                      <div className="text-[11px] text-slate-400 leading-relaxed">
-                        {ach.description}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px] font-mono-num">
+                          <span className={isDone ? 'text-emerald-300' : 'text-slate-400'}>
+                            {prog.current.toLocaleString('es-ES')} / {prog.target.toLocaleString('es-ES')}
+                          </span>
+                          <span className={isDone ? 'text-emerald-300 font-bold' : 'text-slate-500'}>
+                            {pct}%
+                          </span>
+                        </div>
+                        <div className="w-full h-1 bg-slate-900 overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              isDone ? 'bg-emerald-400' : 'bg-amber-500/80'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[10px] font-mono-num">
-                        <span className={isDone ? 'text-emerald-300' : 'text-slate-400'}>
-                          {prog.current.toLocaleString('es-ES')} / {prog.target.toLocaleString('es-ES')}
-                        </span>
-                        <span className={isDone ? 'text-emerald-300 font-bold' : 'text-slate-500'}>
-                          {pct}%
-                        </span>
-                      </div>
-                      <div className="w-full h-1 bg-slate-900 overflow-hidden">
-                        <div
-                          className={`h-full transition-all ${
-                            isDone ? 'bg-emerald-400' : 'bg-amber-500/80'
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {remainingCount > 0 && (
+                <div className="pt-1 pb-2 flex flex-col sm:flex-row items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit((prev) => prev + PAGE_SIZE)}
+                    className="px-4 py-2 bg-[#111B2B] hover:bg-slate-800 border border-amber-500/60 text-amber-300 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    Mostrar más (+{Math.min(PAGE_SIZE, remainingCount)}) · Mostrando{' '}
+                    {visibleItems.length.toLocaleString('es-ES')} de{' '}
+                    {filtered.length.toLocaleString('es-ES')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleLimit(filtered.length)}
+                    className="px-3 py-2 bg-[#0B121E] hover:bg-slate-800 border border-slate-700 text-slate-300 text-xs cursor-pointer transition-colors"
+                  >
+                    Mostrar todos ({filtered.length.toLocaleString('es-ES')})
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -158,6 +158,8 @@ export default function App() {
     loadAchievementProfile(null)
   );
   const achievementProfileRef = useRef<AchievementProfile>(achievementProfile);
+  const lastMatchAnnexedRef = useRef<number>(0);
+  const matchVictoryCountedRef = useRef<boolean>(false);
   const [achievementToast, setAchievementToast] = useState<{
     ach: AchievementDef;
     extraCount: number;
@@ -610,11 +612,23 @@ export default function App() {
             case 'declare_war':
               s.warsDeclared += 1;
               break;
+            case 'build_gold_mine':
+              s.minesBuiltTotal += 1;
+              break;
+            case 'build_city':
+              s.citiesBuiltTotal += 1;
+              break;
             case 'build_port':
               s.portsBuilt += 1;
               break;
             case 'build_defense':
               s.defensesBuilt += 1;
+              break;
+            case 'build_barracks':
+              s.barracksBuilt += 1;
+              break;
+            case 'build_anti_nuke':
+              s.antiNukesBuilt += 1;
               break;
             case 'launch_nuke':
               s.nukesLaunched += 1;
@@ -1081,8 +1095,14 @@ export default function App() {
     } catch {
       setShowTutorial(true);
     }
+    lastMatchAnnexedRef.current = 0;
+    matchVictoryCountedRef.current = false;
     bumpRender();
-    updateAchievements(undefined, sim);
+    updateAchievements((s) => {
+      if (sim.difficulty === 'hard') {
+        s.hardModePlayed += 1;
+      }
+    }, sim);
     saveLocalNow(true);
     if (user?.uid) {
       void performCloudSave(user.uid);
@@ -1186,6 +1206,15 @@ export default function App() {
         zoom: c.pixels < 20 ? 3.5 : 2.0,
         nonce: Date.now(),
       });
+      let resumedAnnexed = 0;
+      for (let i = 0; i < chosenSim.countries.length; i++) {
+        const cn = chosenSim.countries[i];
+        if (!cn.alive && cn.annexedById === chosenSim.playerId && cn.id !== chosenSim.playerId) {
+          resumedAnnexed++;
+        }
+      }
+      lastMatchAnnexedRef.current = resumedAnnexed;
+      matchVictoryCountedRef.current = chosenSim.outcome === 'victory';
       bumpRender();
       updateAchievements(undefined, chosenSim);
     },
@@ -1259,6 +1288,8 @@ export default function App() {
       zoom: c.pixels < 20 ? 3.5 : 2.0,
       nonce: Date.now(),
     });
+    lastMatchAnnexedRef.current = 0;
+    matchVictoryCountedRef.current = false;
     bumpRender();
     updateAchievements((s) => {
       s.onlineMatchesPlayed += 1;
@@ -1537,6 +1568,29 @@ export default function App() {
       };
 
       if (tickCount % 2 === 0) {
+        // Count countries captured in this single match (used for cumulative totalAnnexed & Modo Difícil unlock)
+        let capturedInMatch = 0;
+        for (let i = 0; i < sim.countries.length; i++) {
+          const c = sim.countries[i];
+          if (!c.alive && c.annexedById === sim.playerId && c.id !== sim.playerId) {
+            capturedInMatch++;
+          }
+        }
+        if (capturedInMatch > lastMatchAnnexedRef.current) {
+          nextProfile.stats.totalAnnexed += capturedInMatch - lastMatchAnnexedRef.current;
+          lastMatchAnnexedRef.current = capturedInMatch;
+        }
+        const wonNow =
+          (sim.outcome === 'victory' && !sim.isMultiplayer) ||
+          (sim.isMultiplayer && sim.winnerCountryId === sim.playerId);
+        if (wonNow && !matchVictoryCountedRef.current) {
+          matchVictoryCountedRef.current = true;
+          nextProfile.stats.victories += 1;
+          if (sim.difficulty === 'hard') {
+            nextProfile.stats.hardModeVictories += 1;
+          }
+        }
+
         const { updatedProfile, newlyUnlocked } = evaluateAchievements(nextProfile, sim);
         achievementProfileRef.current = updatedProfile;
         if (newlyUnlocked.length > 0) {
@@ -1550,14 +1604,6 @@ export default function App() {
           }
         }
 
-        // Track countries captured in this single match for Modo Difícil unlock (50 countries)
-        let capturedInMatch = 0;
-        for (let i = 0; i < sim.countries.length; i++) {
-          const c = sim.countries[i];
-          if (!c.alive && c.annexedById === sim.playerId && c.id !== sim.playerId) {
-            capturedInMatch++;
-          }
-        }
         if (capturedInMatch > 0) {
           const { progress, justUnlocked } = recordSingleMatchCaptures(
             capturedInMatch,
@@ -1897,7 +1943,7 @@ export default function App() {
           className="flex-1 min-w-0 text-left cursor-pointer"
         >
           <div className="flex items-center gap-1.5 text-[10px] font-mono-num uppercase tracking-wide text-amber-400">
-            <span>Logro desbloqueado #{String(achievementToast.ach.number).padStart(2, '0')}</span>
+            <span>Logro desbloqueado #{String(achievementToast.ach.number).padStart(3, '0')}</span>
             {achievementToast.extraCount > 0 && (
               <span className="text-emerald-300">+{achievementToast.extraCount} más</span>
             )}

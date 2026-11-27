@@ -479,7 +479,7 @@ export function DeviceModeScreen({
                 Conquista el mapa mundial
               </h2>
               <p className="text-xs sm:text-sm text-slate-400 max-w-lg mx-auto">
-                195 países soberanos, árboles genealógicos, imperios históricos, bombas nucleares, rebeliones y 100 logros.
+                195 países soberanos, árboles genealógicos, imperios históricos, bombas nucleares, rebeliones y 1.000 logros.
               </p>
             </div>
 

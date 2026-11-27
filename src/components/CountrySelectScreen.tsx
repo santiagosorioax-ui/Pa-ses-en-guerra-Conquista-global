@@ -19,6 +19,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+import { TOTAL_ACHIEVEMENTS } from '../data/achievements';
 import { COUNTRIES_195, type Continent, type CountrySeed } from '../data/countries195';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
@@ -599,7 +600,7 @@ export function CountrySelectScreen({
                 soundEngine.playClick();
                 onOpenAchievements();
               }}
-              title={`Logros (${achievementsUnlockedCount}/100)`}
+              title={`Logros (${achievementsUnlockedCount.toLocaleString('es-ES')}/${TOTAL_ACHIEVEMENTS.toLocaleString('es-ES')})`}
               className="px-2 py-1.5 bg-slate-900 border border-amber-500/50 text-amber-300 hover:text-amber-200 text-[11px] font-mono-num flex items-center gap-1 cursor-pointer"
             >
               <Trophy className="w-3.5 h-3.5 shrink-0" />
@@ -954,7 +955,7 @@ export function CountrySelectScreen({
               <Trophy className="w-3.5 h-3.5 shrink-0" />
               <span>Logros</span>
               <span className="font-mono-num text-amber-200/90">
-                {achievementsUnlockedCount}/100
+                {achievementsUnlockedCount}/{TOTAL_ACHIEVEMENTS.toLocaleString('es-ES')}
               </span>
             </button>
             <button

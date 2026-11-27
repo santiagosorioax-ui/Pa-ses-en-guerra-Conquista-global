@@ -13,6 +13,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { TOTAL_ACHIEVEMENTS } from '../data/achievements';
 import { getCountryGenealogyTree } from '../data/countryTrees';
 import {
   evaluateFocusNodeStatus,
@@ -195,11 +196,11 @@ export function TopCommandBar({
           <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={onOpenAchievements}
-              title={`Logros (${achievementsUnlockedCount}/100)`}
+              title={`Logros (${achievementsUnlockedCount.toLocaleString('es-ES')}/${TOTAL_ACHIEVEMENTS.toLocaleString('es-ES')})`}
               className="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/40 text-amber-300 text-[10px] font-mono-num flex items-center gap-1 cursor-pointer"
             >
               <Trophy className="w-3 h-3 shrink-0" />
-              <span>{achievementsUnlockedCount}/100</span>
+              <span>{achievementsUnlockedCount}/{TOTAL_ACHIEVEMENTS.toLocaleString('es-ES')}</span>
             </button>
             <PWAInstallButton compact />
             <button
@@ -357,7 +358,9 @@ export function TopCommandBar({
           className="px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-amber-300 hover:text-amber-200 hover:border-amber-500/60 text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
         >
           <Trophy className="w-3.5 h-3.5 shrink-0" />
-          <span className="font-mono-num">{achievementsUnlockedCount}/100</span>
+          <span className="font-mono-num">
+            {achievementsUnlockedCount}/{TOTAL_ACHIEVEMENTS.toLocaleString('es-ES')}
+          </span>
         </button>
 
         <button
