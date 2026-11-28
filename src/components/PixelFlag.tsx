@@ -2,7 +2,7 @@ import type { CountrySeed } from '../data/countries195';
 
 interface PixelFlagProps {
   country: CountrySeed;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 export function PixelFlag({ country, size = 'md' }: PixelFlagProps) {
@@ -12,7 +12,9 @@ export function PixelFlag({ country, size = 'md' }: PixelFlagProps) {
       ? 'flag-real-sm'
       : size === 'lg'
         ? 'flag-real-lg'
-        : 'flag-real-md';
+        : size === 'xl'
+          ? 'flag-real-xl'
+          : 'flag-real-md';
 
   return (
     <span

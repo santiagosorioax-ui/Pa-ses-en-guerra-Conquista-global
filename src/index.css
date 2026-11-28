@@ -25,6 +25,11 @@
   height: 36px;
 }
 
+.flag-real-xl.fi {
+  width: 68px;
+  height: 51px;
+}
+
 @layer base {
   :root {
     --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;

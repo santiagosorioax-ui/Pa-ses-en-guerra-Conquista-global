@@ -9,6 +9,7 @@ import {
   REBEL_RECRUIT_COST,
   TREATY_ALLIANCE,
   TREATY_WAR,
+  applyDiplomaticMeetingOutcome,
   buildAntiNukeAt,
   buildBarracksAt,
   buildCity,
@@ -51,6 +52,10 @@ import {
 } from './gameSimulation';
 import { MAP_H, MAP_W } from './mapRasterizer';
 import { getCountryGenealogyTree } from '../data/countryTrees';
+import type {
+  AppliedMeetingResult,
+  DiplomaticMeetingOutcome,
+} from '../types/diplomacy';
 
 export type GameActionPayload =
   | { type: 'recruit_soldiers' }
@@ -71,12 +76,14 @@ export type GameActionPayload =
   | { type: 'recruit_rebel_army' }
   | { type: 'start_rebellion' }
   | { type: 'suppress_rebellion'; targetId: number }
-  | { type: 'complete_focus'; nodeId: string };
+  | { type: 'complete_focus'; nodeId: string }
+  | { type: 'apply_meeting_outcome'; targetId: number; outcome: DiplomaticMeetingOutcome };
 
 export interface GameActionResult {
   ok: boolean;
   message: string;
   needsPort?: boolean;
+  meetingResult?: AppliedMeetingResult;
 }
 
 /**
@@ -570,6 +577,20 @@ export function executeGameAction(
 
     case 'complete_focus': {
       return completeFocusNode(sim, actorCountryId, action.nodeId);
+    }
+
+    case 'apply_meeting_outcome': {
+      const result = applyDiplomaticMeetingOutcome(
+        sim,
+        actorCountryId,
+        action.targetId,
+        action.outcome
+      );
+      return {
+        ok: true,
+        message: result.outcome.diplomaticHeadline,
+        meetingResult: result,
+      };
     }
   }
 }

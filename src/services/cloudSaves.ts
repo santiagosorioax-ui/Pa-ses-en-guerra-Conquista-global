@@ -26,10 +26,17 @@ import {
   db,
   formatFirestoreUserError,
   handleFirestoreError,
+  isFirestoreNetworkSuspended,
   isFirestoreQuotaCooldownActive,
+  isFirestoreTimeoutError,
+  isQuotaExceededError,
+  markFirestoreQuotaExceeded,
   withTimeout,
 } from '../firebase';
 import { markLocalCampaignSyncedToCloud } from './localSaves';
+
+const knownExistingCloudCampaigns = new Set<string>();
+const lastWrittenUserCampaignByUid = new Map<string, string>();
 
 export interface SavedCampaignSummary {
   campaignId: string;
@@ -50,6 +57,7 @@ export interface SavedCampaignSummary {
 }
 
 export async function ensureUserProfile(user: User): Promise<void> {
+  if (isFirestoreQuotaCooldownActive()) return;
   const path = `users/${user.uid}`;
   const ref = doc(db, 'users', user.uid);
   const displayName = (user.displayName || user.email?.split('@')[0] || 'Comandante').slice(0, 100);
@@ -61,6 +69,7 @@ export async function ensureUserProfile(user: User): Promise<void> {
     existingSnap = await withTimeout(getDoc(ref), 8000);
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path, false);
+    if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) return;
     throw new Error(formatFirestoreUserError(error, 'Error al verificar tu perfil en la nube.'));
   }
 
@@ -79,6 +88,7 @@ export async function ensureUserProfile(user: User): Promise<void> {
       );
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path, false);
+      if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) return;
       throw new Error(formatFirestoreUserError(error, 'Error al crear perfil en la nube.'));
     }
   } else {
@@ -101,6 +111,7 @@ export async function ensureUserProfile(user: User): Promise<void> {
       );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path, false);
+      if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) return;
       throw new Error(formatFirestoreUserError(error, 'Error al actualizar perfil en la nube.'));
     }
   }
@@ -154,27 +165,36 @@ export async function saveCampaignToCloud(
   uid: string,
   campaignId: string,
   sim: SimulationState
-): Promise<{ saved: boolean; skippedDefeated?: boolean }> {
+): Promise<{ saved: boolean; skippedDefeated?: boolean; skippedQuota?: boolean }> {
   if (isFirestoreQuotaCooldownActive()) {
-    throw new Error('resource-exhausted: Quota limit exceeded.');
+    return { saved: false, skippedQuota: true };
   }
+  const cacheKey = `${uid}:${campaignId}`;
   const metaPath = `users/${uid}/campaigns/${campaignId}`;
   const snapPath = `users/${uid}/campaigns/${campaignId}/data/state`;
   const metaRef = doc(db, 'users', uid, 'campaigns', campaignId);
   const snapRef = doc(db, 'users', uid, 'campaigns', campaignId, 'data', 'state');
   const userRef = doc(db, 'users', uid);
 
-  let exists = false;
+  let exists = knownExistingCloudCampaigns.has(cacheKey);
   let alreadyDefeated = false;
-  try {
-    const existingMeta = await withTimeout(getDoc(metaRef), 8000);
-    exists = existingMeta.exists();
-    if (exists && existingMeta.data()?.outcome === 'defeat') {
-      alreadyDefeated = true;
+  if (!exists) {
+    try {
+      const existingMeta = await withTimeout(getDoc(metaRef), 8000);
+      exists = existingMeta.exists();
+      if (exists) {
+        knownExistingCloudCampaigns.add(cacheKey);
+        if (existingMeta.data()?.outcome === 'defeat') {
+          alreadyDefeated = true;
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, metaPath, false);
+      if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) {
+        return { saved: false, skippedQuota: true };
+      }
+      throw error;
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.GET, metaPath, false);
-    throw error;
   }
 
   if (alreadyDefeated) {
@@ -239,17 +259,29 @@ export async function saveCampaignToCloud(
     });
   }
 
-  batch.update(userRef, {
-    lastCampaignId: campaignId,
-    updatedAt: serverTimestamp(),
-  });
+  // Only update user profile pointer when active campaign changes (saves 33% of writes)
+  const shouldUpdateUserPointer = lastWrittenUserCampaignByUid.get(uid) !== campaignId;
+  if (shouldUpdateUserPointer) {
+    batch.update(userRef, {
+      lastCampaignId: campaignId,
+      updatedAt: serverTimestamp(),
+    });
+  }
 
   try {
     await withTimeout(batch.commit(), 9000);
+    knownExistingCloudCampaigns.add(cacheKey);
+    lastWrittenUserCampaignByUid.set(uid, campaignId);
     markLocalCampaignSyncedToCloud(campaignId, uid);
     return { saved: true };
   } catch (error) {
+    if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) {
+      markFirestoreQuotaExceeded();
+    }
     handleFirestoreError(error, OperationType.WRITE, snapPath, false);
+    if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) {
+      return { saved: false, skippedQuota: true };
+    }
     throw error;
   }
 }
@@ -270,7 +302,9 @@ export async function loadCampaignSnapshotWithMetaFromCloud(
 
   try {
     let docSnap = null;
-    const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
+    const isOnline =
+      (typeof navigator === 'undefined' || navigator.onLine !== false) &&
+      !isFirestoreNetworkSuspended();
     if (isOnline) {
       try {
         docSnap = await withTimeout(getDocFromServer(snapRef), 8000);
@@ -311,6 +345,11 @@ export async function deleteCampaignFromCloud(
   uid: string,
   campaignId: string
 ): Promise<void> {
+  if (isFirestoreQuotaCooldownActive()) {
+    throw new Error(
+      'Se alcanzó el límite diario gratuito de escrituras de Firebase Firestore. Podrás eliminar partidas en la nube cuando se restablezca la cuota mañana.'
+    );
+  }
   const metaPath = `users/${uid}/campaigns/${campaignId}`;
   const metaRef = doc(db, 'users', uid, 'campaigns', campaignId);
   const snapRef = doc(db, 'users', uid, 'campaigns', campaignId, 'data', 'state');

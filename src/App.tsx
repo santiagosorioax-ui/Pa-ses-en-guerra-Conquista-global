@@ -10,6 +10,7 @@ import {
   type DeviceMode,
   type UnifiedSavedCampaign,
 } from './components/DeviceModeScreen';
+import { DiplomaticMeetingModal } from './components/DiplomaticMeetingModal';
 import { EventModal } from './components/EventModal';
 import { GenealogyTreeModal } from './components/GenealogyTreeModal';
 import { MinimapBar } from './components/MinimapBar';
@@ -138,6 +139,7 @@ export default function App() {
   const finishedBroadcastSentRef = useRef<boolean>(false);
   const broadcastThrottleRef = useRef<number | null>(null);
   const quotaCooldownUntilRef = useRef<number>(0);
+  const lastCloudSaveAtRef = useRef<number>(0);
   const consecutiveSyncFailuresRef = useRef<number>(0);
   const processedActionIdsRef = useRef<Set<string>>(new Set());
 
@@ -151,6 +153,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [treeCountryId, setTreeCountryId] = useState<number | null>(null);
   const [treeInitialNodeId, setTreeInitialNodeId] = useState<FocusNode['id'] | undefined>(undefined);
+  const [meetingTargetId, setMeetingTargetId] = useState<number | null>(null);
   const [empireHighlight, setEmpireHighlight] = useState<EmpireHighlightConfig | null>(null);
   const [empireRemainingMs, setEmpireRemainingMs] = useState<number>(0);
   const [achievementsOpen, setAchievementsOpen] = useState(false);
@@ -386,7 +389,7 @@ export default function App() {
   );
 
   const performCloudSave = useCallback(
-    async (uidOverride?: string) => {
+    async (uidOverride?: string, forceImmediate = false) => {
       const sim = simRef.current;
       if (!sim || sim.isMultiplayer) return;
 
@@ -397,6 +400,8 @@ export default function App() {
       if (!uid) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       if (Date.now() < quotaCooldownUntilRef.current || isFirestoreQuotaCooldownActive()) return;
+      // Preserve Firestore free-tier daily write quota by enforcing a minimum 120s interval between background cloud writes
+      if (!forceImmediate && Date.now() - lastCloudSaveAtRef.current < 120_000) return;
       if (isSavingRef.current) {
         pendingSaveRef.current = true;
         return;
@@ -406,15 +411,21 @@ export default function App() {
       pendingSaveRef.current = false;
       let failed = false;
       try {
-        await saveCampaignToCloud(uid, activeCampaignIdRef.current, sim);
-        refreshLocalCampaigns();
+        const res = await saveCampaignToCloud(uid, activeCampaignIdRef.current, sim);
+        if (res.skippedQuota) {
+          failed = true;
+          quotaCooldownUntilRef.current = Date.now() + 2 * 60 * 60_000;
+        } else if (res.saved) {
+          lastCloudSaveAtRef.current = Date.now();
+          refreshLocalCampaigns();
+        }
       } catch (err) {
         failed = true;
         pendingSaveRef.current = false;
         if (isQuotaExceededError(err) || isFirestoreQuotaCooldownActive()) {
-          quotaCooldownUntilRef.current = Date.now() + 5 * 60_000;
+          quotaCooldownUntilRef.current = Date.now() + 2 * 60 * 60_000;
         } else {
-          quotaCooldownUntilRef.current = Date.now() + 20_000;
+          quotaCooldownUntilRef.current = Date.now() + 60_000;
         }
       } finally {
         isSavingRef.current = false;
@@ -422,7 +433,8 @@ export default function App() {
           !failed &&
           pendingSaveRef.current &&
           Date.now() >= quotaCooldownUntilRef.current &&
-          !isFirestoreQuotaCooldownActive()
+          !isFirestoreQuotaCooldownActive() &&
+          Date.now() - lastCloudSaveAtRef.current >= 120_000
         ) {
           pendingSaveRef.current = false;
           void performCloudSave(uid);
@@ -450,7 +462,7 @@ export default function App() {
     autoSaveTimerRef.current = window.setTimeout(() => {
       autoSaveTimerRef.current = null;
       void performCloudSave(user.uid);
-    }, 2500);
+    }, 45_000);
   }, [user?.uid, saveLocalNow, performCloudSave]);
 
   const handlePlayerMutation = useCallback(() => {
@@ -1369,6 +1381,9 @@ export default function App() {
     if (screen !== 'PLAYING') return;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (meetingTargetId !== null) {
+        return;
+      }
       if (
         document.activeElement?.tagName === 'INPUT' ||
         document.activeElement?.tagName === 'TEXTAREA'
@@ -1432,6 +1447,7 @@ export default function App() {
     isRemoteGuest,
     searchOpen,
     treeCountryId,
+    meetingTargetId,
     empireHighlight,
     achievementsOpen,
     launchingNuke,
@@ -1452,6 +1468,7 @@ export default function App() {
     const timer = window.setInterval(() => {
       const sim = simRef.current;
       if (!sim) return;
+      if (meetingTargetId !== null && !sim.isMultiplayer) return;
       if (sim.isMultiplayer && sim.outcome !== 'none') return;
 
       const prevOfferCount = sim.diplomaticOffers.length;
@@ -1483,6 +1500,7 @@ export default function App() {
     screen,
     speed,
     isRemoteGuest,
+    meetingTargetId,
     bumpRender,
     user?.uid,
     saveLocalNow,
@@ -1498,6 +1516,7 @@ export default function App() {
     const timer = window.setInterval(() => {
       const sim = simRef.current;
       if (!sim) return;
+      if (meetingTargetId !== null && !sim.isMultiplayer) return;
       if (sim.isMultiplayer && sim.outcome !== 'none') return;
       stepSimulationSecond(sim);
       if (sim.isMultiplayer) {
@@ -1507,7 +1526,7 @@ export default function App() {
     }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [screen, speed, isRemoteGuest, bumpRender, scheduleHostBroadcast]);
+  }, [screen, speed, isRemoteGuest, meetingTargetId, bumpRender, scheduleHostBroadcast]);
 
   // Guest smooth visual interpolation for particles and active naval landings between Host snapshots
   useEffect(() => {
@@ -1693,13 +1712,17 @@ export default function App() {
       if (user?.uid) {
         void performCloudSave(user.uid);
       }
-    }, 45000);
+    }, 240_000);
 
     const persistOnLeave = () => {
       // Synchronous localStorage snapshot guarantees zero loss even offline or on instant app close
       saveLocalNow(true);
-      if (user?.uid) {
-        void performCloudSave(user.uid);
+      if (
+        user?.uid &&
+        !isFirestoreQuotaCooldownActive() &&
+        Date.now() - lastCloudSaveAtRef.current >= 45_000
+      ) {
+        void performCloudSave(user.uid, true);
       }
     };
 
@@ -1726,7 +1749,7 @@ export default function App() {
     };
   }, [screen, user?.uid, saveLocalNow, performCloudSave]);
 
-  // Background cloud catch-up: when signed in and back online, sync any dirty offline saves up to Firestore
+  // Background cloud catch-up: when signed in and back online, sync dirty offline saves gently to Firestore
   useEffect(() => {
     if (!user?.uid) return;
 
@@ -1740,25 +1763,29 @@ export default function App() {
 
       isSyncingOfflineRef.current = true;
       try {
-        for (const item of dirtyList.slice(0, 2)) {
+        for (const item of dirtyList.slice(0, 1)) {
           if (screen === 'PLAYING' && item.campaignId === activeCampaignIdRef.current) {
             continue;
           }
+          if (isFirestoreQuotaCooldownActive()) break;
           const loaded = loadLocalCampaignSnapshot(item.campaignId);
           if (!loaded) continue;
-          await saveCampaignToCloud(user.uid, item.campaignId, loaded.sim);
+          const res = await saveCampaignToCloud(user.uid, item.campaignId, loaded.sim);
+          if (res.skippedQuota) {
+            quotaCooldownUntilRef.current = Date.now() + 2 * 60 * 60_000;
+            break;
+          }
         }
         refreshLocalCampaigns();
       } catch (err) {
         if (isQuotaExceededError(err) || isFirestoreQuotaCooldownActive()) {
-          quotaCooldownUntilRef.current = Date.now() + 5 * 60_000;
+          quotaCooldownUntilRef.current = Date.now() + 2 * 60 * 60_000;
         }
       } finally {
         isSyncingOfflineRef.current = false;
       }
     };
 
-    void syncDirtyLocalCampaigns();
     const onOnline = () => {
       void syncDirtyLocalCampaigns();
     };
@@ -2367,8 +2394,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Popup al tocar o hacer clic en cualquier país extranjero */}
-          {showForeignPopup && (
+          {/* Pantalla completa al tocar o hacer clic en cualquier país extranjero */}
+          {showForeignPopup && meetingTargetId === null && (
             <CountryActionPopup
               deviceMode={deviceMode}
               sim={sim}
@@ -2376,6 +2403,10 @@ export default function App() {
               onClose={() => setSelectedId(sim.playerId)}
               onExecuteAction={handleExecuteAction}
               onOpenCountryTree={(id) => openCountryTree(id)}
+              onStartMeeting={(id) => {
+                soundEngine.playClick();
+                setMeetingTargetId(id);
+              }}
               onStartNukeTarget={() => {
                 soundEngine.playClick();
                 setDefenseFeedback(null);
@@ -2724,6 +2755,26 @@ export default function App() {
             setTreeCountryId(id);
           }}
           onPreviewEmpireTerritory={handlePreviewEmpireTerritory}
+        />
+      )}
+
+      {meetingTargetId !== null && (
+        <DiplomaticMeetingModal
+          deviceMode={deviceMode}
+          sim={sim}
+          targetId={meetingTargetId}
+          onApplyOutcome={async (tId, outcome) => {
+            const res = await handleExecuteAction({
+              type: 'apply_meeting_outcome',
+              targetId: tId,
+              outcome,
+            });
+            return res.meetingResult ?? null;
+          }}
+          onClose={() => {
+            setMeetingTargetId(null);
+            setSelectedId(sim.playerId);
+          }}
         />
       )}
 

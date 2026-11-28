@@ -6,6 +6,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import {
+  disableNetwork,
   doc,
   getDocFromServer,
   initializeFirestore,
@@ -75,14 +76,89 @@ export function isQuotaExceededError(error: unknown): boolean {
   );
 }
 
-let globalQuotaCooldownUntilMs = 0;
+export function isFirestoreTimeoutError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  return lower.includes('tardó demasiado') || lower.includes('timeout');
+}
 
-export function markFirestoreQuotaExceeded(durationMs = 5 * 60_000): void {
-  globalQuotaCooldownUntilMs = Math.max(globalQuotaCooldownUntilMs, Date.now() + durationMs);
+const QUOTA_COOLDOWN_STORAGE_KEY = 'paises_en_guerra_firestore_quota_until_v1';
+
+/**
+ * Firebase Firestore daily free-tier quotas reset at midnight Pacific Time (~08:00 UTC).
+ * Return the next 08:05 UTC timestamp (at least 2 hours from now) so the client stops
+ * hammering an exhausted daily write quota until the next reset window.
+ */
+function getNextDailyQuotaResetMs(nowMs = Date.now()): number {
+  const d = new Date(nowMs);
+  const nextReset = Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth(),
+    d.getUTCDate(),
+    8,
+    5,
+    0,
+    0
+  );
+  const target = nextReset <= nowMs + 15 * 60_000 ? nextReset + 24 * 60 * 60_000 : nextReset;
+  return Math.max(nowMs + 2 * 60 * 60_000, target);
+}
+
+function readPersistedQuotaCooldown(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = window.localStorage.getItem(QUOTA_COOLDOWN_STORAGE_KEY);
+    if (!raw) return 0;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let globalQuotaCooldownUntilMs = readPersistedQuotaCooldown();
+let networkSuspendedForQuota = false;
+
+export function isFirestoreNetworkSuspended(): boolean {
+  return networkSuspendedForQuota;
+}
+
+export function markFirestoreQuotaExceeded(durationMs?: number): void {
+  const targetUntil =
+    typeof durationMs === 'number'
+      ? Date.now() + durationMs
+      : getNextDailyQuotaResetMs();
+  const nextUntil = Math.max(globalQuotaCooldownUntilMs, targetUntil);
+  globalQuotaCooldownUntilMs = nextUntil;
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(QUOTA_COOLDOWN_STORAGE_KEY, String(nextUntil));
+    } catch {
+      // ignore storage errors
+    }
+  }
+  // Immediately halt Firestore's internal WriteStream exponential backoff loop in this tab
+  if (!networkSuspendedForQuota) {
+    networkSuspendedForQuota = true;
+    void disableNetwork(db).catch(() => {
+      // ignore network disable errors
+    });
+  }
 }
 
 export function isFirestoreQuotaCooldownActive(): boolean {
-  return Date.now() < globalQuotaCooldownUntilMs;
+  if (Date.now() < globalQuotaCooldownUntilMs) return true;
+  if (globalQuotaCooldownUntilMs > 0) {
+    globalQuotaCooldownUntilMs = 0;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(QUOTA_COOLDOWN_STORAGE_KEY);
+      } catch {
+        // ignore storage errors
+      }
+    }
+  }
+  return false;
 }
 
 export function formatFirestoreUserError(error: unknown, fallback: string): string {
@@ -90,7 +166,7 @@ export function formatFirestoreUserError(error: unknown, fallback: string): stri
   const lower = msg.toLowerCase();
 
   if (isQuotaExceededError(error)) {
-    return 'Se alcanzó el límite diario gratuito de escrituras de Firebase Firestore. La cuota se restablece mañana.';
+    return 'Se alcanzó el límite diario gratuito de escrituras de Firebase Firestore. Tus partidas siguen guardándose localmente y la cuota en la nube se restablece mañana.';
   }
   if (lower.includes('tardó demasiado') || lower.includes('timeout')) {
     return msg;
@@ -137,7 +213,17 @@ export function handleFirestoreError(
   path: string | null,
   rethrow = true
 ): void {
+  const isWriteOp =
+    operationType === OperationType.WRITE ||
+    operationType === OperationType.CREATE ||
+    operationType === OperationType.UPDATE ||
+    operationType === OperationType.DELETE;
+
   if (isQuotaExceededError(error)) {
+    markFirestoreQuotaExceeded();
+  } else if (isFirestoreTimeoutError(error) && isWriteOp) {
+    // Firestore holds write commits in internal WriteStream backoff when daily write quota is exhausted.
+    // Suspend network writes immediately to stop repeated SDK backoff errors.
     markFirestoreQuotaExceeded();
   }
   const errInfo: FirestoreErrorInfo = {
@@ -157,9 +243,14 @@ export function handleFirestoreError(
     operationType,
     path,
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
   if (rethrow) {
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
     throw new Error(JSON.stringify(errInfo));
+  }
+  if (isQuotaExceededError(error) || isFirestoreTimeoutError(error)) {
+    console.warn('Firestore background sync paused:', errInfo.error, path);
+  } else {
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
   }
 }
 

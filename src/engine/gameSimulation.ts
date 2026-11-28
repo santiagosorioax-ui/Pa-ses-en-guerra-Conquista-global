@@ -21,6 +21,12 @@ import {
   type WorldMapData,
 } from './mapRasterizer';
 import { soundEngine } from './soundEngine';
+import type {
+  AppliedMeetingResult,
+  DiplomaticMeetingOutcome,
+} from '../types/diplomacy';
+
+export const MIN_MEETING_RELATION = 20;
 
 export const N_COUNTRIES = COUNTRIES_195.length; // 195
 
@@ -4011,3 +4017,747 @@ export function stepSimulationDay(sim: SimulationState) {
     updateAllEconomies(sim, true);
   }
 }
+
+function normalizeCountryLookup(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function findDiplomaticCountryByName(
+  sim: SimulationState,
+  rawQuery: string | undefined,
+  excludeIds: number[]
+): CountryState | null {
+  const q = normalizeCountryLookup(rawQuery || '');
+  if (q.length < 3) return null;
+  const exact = sim.countries.find((c) => {
+    if (!c.alive || excludeIds.includes(c.id)) return false;
+    return (
+      normalizeCountryLookup(c.seed.name) === q ||
+      normalizeCountryLookup(getCountryName(c)) === q
+    );
+  });
+  if (exact) return exact;
+  return (
+    sim.countries.find((c) => {
+      if (!c.alive || excludeIds.includes(c.id)) return false;
+      const n1 = normalizeCountryLookup(c.seed.name);
+      const n2 = normalizeCountryLookup(getCountryName(c));
+      return n1.includes(q) || q.includes(n1) || n2.includes(q) || q.includes(n2);
+    }) ?? null
+  );
+}
+
+function transferDiplomaticTerritory(
+  sim: SimulationState,
+  fromId: number,
+  toId: number,
+  pct: number,
+  allowFullAnnexation: boolean
+): { transferredPixels: number; annexed: boolean } {
+  const from = sim.countries[fromId];
+  const to = sim.countries[toId];
+  if (!from || !to || !from.alive || !to.alive || fromId === toId || pct <= 0) {
+    return { transferredPixels: 0, annexed: false };
+  }
+
+  const { ownerGrid } = sim;
+
+  // Full peaceful annexation / total unification / total surrender
+  if (allowFullAnnexation && pct >= 100) {
+    let transferred = 0;
+    for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+      if (ownerGrid[idx] === fromId) {
+        ownerGrid[idx] = toId;
+        to.pixels++;
+        transferred++;
+        const px = idx % MAP_W;
+        const py = Math.floor(idx / MAP_W);
+        if (px < to.bboxMinX) to.bboxMinX = px;
+        if (px > to.bboxMaxX) to.bboxMaxX = px;
+        if (py < to.bboxMinY) to.bboxMinY = py;
+        if (py > to.bboxMaxY) to.bboxMaxY = py;
+      }
+    }
+
+    if (transferred === 0) return { transferredPixels: 0, annexed: false };
+
+    // Transfer intact structures to the new sovereign
+    to.defenses.push(...from.defenses);
+    to.barracks.push(...from.barracks);
+    to.antiNukes.push(...from.antiNukes);
+    to.ports.push(...from.ports);
+
+    from.alive = false;
+    from.pixels = 0;
+    from.ports = [];
+    from.defenses = [];
+    from.antiNukes = [];
+    from.barracks = [];
+    from.annexedById = toId;
+    from.rebelUnrest = 0;
+
+    for (const other of sim.countries) {
+      if (!other.alive && other.annexedById === fromId) {
+        other.annexedById = toId;
+      }
+    }
+
+    to.goldMines = Math.min(
+      MAX_GOLD_MINES_TOTAL,
+      to.goldMines + Math.min(4, Math.max(1, Math.floor(from.goldMines * 0.5)))
+    );
+    to.cities = Math.min(
+      MAX_CITIES_TOTAL,
+      to.cities + Math.min(5, Math.max(1, Math.floor(from.cities * 0.5)))
+    );
+
+    for (let j = 0; j < N_COUNTRIES; j++) {
+      sim.treaties[idxPair(fromId, j)] = 0;
+      sim.treaties[idxPair(j, fromId)] = 0;
+    }
+    sim.wars = sim.wars.filter((war) => war.a !== fromId && war.b !== fromId);
+    sim.invasions = sim.invasions.filter(
+      (inv) => inv.attackerId !== fromId && inv.defenderId !== fromId
+    );
+    if (sim.diplomaticOffers.length > 0) {
+      sim.diplomaticOffers = sim.diplomaticOffers.filter(
+        (o) => o.fromCountryId !== fromId && o.toCountryId !== fromId
+      );
+    }
+
+    sim.dirtyPixels = true;
+    soundEngine.playAnnexation(toId === sim.playerId);
+    return { transferredPixels: transferred, annexed: true };
+  }
+
+  // Partial border-nearest cession (keeps capital & at least 1 pixel alive)
+  const capIdx = from.capitalY * MAP_W + from.capitalX;
+  const candidates: Array<{ idx: number; px: number; py: number; score: number }> = [];
+
+  for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+    if (ownerGrid[idx] !== fromId) continue;
+    if (idx === capIdx) continue;
+    const px = idx % MAP_W;
+    const py = Math.floor(idx / MAP_W);
+    const dx = px - to.capitalX;
+    const dy = py - to.capitalY;
+    let score = dx * dx + dy * dy;
+
+    // Strongly prefer pixels directly touching the receiving nation's borders
+    const touchesRecipient =
+      (px > 0 && ownerGrid[idx - 1] === toId) ||
+      (px + 1 < MAP_W && ownerGrid[idx + 1] === toId) ||
+      (py > 0 && ownerGrid[idx - MAP_W] === toId) ||
+      (py + 1 < MAP_H && ownerGrid[idx + MAP_W] === toId);
+    if (touchesRecipient) {
+      score *= 0.25;
+    }
+
+    candidates.push({ idx, px, py, score });
+  }
+
+  if (candidates.length === 0) return { transferredPixels: 0, annexed: false };
+
+  const clampedPct = Math.max(1, Math.min(85, pct));
+  const targetCount = Math.max(
+    1,
+    Math.min(candidates.length, Math.round((from.pixels * clampedPct) / 100))
+  );
+
+  candidates.sort((a, b) => a.score - b.score);
+
+  let transferred = 0;
+  for (let i = 0; i < targetCount; i++) {
+    const { idx, px, py } = candidates[i];
+    ownerGrid[idx] = toId;
+    from.pixels = Math.max(1, from.pixels - 1);
+    to.pixels++;
+    transferred++;
+    if (px < to.bboxMinX) to.bboxMinX = px;
+    if (px > to.bboxMaxX) to.bboxMaxX = px;
+    if (py < to.bboxMinY) to.bboxMinY = py;
+    if (py > to.bboxMaxY) to.bboxMaxY = py;
+  }
+
+  if (transferred === 0) return { transferredPixels: 0, annexed: false };
+
+  // Recompute giver's bounding box cleanly
+  let minX = MAP_W;
+  let maxX = 0;
+  let minY = MAP_H;
+  let maxY = 0;
+  for (let idx = 0; idx < TOTAL_PIXELS; idx++) {
+    if (ownerGrid[idx] !== fromId) continue;
+    const px = idx % MAP_W;
+    const py = Math.floor(idx / MAP_W);
+    if (px < minX) minX = px;
+    if (px > maxX) maxX = px;
+    if (py < minY) minY = py;
+    if (py > maxY) maxY = py;
+  }
+  if (minX <= maxX && minY <= maxY) {
+    from.bboxMinX = minX;
+    from.bboxMaxX = maxX;
+    from.bboxMinY = minY;
+    from.bboxMaxY = maxY;
+  }
+
+  // Move any defenses, barracks, antiNukes, or ports standing on transferred pixels
+  const keepDef: typeof from.defenses = [];
+  for (const d of from.defenses) {
+    if (ownerGrid[d.y * MAP_W + d.x] === toId) to.defenses.push(d);
+    else keepDef.push(d);
+  }
+  from.defenses = keepDef;
+
+  const keepBar: typeof from.barracks = [];
+  for (const b of from.barracks) {
+    if (ownerGrid[b.y * MAP_W + b.x] === toId) to.barracks.push(b);
+    else keepBar.push(b);
+  }
+  from.barracks = keepBar;
+
+  const keepAnti: typeof from.antiNukes = [];
+  for (const a of from.antiNukes) {
+    if (ownerGrid[a.y * MAP_W + a.x] === toId) to.antiNukes.push(a);
+    else keepAnti.push(a);
+  }
+  from.antiNukes = keepAnti;
+
+  const keepPorts: typeof from.ports = [];
+  for (const p of from.ports) {
+    if (ownerGrid[p.y * MAP_W + p.x] === toId) to.ports.push(p);
+    else keepPorts.push(p);
+  }
+  from.ports = keepPorts;
+
+  sim.dirtyPixels = true;
+  return { transferredPixels: transferred, annexed: false };
+}
+
+function placeDiplomaticStructures(
+  sim: SimulationState,
+  countryId: number,
+  kind: 'defense' | 'barracks' | 'antiNuke' | 'port',
+  requestedCount: number
+): number {
+  const c = sim.countries[countryId];
+  if (!c || !c.alive || requestedCount <= 0) return 0;
+
+  if (kind === 'port') {
+    const coastal = getCoastalCandidates(sim, countryId);
+    if (coastal.length === 0) return 0;
+    let placed = 0;
+    for (const pt of coastal) {
+      if (placed >= requestedCount) break;
+      if (c.ports.some((p) => Math.hypot(p.x - pt.x, p.y - pt.y) < 10)) continue;
+      c.ports.push(pt);
+      placed++;
+    }
+    return placed;
+  }
+
+  const { ownerGrid } = sim;
+  const ownPixels: Array<{ x: number; y: number; dist: number }> = [];
+  const step = c.pixels > 800 ? 3 : c.pixels > 250 ? 2 : 1;
+  for (let py = c.bboxMinY; py <= c.bboxMaxY; py += step) {
+    for (let px = c.bboxMinX; px <= c.bboxMaxX; px += step) {
+      if (ownerGrid[py * MAP_W + px] === countryId) {
+        const dist = Math.hypot(px - c.capitalX, py - c.capitalY);
+        ownPixels.push({ x: px, y: py, dist });
+      }
+    }
+  }
+  if (ownPixels.length === 0 && ownerGrid[c.capitalY * MAP_W + c.capitalX] === countryId) {
+    ownPixels.push({ x: c.capitalX, y: c.capitalY, dist: 0 });
+  }
+  if (ownPixels.length === 0) return 0;
+
+  // Spread points around the capital and key territory
+  ownPixels.sort((a, b) => a.dist - b.dist);
+
+  const existingList =
+    kind === 'defense' ? c.defenses : kind === 'barracks' ? c.barracks : c.antiNukes;
+  const minSpacing = kind === 'defense' ? 12 : 18;
+  const radius =
+    kind === 'defense'
+      ? DEFENSE_RADIUS
+      : kind === 'barracks'
+        ? BARRACKS_RADIUS
+        : ANTI_NUKE_RADIUS;
+
+  let placed = 0;
+  for (const pt of ownPixels) {
+    if (placed >= requestedCount) break;
+    if (existingList.some((e) => Math.hypot(e.x - pt.x, e.y - pt.y) < minSpacing)) continue;
+    existingList.push({ x: pt.x, y: pt.y, radius });
+    if (kind === 'barracks') {
+      for (const other of sim.countries) {
+        if (other.alive || other.annexedById !== countryId) continue;
+        const origCapX = sim.mapData.capitalX[other.id];
+        const origCapY = sim.mapData.capitalY[other.id];
+        if (
+          Math.hypot(pt.x - origCapX, pt.y - origCapY) <= BARRACKS_RADIUS &&
+          (other.rebelUnrest ?? 0) > 0
+        ) {
+          other.rebelUnrest = Math.max(
+            0,
+            Math.round((other.rebelUnrest ?? 0) * (1 - BARRACKS_REBELLION_REDUCTION))
+          );
+        }
+      }
+    }
+    placed++;
+  }
+  return placed;
+}
+
+export function applyDiplomaticMeetingOutcome(
+  sim: SimulationState,
+  actorId: number,
+  targetId: number,
+  outcome: DiplomaticMeetingOutcome
+): AppliedMeetingResult {
+  const actor = sim.countries[actorId];
+  const target = sim.countries[targetId];
+  const prevRel = getRelation(sim, actorId, targetId);
+
+  if (!actor || !target || !actor.alive || !target.alive || actorId === targetId) {
+    return {
+      previousRelation: prevRel,
+      newRelation: prevRel,
+      actualRelationDelta: 0,
+      appliedEffects: ['No se pudieron aplicar cambios porque uno de los países ya no está activo.'],
+      outcome,
+    };
+  }
+
+  const actorName = getCountryName(actor);
+  const targetName = getCountryName(target);
+  const appliedEffects: string[] = [];
+
+  // 1. Relation delta
+  const clampedDelta = Math.max(-40, Math.min(35, Math.round(outcome.relationDelta || 0)));
+  if (clampedDelta !== 0) {
+    addRelation(sim, actorId, targetId, clampedDelta);
+  }
+
+  // 2. Financial transfers (clamped to realistic live balances + sovereign credit backing for AI aid)
+  const rawPayToTarget = Math.max(0, Math.round(outcome.moneyTransferToTarget || 0));
+  if (rawPayToTarget > 0) {
+    const actualPay = Math.min(rawPayToTarget, Math.max(0, Math.floor(actor.money)));
+    if (actualPay > 0) {
+      actor.money -= actualPay;
+      target.money += actualPay;
+      appliedEffects.push(
+        `${actorName} transfirió $${actualPay.toLocaleString('es-ES')} a ${targetName}.`
+      );
+    }
+  }
+
+  const rawPayToPlayer = Math.max(0, Math.round(outcome.moneyTransferToPlayer || 0));
+  if (rawPayToPlayer > 0) {
+    const maxAidCapacity = Math.max(
+      600,
+      Math.floor(Math.max(0, target.money) * 0.65),
+      Math.round(Math.max(0, target.netIncome) * 3)
+    );
+    const actualGrant = Math.min(rawPayToPlayer, maxAidCapacity);
+    if (actualGrant > 0) {
+      const deductedFromCash = Math.min(Math.max(0, target.money), actualGrant);
+      target.money = Math.max(0, target.money - deductedFromCash);
+      actor.money += actualGrant;
+      appliedEffects.push(
+        `${targetName} envió $${actualGrant.toLocaleString('es-ES')} en ayuda financiera a ${actorName}.`
+      );
+      if (actorId === sim.playerId) soundEngine.playMoneyEarned(false);
+    }
+  }
+
+  // 3. Military troop transfers
+  const rawTroopsToPlayer = Math.max(0, Math.round(outcome.soldiersTransferToPlayer || 0));
+  if (rawTroopsToPlayer > 0) {
+    const maxTargetTroops = Math.max(
+      0,
+      Math.min(Math.floor(target.army * 0.45), Math.floor(target.army - 50))
+    );
+    const actualTroops = Math.min(rawTroopsToPlayer, maxTargetTroops);
+    if (actualTroops > 0) {
+      target.army -= actualTroops;
+      actor.army += actualTroops;
+      appliedEffects.push(
+        `${targetName} envió ${actualTroops.toLocaleString('es-ES')} soldados de refuerzo a ${actorName}.`
+      );
+    }
+  }
+
+  const rawTroopsToTarget = Math.max(0, Math.round(outcome.soldiersTransferToTarget || 0));
+  if (rawTroopsToTarget > 0) {
+    const maxActorTroops = Math.max(
+      0,
+      Math.min(Math.floor(actor.army * 0.45), Math.floor(actor.army - 50))
+    );
+    const actualTroops = Math.min(rawTroopsToTarget, maxActorTroops);
+    if (actualTroops > 0) {
+      actor.army -= actualTroops;
+      target.army += actualTroops;
+      appliedEffects.push(
+        `${actorName} envió ${actualTroops.toLocaleString('es-ES')} soldados de apoyo a ${targetName}.`
+      );
+    }
+  }
+
+  // 4. Economic infrastructure & military structures built/transferred for the player
+  const minesToAdd = Math.max(0, Math.min(5, Math.round(outcome.goldMinesToPlayer || 0)));
+  if (minesToAdd > 0) {
+    const before = actor.goldMines;
+    actor.goldMines = Math.min(MAX_GOLD_MINES_TOTAL, actor.goldMines + minesToAdd);
+    const added = actor.goldMines - before;
+    if (added > 0) {
+      appliedEffects.push(
+        `${targetName} financió +${added} ${added === 1 ? 'Mina de Oro' : 'Minas de Oro'} para ${actorName}.`
+      );
+    }
+  }
+
+  const citiesToAdd = Math.max(0, Math.min(5, Math.round(outcome.citiesToPlayer || 0)));
+  if (citiesToAdd > 0) {
+    const before = actor.cities;
+    actor.cities = Math.min(MAX_CITIES_TOTAL, actor.cities + citiesToAdd);
+    const added = actor.cities - before;
+    if (added > 0) {
+      appliedEffects.push(
+        `${targetName} desarrolló +${added} ${added === 1 ? 'Ciudad' : 'Ciudades'} en ${actorName}.`
+      );
+    }
+  }
+
+  const portsToAdd = Math.max(0, Math.min(2, Math.round(outcome.portsToPlayer || 0)));
+  if (portsToAdd > 0) {
+    const placed = placeDiplomaticStructures(sim, actorId, 'port', portsToAdd);
+    if (placed > 0) {
+      appliedEffects.push(
+        `${targetName} construyó +${placed} ${placed === 1 ? 'Puerto naval' : 'Puertos navales'} en la costa de ${actorName}.`
+      );
+    }
+  }
+
+  const defensesToAdd = Math.max(0, Math.min(4, Math.round(outcome.defensesToPlayer || 0)));
+  if (defensesToAdd > 0) {
+    const placed = placeDiplomaticStructures(sim, actorId, 'defense', defensesToAdd);
+    if (placed > 0) {
+      appliedEffects.push(
+        `${targetName} desplegó +${placed} ${placed === 1 ? 'Defensa militar' : 'Defensas militares'} en tu territorio.`
+      );
+      if (actorId === sim.playerId) soundEngine.playBuildStructure('defense');
+    }
+  }
+
+  const barracksToAdd = Math.max(0, Math.min(3, Math.round(outcome.barracksToPlayer || 0)));
+  if (barracksToAdd > 0) {
+    const placed = placeDiplomaticStructures(sim, actorId, 'barracks', barracksToAdd);
+    if (placed > 0) {
+      appliedEffects.push(
+        `${targetName} construyó +${placed} ${placed === 1 ? 'Cuartel Militar (+500 cap.)' : 'Cuarteles Militares'} en tu territorio.`
+      );
+      if (actorId === sim.playerId) soundEngine.playBuildStructure('defense');
+    }
+  }
+
+  const antiNukesToAdd = Math.max(0, Math.min(2, Math.round(outcome.antiNukesToPlayer || 0)));
+  if (antiNukesToAdd > 0) {
+    const placed = placeDiplomaticStructures(sim, actorId, 'antiNuke', antiNukesToAdd);
+    if (placed > 0) {
+      appliedEffects.push(
+        `${targetName} instaló +${placed} ${placed === 1 ? 'Sistema Antibombas' : 'Sistemas Antibombas'} en tu territorio.`
+      );
+      if (actorId === sim.playerId) soundEngine.playBuildStructure('defense');
+    }
+  }
+
+  // 5. Territory cessions & peaceful annexation (mutates ownerGrid on the world map!)
+  const rawTerrToPlayer = Math.max(0, Math.min(100, Math.round(outcome.territoryPctToPlayer || 0)));
+  let targetWasAnnexed = false;
+  if (rawTerrToPlayer > 0 && target.alive) {
+    const res = transferDiplomaticTerritory(sim, targetId, actorId, rawTerrToPlayer, true);
+    if (res.transferredPixels > 0) {
+      const km2 = (res.transferredPixels * 100).toLocaleString('es-ES');
+      if (res.annexed) {
+        targetWasAnnexed = true;
+        appliedEffects.push(
+          `¡Unificación total! ${targetName} cedió el 100% de su territorio (${km2} km²) y pasó a formar parte de ${actorName}.`
+        );
+      } else {
+        appliedEffects.push(
+          `${targetName} cedió ${km2} km² de territorio fronterizo a ${actorName} en el mapa.`
+        );
+      }
+    }
+  }
+
+  const rawTerrToTarget = Math.max(0, Math.min(60, Math.round(outcome.territoryPctToTarget || 0)));
+  if (rawTerrToTarget > 0 && target.alive && !targetWasAnnexed) {
+    const res = transferDiplomaticTerritory(sim, actorId, targetId, rawTerrToTarget, false);
+    if (res.transferredPixels > 0) {
+      const km2 = (res.transferredPixels * 100).toLocaleString('es-ES');
+      appliedEffects.push(
+        `${actorName} cedió ${km2} km² de territorio fronterizo a ${targetName}.`
+      );
+    }
+  }
+
+  // 6. Bilateral Treaty action & Non-aggression Truce (only if target is still alive)
+  if (target.alive && !targetWasAnnexed) {
+    const currentlyAtWar = hasTreaty(sim, actorId, targetId, TREATY_WAR);
+    const currentlyAllied = hasTreaty(sim, actorId, targetId, TREATY_ALLIANCE);
+
+    if (outcome.treatyAction === 'form_alliance' && !currentlyAtWar && !currentlyAllied) {
+      setTreatyFlag(sim, actorId, targetId, TREATY_ALLIANCE, true);
+      if (getRelation(sim, actorId, targetId) < 60) {
+        setRelation(sim, actorId, targetId, 60);
+      }
+      sim.globalStability = Math.min(100, sim.globalStability + 1);
+      appliedEffects.push(`Alianza estratégica firmada entre ${actorName} y ${targetName}.`);
+      if (actorId === sim.playerId || targetId === sim.playerId) {
+        soundEngine.playAllianceFormed();
+      }
+    } else if (outcome.treatyAction === 'break_alliance' && currentlyAllied) {
+      setTreatyFlag(sim, actorId, targetId, TREATY_ALLIANCE, false);
+      if (clampedDelta >= 0) {
+        addRelation(sim, actorId, targetId, -12);
+      }
+      appliedEffects.push(`La alianza entre ${actorName} y ${targetName} quedó disuelta.`);
+    } else if (outcome.treatyAction === 'make_peace' && currentlyAtWar) {
+      const ok = makePeace(
+        sim,
+        actorId,
+        targetId,
+        `Tratado de paz acordado en cumbre diplomática entre ${actorName} y ${targetName}.`
+      );
+      if (ok) {
+        appliedEffects.push(`Paz oficial firmada entre ${actorName} y ${targetName}.`);
+      }
+    } else if (outcome.treatyAction === 'declare_war' && !currentlyAtWar) {
+      if (currentlyAllied) {
+        setTreatyFlag(sim, actorId, targetId, TREATY_ALLIANCE, false);
+      }
+      const warRes = declareWar(sim, targetId, actorId);
+      if (warRes.ok) {
+        appliedEffects.push(`¡${targetName} declaró la guerra a ${actorName} tras la ruptura de la cumbre!`);
+      } else {
+        addRelation(sim, actorId, targetId, -15);
+        appliedEffects.push(
+          `Ruptura diplomática total con ${targetName} (sin frente directo inmediato para iniciar invasión).`
+        );
+      }
+    }
+
+    // Non-aggression pact / Truce
+    const truceMonths = Math.max(0, Math.min(24, Math.round(outcome.truceMonthsToSet || 0)));
+    if (truceMonths > 0 && !hasTreaty(sim, actorId, targetId, TREATY_WAR)) {
+      sim.truceMonths[idxPair(actorId, targetId)] = Math.max(
+        sim.truceMonths[idxPair(actorId, targetId)],
+        truceMonths
+      );
+      sim.truceMonths[idxPair(targetId, actorId)] = Math.max(
+        sim.truceMonths[idxPair(targetId, actorId)],
+        truceMonths
+      );
+      appliedEffects.push(
+        `Pacto de no agresión y tregua activo durante ${truceMonths} meses con ${targetName}.`
+      );
+    }
+
+    // 7. Multilateral Diplomacy: 3rd-party war, peace, alliance break & ally backing
+    const warThird = findDiplomaticCountryByName(sim, outcome.targetDeclaresWarOnCountryName, [
+      actorId,
+      targetId,
+    ]);
+    if (warThird && !hasTreaty(sim, targetId, warThird.id, TREATY_WAR)) {
+      if (hasTreaty(sim, targetId, warThird.id, TREATY_ALLIANCE)) {
+        setTreatyFlag(sim, targetId, warThird.id, TREATY_ALLIANCE, false);
+      }
+      sim.truceMonths[idxPair(targetId, warThird.id)] = 0;
+      sim.truceMonths[idxPair(warThird.id, targetId)] = 0;
+      const thirdWar = declareWar(sim, targetId, warThird.id);
+      if (thirdWar.ok) {
+        appliedEffects.push(
+          `${targetName} cumplió el acuerdo y declaró la guerra a ${getCountryName(warThird)}.`
+        );
+      }
+    }
+
+    const peaceThird = findDiplomaticCountryByName(sim, outcome.targetMakesPeaceWithCountryName, [
+      actorId,
+      targetId,
+    ]);
+    if (peaceThird && hasTreaty(sim, targetId, peaceThird.id, TREATY_WAR)) {
+      const ok = makePeace(
+        sim,
+        targetId,
+        peaceThird.id,
+        `Paz mediada por ${actorName} entre ${targetName} y ${getCountryName(peaceThird)}.`
+      );
+      if (ok) {
+        appliedEffects.push(
+          `Mediación exitosa: ${targetName} firmó la paz con ${getCountryName(peaceThird)}.`
+        );
+      }
+    }
+
+    const breakAllyThird = findDiplomaticCountryByName(
+      sim,
+      outcome.targetBreaksAllianceWithCountryName,
+      [actorId, targetId]
+    );
+    if (breakAllyThird && hasTreaty(sim, targetId, breakAllyThird.id, TREATY_ALLIANCE)) {
+      setTreatyFlag(sim, targetId, breakAllyThird.id, TREATY_ALLIANCE, false);
+      addRelation(sim, targetId, breakAllyThird.id, -20);
+      appliedEffects.push(
+        `${targetName} rompió su alianza con ${getCountryName(breakAllyThird)}.`
+      );
+    }
+
+    const alliesRelDelta = Math.max(
+      -15,
+      Math.min(15, Math.round(outcome.improveRelationsWithAlliesDelta || 0))
+    );
+    if (alliesRelDelta !== 0) {
+      const targetAllies = getAllies(sim, targetId).filter((id) => id !== actorId);
+      if (targetAllies.length > 0) {
+        for (const allyId of targetAllies) {
+          addRelation(sim, actorId, allyId, alliesRelDelta);
+        }
+        const sign = alliesRelDelta > 0 ? '+' : '';
+        appliedEffects.push(
+          `${targetName} influyó en sus ${targetAllies.length} aliados (${sign}${alliesRelDelta} relación con cada uno).`
+        );
+      }
+    }
+
+    // 8. Nuclear cooperation & allied nuclear strike
+    const nukeThird = findDiplomaticCountryByName(sim, outcome.targetLaunchesNukeOnCountryName, [
+      actorId,
+      targetId,
+    ]);
+    if (nukeThird && !hasTreaty(sim, targetId, nukeThird.id, TREATY_ALLIANCE)) {
+      const nukeCost = getNukeCost(sim, targetId);
+      const prevCooldown = target.nukeCooldownDays ?? 0;
+      const hadFunds = target.money >= nukeCost;
+      if (!hadFunds) target.money = nukeCost;
+      target.nukeCooldownDays = 0;
+      const strikeRes = launchNukeAt(sim, targetId, nukeThird.capitalX, nukeThird.capitalY);
+      if (strikeRes.ok) {
+        appliedEffects.push(
+          `¡Ataque nuclear aliado! ${targetName} lanzó una bomba nuclear sobre ${getCountryName(nukeThird)}.`
+        );
+      } else {
+        target.nukeCooldownDays = prevCooldown;
+      }
+    }
+  }
+
+  if (outcome.resetPlayerNukeCooldown) {
+    const hadCd = (actor.nukeCooldownDays ?? 0) > 0;
+    actor.nukeCooldownDays = 0;
+    appliedEffects.push(
+      hadCd
+        ? `Cooperación nuclear: la recarga de tu bomba nuclear quedó lista al 100% de inmediato.`
+        : `Cooperación nuclear: tus sistemas de lanzamiento quedaron listos para operar sin demora.`
+    );
+  }
+
+  // 9. Rebellion suppression & covert rebellion incitement
+  if (outcome.suppressPlayerRebellions) {
+    let calmedCount = 0;
+    for (const c of sim.countries) {
+      if (!c.alive && c.annexedById === actorId && (c.rebelUnrest ?? 0) > 0) {
+        c.rebelUnrest = Math.max(0, Math.round((c.rebelUnrest ?? 0) * 0.5));
+        calmedCount++;
+      }
+    }
+    appliedEffects.push(
+      calmedCount > 0
+        ? `Fuerzas de paz de ${targetName} redujeron un 50% la rebeldía en ${calmedCount} territorios anexados.`
+        : `${targetName} envió asesores de seguridad interna para reforzar la estabilidad de ${actorName}.`
+    );
+  }
+
+  const rebelThird = findDiplomaticCountryByName(sim, outcome.inciteRebellionInCountryName, [
+    actorId,
+    targetId,
+  ]);
+  if (rebelThird) {
+    let incited = 0;
+    for (const c of sim.countries) {
+      if (!c.alive && c.annexedById === rebelThird.id) {
+        c.rebelUnrest = Math.min(100, (c.rebelUnrest ?? 0) + 45);
+        incited++;
+      }
+    }
+    if (incited > 0) {
+      appliedEffects.push(
+        `Operación encubierta: ${targetName} financió rebeldes en ${incited} regiones ocupadas por ${getCountryName(rebelThird)} (+45% rebeldía).`
+      );
+    } else {
+      const armyLoss = Math.min(Math.floor(rebelThird.army * 0.15), 400);
+      rebelThird.army = Math.max(50, rebelThird.army - armyLoss);
+      appliedEffects.push(
+        `Sabotaje interno: ${targetName} desestabilizó a ${getCountryName(rebelThird)} (-${armyLoss.toLocaleString('es-ES')} soldados por disturbios).`
+      );
+    }
+  }
+
+  // Refresh live economies immediately so new mines, cities, territory & armies reflect on HUD right away
+  updateAllEconomies(sim, false);
+
+  const newRel = getRelation(sim, actorId, targetId);
+  const actualRelationDelta = newRel - prevRel;
+
+  if (actualRelationDelta !== 0) {
+    const sign = actualRelationDelta > 0 ? '+' : '';
+    appliedEffects.unshift(
+      `Relación con ${targetName}: ${prevRel}/100 → ${newRel}/100 (${sign}${actualRelationDelta}).`
+    );
+  } else if (appliedEffects.length === 0) {
+    appliedEffects.push(`La relación con ${targetName} se mantuvo en ${newRel}/100 sin cambios territoriales ni tratados.`);
+  }
+
+  const chronicleType = targetWasAnnexed
+    ? 'annex'
+    : outcome.treatyAction === 'form_alliance'
+      ? 'alliance'
+      : outcome.treatyAction === 'make_peace'
+        ? 'peace'
+        : outcome.treatyAction === 'declare_war'
+          ? 'war'
+          : 'event';
+
+  pushChronicle(
+    sim,
+    chronicleType,
+    `${outcome.diplomaticHeadline} (${actorName} ↔ ${targetName}, relación ${actualRelationDelta >= 0 ? '+' : ''}${actualRelationDelta}).`,
+    targetId
+  );
+
+  if (actorId === sim.playerId && outcome.treatyAction === 'none' && !targetWasAnnexed) {
+    if (actualRelationDelta > 0) {
+      soundEngine.playTreaty();
+    } else if (actualRelationDelta < 0) {
+      soundEngine.playClick();
+    }
+  }
+
+  return {
+    previousRelation: prevRel,
+    newRelation: newRel,
+    actualRelationDelta,
+    appliedEffects,
+    outcome,
+  };
+}
+
