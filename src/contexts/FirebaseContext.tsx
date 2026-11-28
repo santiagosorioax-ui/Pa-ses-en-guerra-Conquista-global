@@ -7,7 +7,13 @@ import {
   type ReactNode,
 } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { auth, isOnlineTesterUser, loginWithGoogle, logoutFirebase } from '../firebase';
+import {
+  auth,
+  isAdminUser,
+  isOnlineTesterUser,
+  loginWithGoogle,
+  logoutFirebase,
+} from '../firebase';
 import {
   ensureUserProfile,
   subscribeUserCampaigns,
@@ -16,6 +22,7 @@ import {
 
 interface FirebaseContextValue {
   user: User | null;
+  isAdmin: boolean;
   canAccessOnline: boolean;
   authReady: boolean;
   authBusy: boolean;
@@ -114,12 +121,14 @@ export function FirebaseProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const isAdmin = isAdminUser(user);
   const canAccessOnline = isOnlineTesterUser(user);
 
   return (
     <FirebaseContext.Provider
       value={{
         user,
+        isAdmin,
         canAccessOnline,
         authReady,
         authBusy,

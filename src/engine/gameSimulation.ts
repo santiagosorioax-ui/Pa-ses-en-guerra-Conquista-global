@@ -212,6 +212,9 @@ export interface SimulationState {
   nextIdCounter: number;
   aiCursor: number;
   lastAiWarMonth: number;
+  adminInfiniteMoney?: boolean;
+  adminInfiniteArmy?: boolean;
+  adminNoNukeCooldown?: boolean;
 }
 
 const MONTH_NAMES = [
@@ -2902,8 +2905,10 @@ function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
         const monthlyArmyGrowth = Math.max(1, Math.round(baseGrowth * headroom));
         c.army = Math.min(armyCap, c.army + monthlyArmyGrowth);
       } else if (c.army > armyCap) {
-        const excess = c.army - armyCap;
-        c.army = Math.max(armyCap, Math.round(c.army - Math.max(5, excess * 0.15)));
+        if (!(c.id === sim.playerId && sim.adminInfiniteArmy)) {
+          const excess = c.army - armyCap;
+          c.army = Math.max(armyCap, Math.round(c.army - Math.max(5, excess * 0.15)));
+        }
       }
 
       // Crecimiento económico moderado: +$1/seg cada enero (hasta +10 máximo)
@@ -2929,7 +2934,8 @@ function updateAllEconomies(sim: SimulationState, applyMonthlyGrowth: boolean) {
     const focusBonus = Math.min(20, Math.max(0, c.focusIncomeBonus ?? 0));
 
     const normalArmy = Math.min(c.army, armyCap);
-    const excessArmy = Math.max(0, c.army - armyCap);
+    const excessArmy =
+      c.id === sim.playerId && sim.adminInfiniteArmy ? 0 : Math.max(0, c.army - armyCap);
     const armyUpkeep = Math.round(normalArmy * 0.004 + excessArmy * 0.015);
     const rawNet = baseTerritoryIncome + minesIncome + citiesIncome + cappedBonus + focusBonus - armyUpkeep;
 
@@ -2950,8 +2956,23 @@ export function stepSimulationSecond(sim: SimulationState) {
   const isHard = sim.difficulty === 'hard';
   for (const c of sim.countries) {
     if (!c.alive) continue;
-    const moneyCap = getMoneyCap(c, sim.difficulty);
-    c.money = Math.max(0, Math.min(moneyCap, Math.round(c.money + c.netIncome)));
+    const isAdminPlayer = c.id === sim.playerId;
+    if (isAdminPlayer && sim.adminInfiniteMoney) {
+      c.money = Math.max(c.money, 999_999_999);
+    } else {
+      const moneyCap = getMoneyCap(c, sim.difficulty);
+      if (isAdminPlayer && c.money > moneyCap) {
+        c.money = Math.max(0, Math.round(c.money + c.netIncome));
+      } else {
+        c.money = Math.max(0, Math.min(moneyCap, Math.round(c.money + c.netIncome)));
+      }
+    }
+    if (isAdminPlayer && sim.adminInfiniteArmy) {
+      c.army = Math.max(c.army, 999_999);
+    }
+    if (isAdminPlayer && sim.adminNoNukeCooldown) {
+      c.nukeCooldownDays = 0;
+    }
     if (isHard) {
       const armyCap = getArmyCap(c, 'hard');
       const isPlayer = c.id === sim.playerId || isHumanCountry(sim, c.id);
@@ -4759,5 +4780,182 @@ export function applyDiplomaticMeetingOutcome(
     appliedEffects,
     outcome,
   };
+}
+
+// ============================================================================
+// ADMIN POWERS (exclusively invoked for verified admin santiagosorioax@gmail.com)
+// ============================================================================
+
+export function adminToggleInfiniteMoney(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  sim.adminInfiniteMoney = !sim.adminInfiniteMoney;
+  if (sim.adminInfiniteMoney) {
+    p.money = 999_999_999;
+    soundEngine.playMoneyEarned(false);
+    return 'Dinero Infinito ACTIVADO ($999.999.999 constantes).';
+  }
+  return 'Dinero Infinito desactivado.';
+}
+
+export function adminToggleInfiniteArmy(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  sim.adminInfiniteArmy = !sim.adminInfiniteArmy;
+  if (sim.adminInfiniteArmy) {
+    p.army = 999_999;
+    updateAllEconomies(sim, false);
+    soundEngine.playRecruit();
+    return 'Ejército Infinito ACTIVADO (999.999 soldados sin desgaste).';
+  }
+  return 'Ejército Infinito desactivado.';
+}
+
+export function adminToggleGodMode(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  const enable = !(sim.adminInfiniteMoney && sim.adminInfiniteArmy && sim.adminNoNukeCooldown);
+  sim.adminInfiniteMoney = enable;
+  sim.adminInfiniteArmy = enable;
+  sim.adminNoNukeCooldown = enable;
+  if (enable) {
+    p.money = 999_999_999;
+    p.army = 999_999;
+    p.nukeCooldownDays = 0;
+    for (const c of sim.countries) {
+      if (!c.alive && c.annexedById === sim.playerId) {
+        c.rebelUnrest = 0;
+      }
+    }
+    updateAllEconomies(sim, false);
+    soundEngine.playAnnexation(true);
+    return 'MODO DIOS ACTIVADO: Dinero infinito, Ejército infinito, 0 recarga nuclear y 0% rebeldía.';
+  }
+  return 'Modo Dios desactivado.';
+}
+
+export function adminAddMoney(sim: SimulationState, amount: number): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  p.money = Math.max(0, Math.round(p.money + amount));
+  soundEngine.playMoneyEarned(false);
+  return `+$${amount.toLocaleString('es-ES')} añadidos a tu tesoro.`;
+}
+
+export function adminAddArmy(sim: SimulationState, amount: number): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  p.army = Math.max(0, Math.round(p.army + amount));
+  soundEngine.playRecruit();
+  return `+${amount.toLocaleString('es-ES')} soldados añadidos a tu ejército.`;
+}
+
+export function adminConquerCountry(sim: SimulationState, targetId: number): string {
+  const p = sim.countries[sim.playerId];
+  const t = sim.countries[targetId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  if (!t || !t.alive || targetId === sim.playerId) return 'País objetivo no disponible.';
+  const targetName = getCountryName(t);
+  const res = transferDiplomaticTerritory(sim, targetId, sim.playerId, 100, true);
+  if (res.annexed) {
+    updateAllEconomies(sim, false);
+    pushChronicle(sim, 'annex', `[ADMIN] ${getCountryName(p)} anexó instantáneamente a ${targetName}.`, sim.playerId);
+    return `${targetName} fue conquistado al instante.`;
+  }
+  return `No se pudo conquistar a ${targetName}.`;
+}
+
+export function adminConquerWorld(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  let conquered = 0;
+  for (const c of sim.countries) {
+    if (!c.alive || c.id === sim.playerId) continue;
+    const res = transferDiplomaticTerritory(sim, c.id, sim.playerId, 100, true);
+    if (res.annexed) conquered++;
+  }
+  p.rebelUnrest = 0;
+  for (const c of sim.countries) {
+    if (!c.alive && c.annexedById === sim.playerId) {
+      c.rebelUnrest = 0;
+    }
+  }
+  updateAllEconomies(sim, false);
+  sim.dirtyPixels = true;
+  if (!sim.sandboxAfterVictory) {
+    sim.outcome = 'victory';
+  }
+  pushChronicle(
+    sim,
+    'annex',
+    `[ADMIN] ${getCountryName(p)} conquistó el mundo entero (${conquered} naciones anexadas).`,
+    sim.playerId
+  );
+  soundEngine.playAnnexation(true);
+  return `¡Mundo conquistado! ${conquered} países pasaron a formar parte de ${getCountryName(p)}.`;
+}
+
+export function adminMaxInfrastructure(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  p.goldMines = MAX_GOLD_MINES_TOTAL;
+  p.cities = MAX_CITIES_TOTAL;
+  const defs = placeDiplomaticStructures(sim, sim.playerId, 'defense', 5);
+  const bars = placeDiplomaticStructures(sim, sim.playerId, 'barracks', 5);
+  const antis = placeDiplomaticStructures(sim, sim.playerId, 'antiNuke', 3);
+  const ports = placeDiplomaticStructures(sim, sim.playerId, 'port', 2);
+  updateAllEconomies(sim, false);
+  soundEngine.playBuildStructure('defense');
+  return `Infraestructura al máximo: ${p.goldMines} Minas, ${p.cities} Ciudades, +${defs} Defensas, +${bars} Cuarteles, +${antis} Antibombas, +${ports} Puertos.`;
+}
+
+export function adminResetNukeCooldown(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  p.nukeCooldownDays = 0;
+  soundEngine.playClick();
+  return 'Bomba nuclear lista para lanzar (0 días de recarga).';
+}
+
+export function adminGlobalPeace(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  const enemies = getEnemies(sim, sim.playerId);
+  for (const eid of enemies) {
+    makePeace(sim, sim.playerId, eid, `[ADMIN] Paz global firmada por ${getCountryName(p)}.`);
+  }
+  return enemies.length > 0
+    ? `Paz instantánea firmada con ${enemies.length} países enemigos.`
+    : 'No tenías guerras activas.';
+}
+
+export function adminAllyEveryone(sim: SimulationState): string {
+  const p = sim.countries[sim.playerId];
+  if (!p || !p.alive) return 'Tu país no está activo.';
+  let count = 0;
+  for (const c of sim.countries) {
+    if (!c.alive || c.id === sim.playerId) continue;
+    if (hasTreaty(sim, sim.playerId, c.id, TREATY_WAR)) {
+      makePeace(sim, sim.playerId, c.id);
+    }
+    setRelation(sim, sim.playerId, c.id, 100);
+    setTreatyFlag(sim, sim.playerId, c.id, TREATY_ALLIANCE, true);
+    count++;
+  }
+  soundEngine.playAllianceFormed();
+  return `Relación 100/100 y alianza global firmada con ${count} países.`;
+}
+
+export function adminPacifyAllRebellions(sim: SimulationState): string {
+  let calmed = 0;
+  for (const c of sim.countries) {
+    if (!c.alive && c.annexedById === sim.playerId && (c.rebelUnrest ?? 0) > 0) {
+      c.rebelUnrest = 0;
+      calmed++;
+    }
+  }
+  return calmed > 0
+    ? `Rebeldía reducida a 0% en ${calmed} territorios anexados.`
+    : 'Todas tus regiones ya están en 0% de rebeldía.';
 }
 

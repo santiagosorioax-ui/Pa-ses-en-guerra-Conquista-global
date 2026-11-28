@@ -1,6 +1,7 @@
 import {
   Anchor,
   Coins,
+  Crown,
   GitFork,
   HelpCircle,
   Pause,
@@ -42,6 +43,8 @@ interface TopCommandBarProps {
   onReturnToMenu: () => void;
   roomCode?: string | null;
   isRemoteGuest?: boolean;
+  isAdmin?: boolean;
+  onOpenAdmin?: () => void;
 }
 
 export function TopCommandBar({
@@ -61,6 +64,8 @@ export function TopCommandBar({
   onReturnToMenu,
   roomCode,
   isRemoteGuest = false,
+  isAdmin = false,
+  onOpenAdmin,
 }: TopCommandBarProps) {
   const player = sim.countries[sim.playerId];
   const playerName = getCountryName(player);
@@ -194,6 +199,17 @@ export function TopCommandBar({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {isAdmin && onOpenAdmin && (
+              <button
+                type="button"
+                onClick={onOpenAdmin}
+                title="Panel de Administrador"
+                className="px-1.5 py-0.5 bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 border border-amber-300/80 text-slate-950 text-[10px] font-extrabold tracking-wider uppercase flex items-center gap-1 cursor-pointer"
+              >
+                <Crown className="w-3 h-3 shrink-0" />
+                <span>ADMIN</span>
+              </button>
+            )}
             <button
               onClick={onOpenAchievements}
               title={`Logros (${achievementsUnlockedCount.toLocaleString('es-ES')}/${TOTAL_ACHIEVEMENTS.toLocaleString('es-ES')})`}
@@ -335,6 +351,18 @@ export function TopCommandBar({
         )}
 
         <PWAInstallButton compact />
+
+        {isAdmin && onOpenAdmin && (
+          <button
+            type="button"
+            onClick={onOpenAdmin}
+            title="Panel de Administrador"
+            className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 border border-amber-300/80 text-slate-950 text-xs font-extrabold tracking-wider uppercase flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-md shadow-amber-500/20"
+          >
+            <Crown className="w-3.5 h-3.5 shrink-0" />
+            <span>ADMIN</span>
+          </button>
+        )}
 
         <button
           onClick={onOpenTree}

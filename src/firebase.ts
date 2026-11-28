@@ -26,6 +26,16 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
+export const ADMIN_EMAIL = 'santiagosorioax@gmail.com';
+
+export function isAdminUser(
+  user: { email?: string | null; emailVerified?: boolean | null } | null | undefined
+): boolean {
+  if (!user || !user.email) return false;
+  if (user.emailVerified === false) return false;
+  return user.email.trim().toLowerCase() === ADMIN_EMAIL;
+}
+
 export const ONLINE_TESTER_EMAILS = [
   'santiagosorioax@gmail.com',
   'leonelosorioa@gmail.com',

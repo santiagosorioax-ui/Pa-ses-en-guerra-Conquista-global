@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ArrowLeft,
   Cloud,
+  Crown,
   Flame,
   Globe,
   HardDrive,
@@ -44,6 +45,7 @@ interface DeviceModeScreenProps {
   lastCampaign?: UnifiedSavedCampaign | null;
   onResumeLastCampaign?: (campaign: UnifiedSavedCampaign) => Promise<void>;
   hardModeProgress: HardModeUnlockProgress;
+  onOpenAdmin?: () => void;
 }
 
 interface ChainLinkOverlayProps {
@@ -227,8 +229,9 @@ export function DeviceModeScreen({
   lastCampaign = null,
   onResumeLastCampaign,
   hardModeProgress,
+  onOpenAdmin,
 }: DeviceModeScreenProps) {
-  const { user, canAccessOnline, authBusy, signInWithGoogle, signOutUser } = useFirebase();
+  const { user, isAdmin, canAccessOnline, authBusy, signInWithGoogle, signOutUser } = useFirebase();
   const [resumingLast, setResumingLast] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [choosingDifficulty, setChoosingDifficulty] = useState(false);
@@ -251,6 +254,20 @@ export function DeviceModeScreen({
           </h1>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {isAdmin && onOpenAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                onOpenAdmin();
+              }}
+              title="Panel de Administrador"
+              className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 border border-amber-300/80 text-slate-950 text-xs font-extrabold tracking-wider uppercase flex items-center gap-1.5 cursor-pointer shadow-lg shadow-amber-500/20"
+            >
+              <Crown className="w-3.5 h-3.5 shrink-0" />
+              <span>ADMIN</span>
+            </button>
+          )}
           {user ? (
             <div className="flex items-center gap-1.5 bg-[#0B121E] border border-slate-700 px-2 py-1">
               {user.photoURL && (

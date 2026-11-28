@@ -1,9 +1,11 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import firebaseConfig from './firebase-applet-config.json';
 import type {
   DiplomaticMeetingContext,
   DiplomaticMeetingOutcome,
@@ -13,6 +15,114 @@ import type {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const ADMIN_EMAIL = 'santiagosorioax@gmail.com';
+const FIREBASE_PROJECT_ID = firebaseConfig.projectId;
+const FIREBASE_CERTS_URL =
+  'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+
+interface ActivePlayerSession {
+  sessionId: string;
+  screen: string;
+  countryName: string;
+  difficulty: 'normal' | 'hard' | '';
+  playerLabel: string;
+  isSignedIn: boolean;
+  firstSeenMs: number;
+  lastSeenMs: number;
+}
+
+const SESSION_TTL_MS = 45_000;
+const MAX_TRACKED_SESSIONS = 5_000;
+const activeSessions = new Map<string, ActivePlayerSession>();
+let peakOnlinePlayers = 0;
+const serverStartedAtMs = Date.now();
+
+function pruneExpiredSessions(now = Date.now()): void {
+  for (const [id, sess] of activeSessions.entries()) {
+    if (now - sess.lastSeenMs > SESSION_TTL_MS) {
+      activeSessions.delete(id);
+    }
+  }
+  if (activeSessions.size > peakOnlinePlayers) {
+    peakOnlinePlayers = activeSessions.size;
+  }
+}
+
+let cachedCerts: Record<string, string> = {};
+let certsExpiresAtMs = 0;
+
+async function getFirebasePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (now < certsExpiresAtMs && Object.keys(cachedCerts).length > 0) {
+    return cachedCerts;
+  }
+  const resp = await fetch(FIREBASE_CERTS_URL);
+  if (!resp.ok) {
+    throw new Error('No se pudieron obtener los certificados públicos de Firebase Auth.');
+  }
+  const cacheControl = resp.headers.get('cache-control') || '';
+  const maxAgeMatch = cacheControl.match(/max-age=(\d+)/i);
+  const maxAgeSec = maxAgeMatch ? Math.min(86400, Math.max(60, Number(maxAgeMatch[1]))) : 3600;
+  const certs = (await resp.json()) as Record<string, string>;
+  cachedCerts = certs;
+  certsExpiresAtMs = now + maxAgeSec * 1000;
+  return certs;
+}
+
+function decodeBase64UrlJson<T>(segment: string): T {
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  return JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as T;
+}
+
+interface VerifiedFirebaseClaims {
+  sub?: string;
+  aud?: string;
+  iss?: string;
+  exp?: number;
+  iat?: number;
+  email?: string;
+  email_verified?: boolean;
+}
+
+async function verifyAdminFirebaseToken(idToken: string): Promise<VerifiedFirebaseClaims | null> {
+  try {
+    const parts = idToken.split('.');
+    if (parts.length !== 3) return null;
+    const [headerB64, payloadB64, sigB64] = parts;
+    const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(headerB64);
+    if (header.alg !== 'RS256' || !header.kid) return null;
+
+    const certs = await getFirebasePublicCerts();
+    const certPem = certs[header.kid];
+    if (!certPem) return null;
+
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(`${headerB64}.${payloadB64}`);
+    verifier.end();
+    const sigNorm = sigB64.replace(/-/g, '+').replace(/_/g, '/');
+    const sigBuf = Buffer.from(
+      sigNorm + '='.repeat((4 - (sigNorm.length % 4)) % 4),
+      'base64'
+    );
+    if (!verifier.verify(certPem, sigBuf)) return null;
+
+    const claims = decodeBase64UrlJson<VerifiedFirebaseClaims>(payloadB64);
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (claims.aud !== FIREBASE_PROJECT_ID) return null;
+    if (claims.iss !== `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`) return null;
+    if (!claims.sub || typeof claims.sub !== 'string') return null;
+    if (typeof claims.exp !== 'number' || claims.exp <= nowSec) return null;
+    if (typeof claims.iat !== 'number' || claims.iat > nowSec + 300) return null;
+    if (claims.email_verified !== true) return null;
+    if ((claims.email || '').trim().toLowerCase() !== ADMIN_EMAIL) return null;
+
+    return claims;
+  } catch {
+    return null;
+  }
+}
 
 const PORT = Number(process.env.PORT) || 3000;
 const FAST_REPLY_MODEL = 'gemini-3.1-flash-lite';
@@ -307,6 +417,140 @@ function formatApiError(err: unknown): { status: number; message: string } {
 async function startServer() {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
+  app.use(express.text({ type: 'text/plain', limit: '8kb' }));
+
+  // Live Player Presence Heartbeat (zero Firestore writes)
+  app.post('/api/presence/heartbeat', (req, res) => {
+    const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<
+      string,
+      unknown
+    >;
+    const rawSessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(rawSessionId)) {
+      res.status(400).json({ error: 'sessionId inválido.' });
+      return;
+    }
+
+    const now = Date.now();
+    pruneExpiredSessions(now);
+
+    if (!activeSessions.has(rawSessionId) && activeSessions.size >= MAX_TRACKED_SESSIONS) {
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    const allowedScreens = new Set([
+      'DEVICE_SELECT',
+      'COUNTRY_SELECT',
+      'DEVICE_MODE',
+      'SELECT',
+      'ONLINE_LOBBY',
+      'PLAYING',
+    ]);
+    const screen =
+      typeof body.screen === 'string' && allowedScreens.has(body.screen)
+        ? body.screen
+        : 'DEVICE_SELECT';
+    const countryName =
+      typeof body.countryName === 'string' ? body.countryName.trim().slice(0, 60) : '';
+    const difficulty =
+      body.difficulty === 'hard' ? 'hard' : body.difficulty === 'normal' ? 'normal' : '';
+    const playerLabel =
+      typeof body.playerLabel === 'string' && body.playerLabel.trim()
+        ? body.playerLabel.trim().slice(0, 60)
+        : 'Invitado';
+    const isSignedIn = Boolean(body.isSignedIn);
+
+    const existing = activeSessions.get(rawSessionId);
+    activeSessions.set(rawSessionId, {
+      sessionId: rawSessionId,
+      screen,
+      countryName,
+      difficulty,
+      playerLabel,
+      isSignedIn,
+      firstSeenMs: existing?.firstSeenMs ?? now,
+      lastSeenMs: now,
+    });
+    if (activeSessions.size > peakOnlinePlayers) {
+      peakOnlinePlayers = activeSessions.size;
+    }
+
+    res.json({ ok: true });
+  });
+
+  // Immediate session cleanup when a player closes the tab
+  app.post('/api/presence/leave', (req, res) => {
+    let sessionId = '';
+    if (typeof req.body === 'string') {
+      try {
+        const parsed = JSON.parse(req.body) as { sessionId?: unknown };
+        if (typeof parsed.sessionId === 'string') sessionId = parsed.sessionId.trim();
+      } catch {
+        // ignore invalid beacon
+      }
+    } else if (req.body && typeof req.body === 'object') {
+      const candidate = (req.body as { sessionId?: unknown }).sessionId;
+      if (typeof candidate === 'string') sessionId = candidate.trim();
+    }
+    if (sessionId) {
+      activeSessions.delete(sessionId);
+    }
+    res.status(204).end();
+  });
+
+  // Strictly Protected Admin Telemetry Endpoint (verified Firebase ID token for santiagosorioax@gmail.com)
+  app.get('/api/admin/stats', async (req, res) => {
+    const authHeader = req.headers.authorization || '';
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      res.status(401).json({ error: 'No autorizado.' });
+      return;
+    }
+
+    const claims = await verifyAdminFirebaseToken(match[1].trim());
+    if (!claims) {
+      res.status(403).json({ error: 'Acceso restringido al administrador.' });
+      return;
+    }
+
+    const now = Date.now();
+    pruneExpiredSessions(now);
+
+    const sessions = Array.from(activeSessions.values())
+      .sort((a, b) => b.lastSeenMs - a.lastSeenMs)
+      .slice(0, 150)
+      .map((s) => ({
+        id: s.sessionId.slice(0, 8),
+        playerLabel: s.playerLabel,
+        isSignedIn: s.isSignedIn,
+        screen: s.screen,
+        countryName: s.countryName,
+        difficulty: s.difficulty,
+        activeSeconds: Math.max(0, Math.round((now - s.firstSeenMs) / 1000)),
+        lastSeenSecondsAgo: Math.max(0, Math.round((now - s.lastSeenMs) / 1000)),
+      }));
+
+    let playingNow = 0;
+    let menuNow = 0;
+    let onlineLobbyNow = 0;
+    for (const s of activeSessions.values()) {
+      if (s.screen === 'PLAYING') playingNow++;
+      else if (s.screen === 'ONLINE_LOBBY') onlineLobbyNow++;
+      else menuNow++;
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      onlineNow: activeSessions.size,
+      playingNow,
+      menuNow,
+      onlineLobbyNow,
+      peakOnline: peakOnlinePlayers,
+      serverUptimeSeconds: Math.max(0, Math.round((now - serverStartedAtMs) / 1000)),
+      sessions,
+    });
+  });
 
   // AI #1: Diplomatic Leader Responder
   app.post('/api/diplomacy/reply', async (req, res) => {

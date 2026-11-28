@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Crown, Handshake, Map as MapIcon, ScrollText, Skull, Swords, TrendingUp, Trophy, X } from 'lucide-react';
 import { AchievementsModal } from './components/AchievementsModal';
+import { AdminModal } from './components/AdminModal';
 import { CommandDrawer, type DrawerTab } from './components/CommandDrawer';
 import { CountryActionPopup } from './components/CountryActionPopup';
 import { CountrySearchModal } from './components/CountrySearchModal';
@@ -80,8 +81,10 @@ import {
   type LocalCampaignSummary,
 } from './services/localSaves';
 import {
+  HARD_MODE_UNLOCK_TARGET,
   loadHardModeUnlockProgress,
   recordSingleMatchCaptures,
+  saveHardModeUnlockProgress,
   type HardModeUnlockProgress,
 } from './services/hardModeUnlock';
 import {
@@ -102,7 +105,7 @@ import {
 type GameScreen = 'DEVICE_SELECT' | 'COUNTRY_SELECT' | 'ONLINE_LOBBY' | 'PLAYING';
 
 export default function App() {
-  const { user, canAccessOnline, authBusy, campaigns, signInWithGoogle } = useFirebase();
+  const { user, isAdmin, canAccessOnline, authBusy, campaigns, signInWithGoogle } = useFirebase();
 
   const [screen, setScreen] = useState<GameScreen>('DEVICE_SELECT');
   const [selectedDifficulty, setSelectedDifficulty] = useState<GameDifficulty>('normal');
@@ -110,6 +113,13 @@ export default function App() {
   const [onlineDevNotice, setOnlineDevNotice] = useState(false);
   const onlineNoticeTimerRef = useRef<number | null>(null);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  const [adminModalTab, setAdminModalTab] = useState<'players' | 'powers'>('players');
+  const presenceSessionIdRef = useRef<string>(
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
+  );
   const simRef = useRef<SimulationState | null>(null);
   const cachedMapDataRef = useRef<WorldMapData | null>(null);
 
@@ -1892,6 +1902,111 @@ export default function App() {
       </div>
     ) : null;
 
+  useEffect(() => {
+    if (!isAdmin && adminModalOpen) {
+      setAdminModalOpen(false);
+    }
+  }, [isAdmin, adminModalOpen]);
+
+  // Live active player presence heartbeat (server memory only — zero Firestore writes)
+  useEffect(() => {
+    const sessionId = presenceSessionIdRef.current;
+
+    const sendHeartbeat = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const currentSim = screen === 'PLAYING' ? simRef.current : null;
+      const activeCountry =
+        currentSim && currentSim.countries[currentSim.playerId]
+          ? getCountryName(currentSim.countries[currentSim.playerId])
+          : '';
+      const payload = {
+        sessionId,
+        screen,
+        countryName: activeCountry,
+        difficulty: currentSim ? currentSim.difficulty : '',
+        playerLabel:
+          user?.displayName || (user?.email ? user.email.split('@')[0] : 'Invitado'),
+        isSignedIn: Boolean(user),
+      };
+      fetch('/api/presence/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => {
+        // Ignore transient network errors
+      });
+    };
+
+    sendHeartbeat();
+    const intervalId = window.setInterval(sendHeartbeat, 20_000);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        sendHeartbeat();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [screen, selectedDifficulty, user]);
+
+  useEffect(() => {
+    const sessionId = presenceSessionIdRef.current;
+    const sendLeave = () => {
+      const body = JSON.stringify({ sessionId });
+      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+        try {
+          navigator.sendBeacon(
+            '/api/presence/leave',
+            new Blob([body], { type: 'application/json' })
+          );
+          return;
+        } catch {
+          // Fallback to fetch below
+        }
+      }
+      fetch('/api/presence/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    };
+
+    window.addEventListener('pagehide', sendLeave);
+    window.addEventListener('beforeunload', sendLeave);
+    return () => {
+      window.removeEventListener('pagehide', sendLeave);
+      window.removeEventListener('beforeunload', sendLeave);
+    };
+  }, []);
+
+  const handleAdminUnlockHardMode = useCallback(() => {
+    const nextProgress: HardModeUnlockProgress = {
+      unlocked: true,
+      bestCapturedInMatch: Math.max(hardModeProgress.bestCapturedInMatch, HARD_MODE_UNLOCK_TARGET),
+      unlockedAtMs: hardModeProgress.unlockedAtMs ?? Date.now(),
+    };
+    saveHardModeUnlockProgress(nextProgress, user?.uid ?? null);
+    setHardModeProgress(nextProgress);
+  }, [hardModeProgress, user?.uid]);
+
+  const renderAdminModal = (activeSim: SimulationState | null) =>
+    isAdmin && user && adminModalOpen ? (
+      <AdminModal
+        user={user}
+        sim={activeSim}
+        defaultTab={adminModalTab}
+        hardModeUnlocked={hardModeProgress.unlocked}
+        onUnlockHardMode={handleAdminUnlockHardMode}
+        onSimulationMutated={handlePlayerMutation}
+        onClose={() => setAdminModalOpen(false)}
+      />
+    ) : null;
+
   if (screen === 'DEVICE_SELECT') {
     return (
       <>
@@ -1906,7 +2021,12 @@ export default function App() {
           lastCampaign={lastCampaign}
           onResumeLastCampaign={handleResumeCampaign}
           hardModeProgress={hardModeProgress}
+          onOpenAdmin={() => {
+            setAdminModalTab('players');
+            setAdminModalOpen(true);
+          }}
         />
+        {renderAdminModal(null)}
         {menuTutorialOpen && (
           <TutorialOverlay
             deviceMode={deviceMode}
@@ -2120,6 +2240,12 @@ export default function App() {
         onReturnToMenu={() => void handleExitToMenu()}
         roomCode={sim.isMultiplayer ? mpRoomCode : null}
         isRemoteGuest={isRemoteGuest}
+        isAdmin={isAdmin}
+        onOpenAdmin={() => {
+          soundEngine.playClick();
+          setAdminModalTab('powers');
+          setAdminModalOpen(true);
+        }}
       />
 
       <div className="flex-1 flex min-h-0 relative">
@@ -2785,6 +2911,8 @@ export default function App() {
           onClose={() => setAchievementsOpen(false)}
         />
       )}
+
+      {renderAdminModal(sim)}
 
       <EventModal
         sim={sim}
